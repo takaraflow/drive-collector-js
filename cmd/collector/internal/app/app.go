@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/youngsx/drive-collector/cmd/collector/internal/drive"
+	"github.com/youngsx/drive-collector/cmd/collector/internal/instance"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/rclone"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/store"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/task"
@@ -51,6 +52,13 @@ type Config struct {
 	// Repo 是任务仓储。
 	Repo *store.Repository
 	Log  *slog.Logger
+
+	// Coord 是实例协调器(注册 + telegram_client 锁)。
+	//
+	// 必填:它决定 LB 把 webhook 转发给谁。缺了它,Go 会在没有抢到锁的
+	// 情况下连接 Telegram,和 Node 双实例并发处理同一批消息 ——
+	// 表现为「同一个文件被传两次」。
+	Coord *instance.Coordinator
 }
 
 // App 是编排后的应用。
@@ -117,7 +125,51 @@ func (a *App) Run(ctx context.Context) error {
 	if err := os.MkdirAll(a.cfg.DownloadDir, 0o755); err != nil {
 		return fmt.Errorf("app: 创建下载目录失败: %w", err)
 	}
-	return a.tg.Run(ctx)
+	if a.cfg.Coord == nil {
+		return fmt.Errorf("app: 缺少实例协调器 —— 没有锁就连接 Telegram 会与 Node 双实例并发")
+	}
+
+	// 先注册,再抢锁。顺序不能反:注册让 Node 知道本实例活着,
+	// 抢锁才不会被 Node 判定为「残留锁可抢占」。
+	if err := a.cfg.Coord.Register(ctx); err != nil {
+		return fmt.Errorf("app: 实例注册失败: %w", err)
+	}
+
+	held, err := a.cfg.Coord.AcquireTelegramLock(ctx)
+	if err != nil {
+		return fmt.Errorf("app: 抢 telegram_client 锁失败: %w", err)
+	}
+	if !held {
+		// 别人还持着锁。这不是错误 —— 是「现在不该我处理」。
+		// 硬失败比安静等待好:调用方(容器编排)会看到明确的退出原因,
+		// 而不是服务「活着但什么都不做」。
+		return fmt.Errorf("app: telegram_client 锁被 %s 持有,本实例不接管",
+			a.cfg.Coord.ID())
+	}
+	a.log.Info("已持有 telegram_client 锁,开始接管",
+		"instance", a.cfg.Coord.ID(), "ttl", "90s")
+
+	// 续租:失去锁必须立刻停手,否则会和新主人双实例并发。
+	// 这是「切流量」的触发点 —— LB 下一个请求就打到新主人了。
+	lockCtx, cancelLock := context.WithCancel(ctx)
+	defer cancelLock()
+	lockLost := make(chan error, 1)
+	go func() { lockLost <- a.cfg.Coord.RunLockHeartbeat(lockCtx) }()
+
+	tgCtx, cancelTG := context.WithCancel(ctx)
+	defer cancelTG()
+	go func() {
+		select {
+		case err := <-lockLost:
+			if err != nil && tgCtx.Err() == nil {
+				a.log.Error("失去锁,断开 Telegram 客户端", "err", err)
+				cancelTG()
+			}
+		case <-tgCtx.Done():
+		}
+	}()
+
+	return a.tg.Run(tgCtx)
 }
 
 // TG 暴露 Telegram 客户端,供发消息等场景使用。

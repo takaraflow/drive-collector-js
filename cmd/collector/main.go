@@ -39,8 +39,10 @@ import (
 	"github.com/youngsx/drive-collector/cmd/collector/internal/app"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/d1"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/edge"
+	"github.com/youngsx/drive-collector/cmd/collector/internal/instance"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/leader"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/qstash"
+	"github.com/youngsx/drive-collector/cmd/collector/internal/redisenv"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/store"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/tgsession"
 )
@@ -180,6 +182,14 @@ func runWorker(log *slog.Logger) error {
 		return fmt.Errorf("D1 配置不完整: %w", err)
 	}
 
+	// 实例 ID / 公网 URL 决定 LB 把 webhook 转发到哪 ——
+	// 这就是「Go 接管」的机制:抢到锁并注册,LB 自动改指向,无需改 LB 配置。
+	publicURL := os.Getenv("APP_EXTERNAL_URL")
+	if publicURL == "" {
+		return errors.New("APP_EXTERNAL_URL 未配置 —— LB 靠它发现本实例,缺了就接管不了")
+	}
+	coord := instance.NewCoordinator(redisenv.FromEnv(), os.Getenv("INSTANCE_ID"), publicURL, log)
+
 	application, err := app.New(app.Config{
 		APIID:       apiID,
 		APIHash:     os.Getenv("API_HASH"),
@@ -188,6 +198,7 @@ func runWorker(log *slog.Logger) error {
 		RemoteBase:  os.Getenv("REMOTE_FOLDER"),
 		Repo:        store.NewTaskRepository(db),
 		Log:         log,
+		Coord:       coord,
 	})
 	if err != nil {
 		return err

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -197,5 +198,26 @@ func TestNullableString(t *testing.T) {
 	}
 	if !nullableString("x").Valid {
 		t.Error("非空串应是有效值")
+	}
+}
+
+// TestRunRefusesWithoutCoordinator 没协调器必须拒绝运行。
+//
+// 这是防双实例并发的最后一道闸:没有锁就连接 Telegram,会和 Node
+// 同时处理同一批消息,表现为「同一个文件被传两次」。
+func TestRunRefusesWithoutCoordinator(t *testing.T) {
+	a, err := New(Config{
+		APIID:   1,
+		APIHash: "h",
+		Session: loadSession(t),
+		Repo:    nil,
+		Log:     quiet(),
+	})
+	if err != nil {
+		// 缺 Repo 时构造就该失败,这也是对的
+		return
+	}
+	if err := a.Run(context.Background()); err == nil {
+		t.Error("缺协调器时 Run 应报错")
 	}
 }
