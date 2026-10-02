@@ -37,6 +37,7 @@ import (
 	"time"
 
 	"github.com/youngsx/drive-collector/cmd/collector/internal/app"
+	"github.com/youngsx/drive-collector/cmd/collector/internal/auth"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/d1"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/edge"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/instance"
@@ -190,7 +191,10 @@ func runWorker(log *slog.Logger) error {
 	}
 	coord := instance.NewCoordinator(redisenv.FromEnv(), os.Getenv("INSTANCE_ID"), publicURL, log)
 
+	authGuard := auth.NewGuard(db, os.Getenv("OWNER_ID"), nil)
+
 	application, err := app.New(app.Config{
+		Auth:        authGuard,
 		APIID:       apiID,
 		APIHash:     os.Getenv("API_HASH"),
 		Session:     parsed,

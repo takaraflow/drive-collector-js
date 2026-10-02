@@ -22,8 +22,16 @@ type messageInfo struct {
 	ChatID    int64
 	SenderID  int64
 	GroupedID int64
-	HasMedia  bool
-	FileName  string
+	// SourceMsgID 是被转存的那条消息的 id。
+	//
+	// 与 GroupedID 严格区分:GroupedID 标识「一组消息」,
+	// SourceMsgID 标识「具体哪个文件」。任务表两者都要存 ——
+	// 写混了「按源消息反查任务」会静默失效。
+	SourceMsgID int64
+	HasMedia    bool
+	FileName    string
+	// Text 是消息文本 —— 命令路由要用它判断用户是不是在敲 /status。
+	Text string
 }
 
 // messageOf 从 update 里提取消息信息。
@@ -46,7 +54,7 @@ func fromMessage(m tg.MessageClass) (messageInfo, bool) {
 		// 空消息没有可提取的信息
 		return messageInfo{}, false
 	}
-	info := messageInfo{ID: msg.GetID()}
+	info := messageInfo{ID: msg.GetID(), SourceMsgID: int64(msg.GetID())}
 	if from, ok := msg.GetFromID(); ok {
 		if user, isUser := from.(*tg.PeerUser); isUser {
 			info.SenderID = user.GetUserID()
@@ -60,6 +68,10 @@ func fromMessage(m tg.MessageClass) (messageInfo, bool) {
 	}
 	gid, _ := msg.GetGroupedID()
 	info.GroupedID = gid
+
+	info.Text = msg.GetMessage()
+
+	info.Text = msg.GetMessage()
 
 	media, hasMedia := msg.GetMedia()
 	info.HasMedia = hasMedia && media != nil

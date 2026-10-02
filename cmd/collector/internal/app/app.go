@@ -18,8 +18,11 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/youngsx/drive-collector/cmd/collector/internal/auth"
+	"github.com/youngsx/drive-collector/cmd/collector/internal/dispatcher"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/drive"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/instance"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/rclone"
@@ -56,6 +59,9 @@ type Config struct {
 	// Drives 是网盘仓储 —— 凭据按用户存在 D1,不能从环境变量读。
 	Drives *store.DriveRepository
 
+	// Auth 做 RBAC 判定。为 nil 时不装配 Dispatcher,命令被静默忽略。
+	Auth *auth.Guard
+
 	// Coord 是实例协调器(注册 + telegram_client 锁)。
 	//
 	// 必填:它决定 LB 把 webhook 转发给谁。缺了它,Go 会在没有抢到锁的
@@ -66,14 +72,15 @@ type Config struct {
 
 // App 是编排后的应用。
 type App struct {
-	tg     *tgclient.Client
-	tasks  *task.Manager
-	locks  *drive.SessionLock
-	rclone *rclone.Runner
-	repo   *store.Repository
-	drives *store.DriveRepository
-	cfg    Config
-	log    *slog.Logger
+	tg         *tgclient.Client
+	tasks      *task.Manager
+	locks      *drive.SessionLock
+	rclone     *rclone.Runner
+	repo       *store.Repository
+	drives     *store.DriveRepository
+	dispatcher *dispatcher.Dispatcher
+	cfg        Config
+	log        *slog.Logger
 }
 
 // New 构造 App。此时不连接 Telegram、不碰网盘。
@@ -122,6 +129,18 @@ func New(cfg Config) (*App, error) {
 
 	a.tg = tg
 	a.tasks = manager
+
+	// Dispatcher 在这里装配而不是在 main —— 它需要 tg / auth / tasks 三样
+	// 依赖,而 tg 是本包内部创建的。放外面就得额外导出一个构造顺序约束。
+	if cfg.Auth != nil {
+		a.dispatcher = dispatcher.New(dispatcher.Deps{
+			Telegram: tg,
+			Auth:     cfg.Auth,
+			Tasks:    a,
+			Renders:  a,
+			Log:      cfg.Log,
+		})
+	}
 	return a, nil
 }
 
@@ -196,19 +215,69 @@ func (a *App) HandleUploadWebhook(ctx context.Context, taskID string) (task.Resu
 	return a.tasks.HandleUpload(ctx, taskID)
 }
 
-// onUpdate 收到 Telegram update 时创建任务。
+// onUpdate 是 Telegram update 的总入口。
 //
-// 只处理「带媒体的入站消息」—— 用户发文件或图片给 bot,建任务。
-// 其他(update、callback、编辑)留给未来扩展,现在记一条 debug 就够:
-// 猜错业务规则的风险远大于漏处理的风险。
+// 分流顺序很关键:命令优先,媒体其次。
+// 反过来的话,用户发「/status」会先被判成「无媒体的文本消息」而丢弃 ——
+// 而带媒体的 /status 之类消息会被误建任务。
 func (a *App) onUpdate(ctx context.Context, u tgclient.Update) error {
 	switch u.Kind {
+	case tgclient.KindCallbackQuery:
+		return a.handleCallback(ctx, u)
+
 	case tgclient.KindNewMessage, tgclient.KindMediaGroup:
+		msg, ok := messageOf(u)
+		if !ok {
+			return nil
+		}
+
+		// 命令优先:带媒体的消息里也可能带 / 开头的内容,
+		// 但命令是用户明确的意图,不能被当成文件投递。
+		if strings.HasPrefix(strings.TrimSpace(msg.Text), "/") {
+			return a.routeCommand(ctx, msg)
+		}
+
+		if !msg.HasMedia {
+			return nil // 普通聊天内容,不做任何事
+		}
 		return a.createTaskFrom(ctx, u)
+
 	default:
 		a.log.Debug("暂不处理的 update", "kind", u.Kind, "pts", u.Pts)
 		return nil
 	}
+}
+
+// routeCommand 把命令交给 Dispatcher。
+func (a *App) routeCommand(ctx context.Context, msg messageInfo) error {
+	if a.dispatcher == nil {
+		a.log.Debug("命令被忽略:dispatcher 未装配", "text", msg.Text)
+		return nil
+	}
+	_, err := a.dispatcher.HandleText(ctx, msg.ChatID, fmt.Sprintf("%d", msg.SenderID), msg.Text)
+	if err != nil {
+		// 命令处理失败不该让客户端重连 —— 否则一条坏命令会变成
+		// 断线重连风暴。记日志就好。
+		a.log.Error("命令处理失败", "text", msg.Text, "err", err)
+	}
+	return nil
+}
+
+// handleCallback 处理按钮点击。
+//
+// B 方案没实现需要按钮的命令,所以这里只回一个「暂不可用」——
+// 静默不回会让 Telegram 客户端的转圈动画一直转(15 秒超时)。
+func (a *App) handleCallback(ctx context.Context, u tgclient.Update) error {
+	callbackID, data, ok := tgclient.CallbackData(u)
+	if !ok {
+		return nil
+	}
+	// 无论如何都要回应 —— 不回应客户端会一直转圈。
+	if err := a.tg.AnswerCallback(ctx, callbackID, "该功能暂未迁移", false); err != nil {
+		a.log.Warn("回应按钮失败", "err", err)
+	}
+	a.log.Debug("收到按钮点击", "data", data)
+	return nil
 }
 
 func (a *App) createTaskFrom(ctx context.Context, u tgclient.Update) error {
@@ -227,13 +296,17 @@ func (a *App) createTaskFrom(ctx context.Context, u tgclient.Update) error {
 
 	taskID := newTaskID()
 	t := store.Task{
-		ID:          taskID,
-		UserID:      fmt.Sprintf("%d", msg.SenderID),
-		SourceType:  "telegram_media",
-		FileName:    nullableString(msg.FileName),
-		SourceRef:   nullableString(fmt.Sprintf("%d/%d", msg.ChatID, msg.ID)),
+		ID:         taskID,
+		UserID:     fmt.Sprintf("%d", msg.SenderID),
+		SourceType: "telegram_media",
+		FileName:   nullableString(msg.FileName),
+		SourceRef:  nullableString(fmt.Sprintf("%d/%d", msg.ChatID, msg.ID)),
+		// MsgID 是这条状态消息本身;SourceMsgID 是【被转存的那条消息】。
+		// 两者都是单条消息 id —— Node 侧 addBatchTasks 写的也是 msg.id。
+		// 曾经写成 grouped_id,会让「按源消息反查任务」全部失效,
+		// 而且不报错(取消整批时只表现为"点了没反应")。
 		MsgID:       nullableInt(int64(msg.ID)),
-		SourceMsgID: nullableInt(int64(msg.GroupedID)),
+		SourceMsgID: nullableInt(msg.SourceMsgID),
 	}
 
 	if err := a.repo.Create(ctx, t); err != nil {

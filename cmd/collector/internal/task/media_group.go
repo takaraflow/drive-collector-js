@@ -117,34 +117,24 @@ func (b *MediaGroupBuffer) lockKey(gid string) string {
 //
 // 重复的 msgID 会被忽略 —— Telegram 会重推同一条,不加去重会让
 // 同一个文件建两次任务。
+//
+// 【并发安全】整个读-改-写跑在 Redis Lua 脚本里,是原子的。
+//
+// 之前是「load → append → save」三步分开,没有锁:用户连发 10 张图时
+// Telegram 会并发推,10 个 goroutine 全部读到 messages:[],各自 append
+// 一条,后写的覆盖先写的 —— 实测 8 条并发只留下 2 条。
+//
+// 而且【静默丢失】:没有报错、没有日志,用户的相册少了 6 张图。
+//
+// 刻意不用进程内锁:多实例下各锁各的,一样会丢。必须是 Redis 侧原子。
 func (b *MediaGroupBuffer) Add(ctx context.Context, gid string, chatID, userID, msgID int64) error {
 	if gid == "" {
 		// 没有 grouped_id 的消息不算媒体组,交给调用方直接建任务。
 		return fmt.Errorf("media group: gid 为空")
 	}
 
-	meta, err := b.load(ctx, gid)
+	_, count, err := b.appendAtomic(ctx, gid, chatID, userID, msgID)
 	if err != nil {
-		return err
-	}
-
-	if meta == nil {
-		meta = &groupMeta{
-			GID:       gid,
-			ChatID:    chatID,
-			UserID:    userID,
-			CreatedAt: b.Now().UnixMilli(),
-		}
-	}
-
-	for _, existing := range meta.MsgIDs {
-		if existing == msgID {
-			return nil // 重复推送,已在内
-		}
-	}
-	meta.MsgIDs = append(meta.MsgIDs, msgID)
-
-	if err := b.save(ctx, meta); err != nil {
 		return err
 	}
 	if err := b.track(ctx, gid); err != nil {
@@ -152,7 +142,7 @@ func (b *MediaGroupBuffer) Add(ctx context.Context, gid string, chatID, userID, 
 	}
 
 	// 攒够一批立刻刷 —— 再等就没有意义了。
-	if len(meta.MsgIDs) >= b.maxBatchSize {
+	if count >= b.maxBatchSize {
 		b.cancelTimer(gid)
 		go b.flush(context.WithoutCancel(ctx), gid)
 		return nil
@@ -160,6 +150,78 @@ func (b *MediaGroupBuffer) Add(ctx context.Context, gid string, chatID, userID, 
 
 	b.schedule(gid)
 	return nil
+}
+
+// appendAtomic 在 Redis 侧原子地把 msgID 追加进组。
+//
+// 返回 added=false 表示这条已经在组里(重复推送)。重复时不重置计时器 ——
+// 否则 Telegram 的重推会让组永远等不满窗口。
+func (b *MediaGroupBuffer) appendAtomic(
+	ctx context.Context, gid string, chatID, userID, msgID int64,
+) (added bool, count int, err error) {
+	now := b.Now().UnixMilli()
+	key := b.bufferKey(gid)
+
+	// 用 Lua 保证「读 → 去重 → 追加 → 写回」是一步。
+	//
+	// 不用 WATCH/MULTI:那需要重试循环,在高并发下重试率很高,
+	// 而这里每次调用都要付这个代价。
+	const lua = `
+local raw = redis.call('GET', KEYS[1])
+local meta
+if raw then
+  meta = cjson.decode(raw)
+else
+  meta = {gid=ARGV[1], chatId=tonumber(ARGV[2]), userId=tonumber(ARGV[3]), messages={}, createdAt=tonumber(ARGV[5])}
+end
+
+-- 去重:已在组里就返回 0,不改数据
+for _, m in ipairs(meta.messages or {}) do
+  if m == tonumber(ARGV[4]) then
+    return {0, #meta.messages}
+  end
+end
+
+table.insert(meta.messages, tonumber(ARGV[4]))
+redis.call('SET', KEYS[1], cjson.encode(meta), 'EX', ARGV[6])
+return {1, #meta.messages}
+`
+
+	res, err := b.redis.Eval(ctx, lua, []string{key},
+		gid, chatID, userID, msgID, now, int(b.staleThreshold.Seconds())).Slice()
+	if err != nil {
+		return false, 0, fmt.Errorf("媒体组追加失败(gid=%s): %w", gid, err)
+	}
+	if len(res) != 2 {
+		return false, 0, fmt.Errorf("媒体组追加返回异常: %v", res)
+	}
+	return toInt64(res[0]) == 1, int(toInt64(res[1])), nil
+}
+
+// toInt64 把 Redis 整数回复转成 int64。
+func toInt64(v interface{}) int64 {
+	switch n := v.(type) {
+	case int64:
+		return n
+	case int:
+		return int64(n)
+	case string:
+		i, _ := parseInt(n)
+		return i
+	default:
+		return 0
+	}
+}
+
+func parseInt(s string) (int64, error) {
+	var n int64
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return 0, fmt.Errorf("非法数字 %q", s)
+		}
+		n = n*10 + int64(c-'0')
+	}
+	return n, nil
 }
 
 // schedule 安排延迟刷盘。同一组重复调用会重置计时器。
