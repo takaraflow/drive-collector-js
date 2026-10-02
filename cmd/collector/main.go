@@ -193,6 +193,14 @@ func runWorker(log *slog.Logger) error {
 
 	authGuard := auth.NewGuard(db, os.Getenv("OWNER_ID"), nil)
 
+	// Redis 媒体组缓冲的存储。没有它 NewMediaGroupBuffer 不会被创建,
+	// Run 会因为「媒体组缓冲缺失」而硬失败 —— 那道闸正是为了在
+	// 忘了传 Redis 时立刻暴露,而不是静默退化成「10 张图 10 个任务」。
+	rdb := redisenv.FromEnv()
+	if rdb == nil {
+		return errors.New("REDIS_URL/NF_REDIS_URL 未配置 —— 媒体组缓冲与实例锁都依赖它")
+	}
+
 	application, err := app.New(app.Config{
 		Auth:        authGuard,
 		APIID:       apiID,
@@ -202,6 +210,7 @@ func runWorker(log *slog.Logger) error {
 		RemoteBase:  os.Getenv("REMOTE_FOLDER"),
 		Repo:        store.NewTaskRepository(db),
 		Drives:      store.NewDriveRepository(db),
+		Redis:       rdb,
 		Log:         log,
 		Coord:       coord,
 	})
