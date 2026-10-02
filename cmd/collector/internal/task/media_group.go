@@ -40,8 +40,11 @@ type MediaGroupBuffer struct {
 
 	// FlushGroup 在缓冲窗口到期时调用,负责建任务。
 	//
+	// meta 里带 chatID:刷盘发生在 1 秒缓冲窗口之后,那时 update 的
+	// chat/user 上下文已经不在手上,只能靠组数据里存的那份回溯。
+	//
 	// 注入而不是直接调 Manager —— 这样缓冲层不依赖任务层,可独立测试。
-	FlushGroup func(ctx context.Context, gid string, msgIDs []int64) error
+	FlushGroup func(ctx context.Context, gid string, meta GroupMeta, msgIDs []int64) error
 
 	// Now 可注入,便于测试时间边界。
 	Now func() time.Time
@@ -90,6 +93,16 @@ func NewMediaGroupBuffer(rdb *redis.Client, cfg BufferConfig) *MediaGroupBuffer 
 		inflight:       map[string]bool{},
 		Now:            time.Now,
 	}
+}
+
+// GroupMeta 是组里除消息 id 之外的上下文。
+//
+// 单独导出是因为刷盘发生在 1 秒缓冲窗口之后 —— 那时 update 的
+// chat/user 上下文已经不在手上,只能靠组数据里存的那份。
+type GroupMeta struct {
+	GID    string
+	ChatID int64
+	UserID int64
 }
 
 // groupMeta 是存在 Redis 里的组状态。
@@ -294,7 +307,8 @@ func (b *MediaGroupBuffer) flush(ctx context.Context, gid string) {
 	if b.FlushGroup == nil {
 		return
 	}
-	if err := b.FlushGroup(ctx, gid, meta.MsgIDs); err != nil {
+	metaOut := GroupMeta{GID: meta.GID, ChatID: meta.ChatID, UserID: meta.UserID}
+	if err := b.FlushGroup(ctx, gid, metaOut, meta.MsgIDs); err != nil {
 		b.log.Error("媒体组刷盘失败,保留以便重试", "gid", gid, "err", err)
 		return // 不 drop:留给下次或重启后的 restore()
 	}

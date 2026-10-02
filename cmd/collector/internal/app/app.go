@@ -21,7 +21,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/redis/go-redis/v9"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/auth"
+
+	"github.com/youngsx/drive-collector/cmd/collector/internal/contract"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/dispatcher"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/drive"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/instance"
@@ -62,6 +65,10 @@ type Config struct {
 	// Auth 做 RBAC 判定。为 nil 时不装配 Dispatcher,命令被静默忽略。
 	Auth *auth.Guard
 
+	// Redis 是媒体组缓冲的存储 —— 必须是 Redis 而不是内存:
+	// flush 由分布式锁保护,多实例下各存各的会各刷一半。
+	Redis *redis.Client
+
 	// Coord 是实例协调器(注册 + telegram_client 锁)。
 	//
 	// 必填:它决定 LB 把 webhook 转发给谁。缺了它,Go 会在没有抢到锁的
@@ -72,15 +79,21 @@ type Config struct {
 
 // App 是编排后的应用。
 type App struct {
-	tg         *tgclient.Client
-	tasks      *task.Manager
-	locks      *drive.SessionLock
-	rclone     *rclone.Runner
-	repo       *store.Repository
-	drives     *store.DriveRepository
-	dispatcher *dispatcher.Dispatcher
-	cfg        Config
-	log        *slog.Logger
+	tg *tgclient.Client
+	// downloader 默认可用 tg;测试注入假实现。
+	// 单独一个字段是因为 download 要用假实现测,而 tg 是具体类型。
+	downloader Downloader
+	// mediaGroups 聚合用户连发的多条消息。为 nil 时媒体组会退化成
+	// 逐条任务(用户发 10 张图变 10 个任务),所以 wiring 时必须给。
+	mediaGroups *task.MediaGroupBuffer
+	tasks       *task.Manager
+	locks       *drive.SessionLock
+	rclone      Rclone
+	repo        TaskRepo
+	drives      DriveRepo
+	dispatcher  *dispatcher.Dispatcher
+	cfg         Config
+	log         *slog.Logger
 }
 
 // New 构造 App。此时不连接 Telegram、不碰网盘。
@@ -128,7 +141,18 @@ func New(cfg Config) (*App, error) {
 	}
 
 	a.tg = tg
+	a.downloader = tg
 	a.tasks = manager
+
+	// 媒体组缓冲:用户连发多图时聚合成一批。
+	if cfg.Redis != nil {
+		a.mediaGroups = task.NewMediaGroupBuffer(cfg.Redis, task.BufferConfig{
+			Log: cfg.Log,
+		})
+		// 刷出的组要真的建任务 —— 不接这个回调,组会被清掉但任务不建,
+		// 用户的图片就凭空消失了。
+		a.mediaGroups.FlushGroup = a.flushMediaGroup
+	}
 
 	// Dispatcher 在这里装配而不是在 main —— 它需要 tg / auth / tasks 三样
 	// 依赖,而 tg 是本包内部创建的。放外面就得额外导出一个构造顺序约束。
@@ -152,6 +176,11 @@ func (a *App) Run(ctx context.Context) error {
 	if a.cfg.Coord == nil {
 		return fmt.Errorf("app: 缺少实例协调器 —— 没有锁就连接 Telegram 会与 Node 双实例并发")
 	}
+	if a.mediaGroups == nil {
+		// 不是警告而是错误:媒体组缓冲缺失意味着用户发 10 张图会变
+		// 10 个任务,而这【不报错】—— 用户只会看到结果不对。
+		return fmt.Errorf("app: 缺少媒体组缓冲 —— 连发多图会退化成逐条任务")
+	}
 
 	// 先注册,再抢锁。顺序不能反:注册让 Node 知道本实例活着,
 	// 抢锁才不会被 Node 判定为「残留锁可抢占」。
@@ -172,6 +201,13 @@ func (a *App) Run(ctx context.Context) error {
 	}
 	a.log.Info("已持有 telegram_client 锁,开始接管",
 		"instance", a.cfg.Coord.ID(), "ttl", "90s")
+
+	// 捞回上次运行遗留的组与僵尸任务。
+	//
+	// 必须在抢到锁【之后】做:那才是「这个实例负责处理」的信号。
+	// 启动时进程会丢掉所有内存里的定时器,组就永远留在 Redis 里不刷,
+	// 僵尸任务也永远停在 downloading —— 用户等的是「永远不出现」。
+	go a.recoverOnStart(ctx)
 
 	// 续租:失去锁必须立刻停手,否则会和新主人双实例并发。
 	// 这是「切流量」的触发点 —— LB 下一个请求就打到新主人了。
@@ -195,6 +231,46 @@ func (a *App) Run(ctx context.Context) error {
 
 	return a.tg.Run(tgCtx)
 }
+
+// recoverOnStart 捞回上次运行的遗留物。
+//
+// 两个都是「重启后会静默消失」的东西:
+//   - 媒体组:定时器全在内存里,进程一死组就卡在缓冲里不刷
+//   - 僵尸任务:停在 downloading/uploading,用户永远等不到结果
+func (a *App) recoverOnStart(ctx context.Context) {
+	// 媒体组
+	if n, err := a.mediaGroups.Restore(ctx); err != nil {
+		a.log.Warn("捞回遗留媒体组失败", "err", err)
+	} else if n > 0 {
+		a.log.Info("已捞回遗留媒体组", "组数", n)
+	}
+
+	// 僵尸任务:重置为 queued,让随后的 webhook 重新处理。
+	stalled, err := a.repo.FindStalledTasks(ctx, StalledThreshold)
+	if err != nil {
+		a.log.Warn("查询僵尸任务失败", "err", err)
+		return
+	}
+	if len(stalled) == 0 {
+		return
+	}
+
+	reset := 0
+	for _, tsk := range stalled {
+		if _, terr := a.repo.Transition(ctx, tsk.ID, contract.EventResetStalled, nil); terr != nil {
+			a.log.Warn("重置僵尸任务失败", "taskId", tsk.ID, "err", terr)
+			continue
+		}
+		reset++
+	}
+	a.log.Info("已重置僵尸任务", "数量", reset)
+}
+
+// StalledThreshold 是判定「任务卡住」的时间。
+//
+// 与 Node 侧一致(约 5 分钟):短了会把正在下载的大文件误判为僵尸,
+// 长了用户要多等。
+const StalledThreshold = 5 * time.Minute
 
 // TG 暴露 Telegram 客户端,供发消息等场景使用。
 func (a *App) TG() *tgclient.Client { return a.tg }
@@ -239,6 +315,14 @@ func (a *App) onUpdate(ctx context.Context, u tgclient.Update) error {
 
 		if !msg.HasMedia {
 			return nil // 普通聊天内容,不做任何事
+		}
+
+		// 媒体组走缓冲:用户连发 10 张图,Telegram 推 10 条 update(同
+		// 一个 grouped_id)。不聚合就是 10 个独立任务 —— 而且不报错,
+		// 只是结果不对。
+		if msg.GroupedID != 0 && a.mediaGroups != nil {
+			return a.mediaGroups.Add(ctx, task.NormalizeGID(msg.GroupedID),
+				msg.ChatID, msg.SenderID, int64(msg.ID))
 		}
 		return a.createTaskFrom(ctx, u)
 
@@ -330,7 +414,7 @@ func (a *App) download(ctx context.Context, t store.Task) error {
 	}
 
 	dest := filepath.Join(a.cfg.DownloadDir, sanitize(t.FileName.String))
-	if err := a.tg.DownloadTo(ctx, chatID, msgID, dest, func(ratio float64) {
+	if err := a.downloader.DownloadTo(ctx, chatID, msgID, dest, func(ratio float64) {
 		a.log.Debug("下载中", "taskId", t.ID, "ratio", ratio)
 	}); err != nil {
 		return fmt.Errorf("下载失败: %w", err)
