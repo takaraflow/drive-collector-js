@@ -94,6 +94,19 @@ type App struct {
 	dispatcher  *dispatcher.Dispatcher
 	cfg         Config
 	log         *slog.Logger
+
+	// pending 是「建完任务、等着被处理」的队列。
+	//
+	// 为什么需要它:worker 模式下 Node 侧那条「建任务 → 发 QStash →
+	// webhook 回调」的链路【不存在】—— Go 没有 QStash 发布器。建完
+	// 任务没人触发下载,任务就永远停在 queued。
+	//
+	// 生产实测:一条真实视频消息建出了任务,状态卡在 queued 不动,
+	// 而日志里一切正常 —— 属于最难发现的一类故障。
+	//
+	// 单实例下用内存队列足够;多实例时它必须换成 Redis 队列(每个
+	// 实例只能处理自己建的任务,否则会重复下载)。
+	pending chan string
 }
 
 // New 构造 App。此时不连接 Telegram、不碰网盘。
@@ -116,12 +129,13 @@ func New(cfg Config) (*App, error) {
 	}
 
 	a := &App{
-		locks:  drive.NewSessionLock(),
-		rclone: rclone.NewRunner(),
-		repo:   cfg.Repo,
-		drives: cfg.Drives,
-		cfg:    cfg,
-		log:    cfg.Log,
+		locks:   drive.NewSessionLock(),
+		rclone:  rclone.NewRunner(),
+		repo:    cfg.Repo,
+		drives:  cfg.Drives,
+		cfg:     cfg,
+		log:     cfg.Log,
+		pending: make(chan string, pendingQueueSize),
 	}
 
 	// task.Manager 只负责「该不该处理」和状态推进,具体怎么做由这里注入。
@@ -207,7 +221,18 @@ func (a *App) Run(ctx context.Context) error {
 	// 必须在抢到锁【之后】做:那才是「这个实例负责处理」的信号。
 	// 启动时进程会丢掉所有内存里的定时器,组就永远留在 Redis 里不刷,
 	// 僵尸任务也永远停在 downloading —— 用户等的是「永远不出现」。
-	go a.recoverOnStart(ctx)
+	//
+	// 周期跑而不是只跑一次:内存队列里的任务在崩溃时会丢,而它们
+	// 状态还是 queued —— 只靠启动时扫一遍的话,那些任务要等到【下次
+	// 重启】才被捞回。周期扫描让它们最多等一个周期。
+	go a.recoverLoop(ctx)
+
+	// 任务消费循环:把新建的任务推到终态。
+	//
+	// 抢到锁【之后】才起:只有负责处理的实例才该动网盘。
+	// 这也是 worker 模式与 edge 模式的分界线 —— edge 只转发 webhook,
+	// 不开这个循环。
+	go a.runTaskQueue(ctx)
 
 	// 续租:失去锁必须立刻停手,否则会和新主人双实例并发。
 	// 这是「切流量」的触发点 —— LB 下一个请求就打到新主人了。
@@ -232,6 +257,29 @@ func (a *App) Run(ctx context.Context) error {
 	return a.tg.Run(tgCtx)
 }
 
+// recoverLoop 周期性地捞回遗留物,直到 ctx 结束。
+//
+// 为什么不是只跑一次:内存队列在崩溃时会丢,而丢掉的任务状态还是
+// queued —— 只扫一次的话它们要等到下次重启才被捞回。周期扫描把
+// 最坏等待压到一个周期。
+//
+// 周期取 StalledThreshold 的一半:任务被判为「卡住」之后最多再等
+// 这么久就会被重新排队。太短会频繁扫库(每次一条 D1 查询)。
+func (a *App) recoverLoop(ctx context.Context) {
+	a.recoverOnStart(ctx)
+
+	ticker := time.NewTicker(StalledThreshold / 2)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			a.recoverOnStart(ctx)
+		}
+	}
+}
+
 // recoverOnStart 捞回上次运行的遗留物。
 //
 // 两个都是「重启后会静默消失」的东西:
@@ -239,13 +287,25 @@ func (a *App) Run(ctx context.Context) error {
 //   - 僵尸任务:停在 downloading/uploading,用户永远等不到结果
 func (a *App) recoverOnStart(ctx context.Context) {
 	// 媒体组
-	if n, err := a.mediaGroups.Restore(ctx); err != nil {
-		a.log.Warn("捞回遗留媒体组失败", "err", err)
-	} else if n > 0 {
-		a.log.Info("已捞回遗留媒体组", "组数", n)
+	//
+	// nil 守卫不是多余的:本函数跑在后台 goroutine 里,panic 会直接
+	// 终止整个进程。Run 虽然已经检查过 mediaGroups,但那是另一条路径 ——
+	// 这里自己守住,免得将来有人单独调用它。
+	if a.mediaGroups != nil {
+		if n, err := a.mediaGroups.Restore(ctx); err != nil {
+			a.log.Warn("捞回遗留媒体组失败", "err", err)
+		} else if n > 0 {
+			a.log.Info("已捞回遗留媒体组", "组数", n)
+		}
 	}
 
-	// 僵尸任务:重置为 queued,让随后的 webhook 重新处理。
+	// 僵尸任务:重置为 queued 并重新排队。
+	//
+	// 注意 FindStalledTasks 会把 queued 也算进来(它只排除终态)。
+	// 而 reset_stalled 的合法来源是 downloading/downloaded/uploading ——
+	// 对 queued 调用会被状态机拒绝。所以这里必须按状态分流:
+	//   - queued:状态本来就对,直接排队(它正是「建了没人处理」的那批)
+	//   - 其余:先重置再排队
 	stalled, err := a.repo.FindStalledTasks(ctx, StalledThreshold)
 	if err != nil {
 		a.log.Warn("查询僵尸任务失败", "err", err)
@@ -255,15 +315,22 @@ func (a *App) recoverOnStart(ctx context.Context) {
 		return
 	}
 
-	reset := 0
+	reset, requeued := 0, 0
 	for _, tsk := range stalled {
-		if _, terr := a.repo.Transition(ctx, tsk.ID, contract.EventResetStalled, nil); terr != nil {
-			a.log.Warn("重置僵尸任务失败", "taskId", tsk.ID, "err", terr)
-			continue
+		if tsk.Status != contract.StatusQueued {
+			if _, terr := a.repo.Transition(ctx, tsk.ID, contract.EventResetStalled, nil); terr != nil {
+				a.log.Warn("重置僵尸任务失败", "taskId", tsk.ID, "status", tsk.Status, "err", terr)
+				continue
+			}
+			reset++
 		}
-		reset++
+		// 重置完必须自己排队。这里原来只把状态改回 queued 就完事,
+		// 注释写着「让随后的 webhook 重新处理」—— 而 worker 模式下
+		// 那个 webhook 永远不会来,重置等于把任务再卡一次。
+		a.enqueue(ctx, tsk.ID)
+		requeued++
 	}
-	a.log.Info("已重置僵尸任务", "数量", reset)
+	a.log.Info("已恢复僵尸任务", "重置", reset, "重新排队", requeued)
 }
 
 // StalledThreshold 是判定「任务卡住」的时间。
@@ -400,6 +467,9 @@ func (a *App) createTaskFrom(ctx context.Context, u tgclient.Update) error {
 		return nil
 	}
 	a.log.Info("任务已创建", "taskId", taskID, "file", msg.FileName)
+	// 建完必须立刻排队处理。漏了这一步任务会永远停在 queued ——
+	// worker 模式下没有 QStash 回调会来推它。
+	a.enqueue(ctx, taskID)
 	return nil
 }
 

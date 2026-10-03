@@ -62,5 +62,9 @@ func (a *App) flushMediaGroup(ctx context.Context, gid string, meta task.GroupMe
 		return fmt.Errorf("批量建任务失败(gid=%s, %d 条): %w", gid, len(tasks), err)
 	}
 	a.log.Info("媒体组已建任务", "gid", gid, "条数", len(tasks))
+	// 与单条路径一样:建完就得排队,否则这批图只会躺在 queued 里。
+	for _, tsk := range tasks {
+		a.enqueue(ctx, tsk.ID)
+	}
 	return nil
 }

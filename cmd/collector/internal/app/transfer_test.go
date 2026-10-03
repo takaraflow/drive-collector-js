@@ -48,6 +48,8 @@ type fakeRepo struct {
 	created    []store.Task
 	batch      []store.Task
 	stalled    []store.Task
+	byID       *store.Task
+	transByID  map[string][]contract.TaskEvent
 	trans      []contract.TaskEvent
 	fileSize   int64
 	fileName   string
@@ -73,7 +75,9 @@ func (f *fakeRepo) CreateBatch(_ context.Context, ts []store.Task) error {
 	return nil
 }
 
-func (f *fakeRepo) FindById(context.Context, string) (*store.Task, error) { return nil, nil }
+func (f *fakeRepo) FindById(context.Context, string) (*store.Task, error) {
+	return f.byID, nil
+}
 
 func (f *fakeRepo) FindByUserId(context.Context, string, int) ([]store.Task, error) {
 	return nil, nil
@@ -87,8 +91,12 @@ func (f *fakeRepo) FindStalledTasks(_ context.Context, _ time.Duration) ([]store
 	return f.stalled, f.stalledErr
 }
 
-func (f *fakeRepo) Transition(_ context.Context, _ string, ev contract.TaskEvent, _ *string) (store.TransitionResult, error) {
+func (f *fakeRepo) Transition(_ context.Context, id string, ev contract.TaskEvent, _ *string) (store.TransitionResult, error) {
 	f.trans = append(f.trans, ev)
+	if f.transByID == nil {
+		f.transByID = map[string][]contract.TaskEvent{}
+	}
+	f.transByID[id] = append(f.transByID[id], ev)
 	return store.TransitionResult{Changed: true}, nil
 }
 
@@ -146,8 +154,10 @@ func newTestApp(t *testing.T, dl *fakeDL, repo *fakeRepo, drives *fakeDrives) (*
 		rclone:     &fakeRclone{},
 		// locks 必须给:upload 会走 locks.WithSession,nil 会 panic。
 		locks: drive.NewSessionLock(),
-		cfg:   Config{DownloadDir: dir, RemoteBase: "/global"},
-		log:   quietApp(),
+		// pending 必须给:建完任务会 enqueue,nil channel 会永久阻塞。
+		pending: make(chan string, pendingQueueSize),
+		cfg:     Config{DownloadDir: dir, RemoteBase: "/global"},
+		log:     quietApp(),
 	}
 	return a, dir
 }
