@@ -131,24 +131,18 @@ func TestFromMessageExtractsMediaFields(t *testing.T) {
 	doc.Attributes = []tg.DocumentAttributeClass{
 		&tg.DocumentAttributeFilename{FileName: "a.zip"},
 	}
-	// flag 必须显式设 —— gotd 的 getter 靠 Flags 判断字段是否有效,
-	// 直接赋值不会设 flag,getter 一律返回零值。这是 gotd 的系统性约定,
-	// 写测试时最容易踩。
-	// flag 必须显式设 —— gotd 的 getter 靠 Flags 判断字段是否有效,
-	// 直接赋值不会设 flag,getter 一律返回零值。这是 gotd 的系统性约定,
-	// 写测试时最容易踩。
-	// 用 SetMedia 而不是直接赋值 —— 它自己会设 flag 9。
-	// 直接给字段赋值不设 flag 的话,GetMedia 一律返回 false,
-	// 而代码看起来完全正确。
+	// gotd 的 getter 靠 Flags 判断字段是否有效:直接给字段赋值不会设
+	// flag,getter 一律返回零值。必须走 SetXxx helper。
+	//
+	// 这里刻意不用裸的 Flags.Set(数字):flag 编号在生成代码里是
+	// 借位对齐的(media 是 9,from_id 是 8),写错一个数字测试就会
+	// 因为「碰巧」通过而给出虚假的安心 —— 这个文件之前就这么错过。
 	msg := &tg.Message{
 		ID:     42,
 		PeerID: &tg.PeerChat{ChatID: 999},
-		FromID: &tg.PeerUser{UserID: 555},
 	}
-	msg.Flags.Set(4) // from_id
+	msg.SetFromID(&tg.PeerUser{UserID: 555})
 	msg.SetMedia(&tg.MessageMediaDocument{Document: doc})
-	msg.Flags.Set(4) // from_id
-	msg.Flags.Set(8) // media
 
 	info, ok := fromMessage(msg)
 	if !ok {
@@ -172,6 +166,67 @@ func TestFromMessageExtractsMediaFields(t *testing.T) {
 }
 
 // TestFromMessageRejectsEmpty 空消息不该被当成有效消息。
+// TestFromMessageInfersSenderFromPeer 是 user_id=0 的回归测试。
+//
+// from_id 是 Telegram message 构造器的【可选】字段 —— 私聊里通常不发,
+// 因为对话对方就是发送者。只读 from_id 的话 SenderID 是 0,而上传要靠
+// 它查用户网盘,结果是「用户 0 没有绑定网盘」:文件下载成功却永远传不上去。
+//
+// 生产实测:一条真实消息的 source_ref 从 peer 取到了正确的 7428626313,
+// 而 user_id 是 0 —— 就是这个缺失。
+func TestFromMessageInfersSenderFromPeer(t *testing.T) {
+	msg := &tg.Message{
+		ID:     4542,
+		PeerID: &tg.PeerUser{UserID: 7428626313},
+	}
+	// 刻意不设 from_id(flag 4)—— 私聊里的真实形态。
+	msg.SetMedia(&tg.MessageMediaDocument{Document: &tg.Document{ID: 1, Size: 10}})
+
+	info, ok := fromMessage(msg)
+	if !ok {
+		t.Fatal("应能提取")
+	}
+	if info.SenderID != 7428626313 {
+		t.Errorf("SenderID = %d,期望从 peer 兜底成 7428626313 —— "+
+			"否则 user_id=0,上传会因为「用户 0 没有绑定网盘」失败", info.SenderID)
+	}
+	if info.ChatID != 7428626313 {
+		t.Errorf("ChatID = %d", info.ChatID)
+	}
+}
+
+// TestFromMessageDoesNotInferForOutgoing 自己发的消息不能兜底成用户消息。
+//
+// bot 的回复 peer 也是对方,兜底会把 bot 自己的回复当成用户发的文件建任务。
+func TestFromMessageDoesNotInferForOutgoing(t *testing.T) {
+	msg := &tg.Message{
+		ID:     1,
+		PeerID: &tg.PeerUser{UserID: 7428626313},
+	}
+	msg.SetOut(true)
+	msg.SetMedia(&tg.MessageMediaDocument{Document: &tg.Document{ID: 1, Size: 10}})
+
+	info, _ := fromMessage(msg)
+	if info.SenderID != 0 {
+		t.Errorf("发出消息的 SenderID = %d,期望 0(不能兜底)", info.SenderID)
+	}
+}
+
+// TestFromMessagePrefersExplicitFromID 有 from_id 时必须用它,不能被兜底覆盖。
+func TestFromMessagePrefersExplicitFromID(t *testing.T) {
+	msg := &tg.Message{
+		ID:     1,
+		PeerID: &tg.PeerChat{ChatID: 999}, // 群聊:peer 是群,发送者是另一个人
+	}
+	msg.SetFromID(&tg.PeerUser{UserID: 555})
+	msg.SetMedia(&tg.MessageMediaDocument{Document: &tg.Document{ID: 1, Size: 10}})
+
+	info, _ := fromMessage(msg)
+	if info.SenderID != 555 {
+		t.Errorf("SenderID = %d,期望显式的 555", info.SenderID)
+	}
+}
+
 func TestFromMessageRejectsEmpty(t *testing.T) {
 	if _, ok := fromMessage(&tg.MessageEmpty{ID: 1}); ok {
 		t.Error("空消息不该被接受")

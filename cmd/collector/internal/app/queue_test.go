@@ -24,10 +24,10 @@ func mediaUpdate(msgID, senderID int64) tgclient.Update {
 	msg := &tg.Message{
 		ID:     int(msgID),
 		PeerID: &tg.PeerChat{ChatID: 999},
-		FromID: &tg.PeerUser{UserID: senderID},
 	}
-	// flag 必须显式设 —— gotd 的 getter 靠 Flags 判断字段有效。
-	msg.Flags.Set(4) // from_id
+	// 用 SetXxx helper,不要裸设 flag 位 —— flag 编号是借位对齐的
+	// (media 是 9,from_id 是 8),写错数字会因为「碰巧通过」而骗人。
+	msg.SetFromID(&tg.PeerUser{UserID: senderID})
 	msg.SetMedia(&tg.MessageMediaDocument{Document: doc})
 
 	return tgclient.Update{
