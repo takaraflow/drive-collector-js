@@ -190,6 +190,30 @@ EOF`)
 }
 
 // TestMissingBinaryIsAClearError 二进制不存在要给清楚的错误。
+// TestResolveBinaryPrefersExplicitEnv 显式指定优先。
+func TestResolveBinaryPrefersExplicitEnv(t *testing.T) {
+	t.Setenv("RCLONE_BINARY", "/custom/rclone")
+	if got := resolveBinary(); got != "/custom/rclone" {
+		t.Errorf("resolveBinary = %q,期望 /custom/rclone", got)
+	}
+}
+
+// TestResolveBinaryFallsBackWhenNoPath 环境里没有 rclone 时退到历史路径。
+//
+// 不能返回空串 —— 那会让 exec 报一个和「rclone 不存在」毫无关系的错。
+//
+// 这条守着生产实测的故障:写死 /app/rclone/rclone 时,edge 镜像里
+// 按官方脚本装到 /usr/bin/rclone,于是每次上传都「rclone: 启动失败」,
+// 而下载是成功的 —— 表现为「文件传了一半」。
+func TestResolveBinaryFallsBackWhenNoPath(t *testing.T) {
+	t.Setenv("RCLONE_BINARY", "")
+	t.Setenv("PATH", t.TempDir()) // 空目录,LookPath 必然失败
+
+	if got := resolveBinary(); got != "/app/rclone/rclone" {
+		t.Errorf("resolveBinary = %q,期望退到 /app/rclone/rclone", got)
+	}
+}
+
 func TestMissingBinaryIsAClearError(t *testing.T) {
 	r := &Runner{Binary: "/nonexistent/rclone", Env: []string{}}
 	_, err := r.Run(context.Background(), Config{Timeout: time.Second},
