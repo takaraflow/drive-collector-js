@@ -184,6 +184,13 @@ func New(cfg Config) (*App, error) {
 
 // Run 启动并阻塞到 ctx 结束。
 func (a *App) Run(ctx context.Context) error {
+	// 清掉上次运行残留的下载文件。
+	//
+	// 上传失败的任务会把文件留在盘上(刻意留着,方便排查),而它们
+	// 对应的任务会被 recoverOnStart 重新排队 —— 重跑时会重新下载。
+	// 不清的话容器磁盘(1GB)会一天天涨到满,而盘满的表现是
+	// 【所有】任务一起失败,不是单个任务。
+	_ = os.RemoveAll(a.cfg.DownloadDir)
 	if err := os.MkdirAll(a.cfg.DownloadDir, 0o755); err != nil {
 		return fmt.Errorf("app: 创建下载目录失败: %w", err)
 	}
@@ -543,6 +550,14 @@ func (a *App) upload(ctx context.Context, t store.Task) error {
 			return fmt.Errorf("上传失败: %w", err)
 		}
 		// 记下远端路径:出问题时能告诉用户文件原本该去哪。
-		return a.repo.UpdateSourceRef(ctx, t.ID, remote)
+		if err := a.repo.UpdateSourceRef(ctx, t.ID, remote); err != nil {
+			return err
+		}
+		// 上传成功才删本地。失败时保留 —— 排查和手工重试都要用。
+		//
+		// 不删的话容器磁盘(1GB)会被撑爆,而撑满之后是【所有】任务
+		// 一起失败,不是单个任务 —— 排查时会往网盘方向找,实际是本地盘。
+		_ = os.Remove(local)
+		return nil
 	})
 }
