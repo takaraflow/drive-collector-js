@@ -31,13 +31,32 @@ type Runner struct {
 	Env []string
 }
 
-// NewRunner 构造 Runner,二进制路径从环境变量的常见位置里找。
+// NewRunner 构造 Runner,按可靠性顺序解析 rclone 的位置。
+//
+// 顺序不能反:
+//  1. RCLONE_BINARY —— 显式指定优先,谁设了谁说了算
+//  2. PATH 上的 rclone —— 任何正常镜像都该有。edge 镜像按官方脚本
+//     装到 /usr/bin/rclone,不查 PATH 就找不到
+//  3. /app/rclone/rclone —— Node 镜像的历史约定,留着兼容
+//
+// 生产实测:写死 /app/rclone/rclone 导致每次上传都
+// 「rclone: 启动失败」—— 而下载是成功的,所以表现为「文件传了一半」。
 func NewRunner() *Runner {
-	bin := os.Getenv("RCLONE_BINARY")
-	if bin == "" {
-		bin = "/app/rclone/rclone"
+	return &Runner{
+		Binary: resolveBinary(),
+		Env:    append(os.Environ(), "RCLONE_CONFIG_PASS="),
 	}
-	return &Runner{Binary: bin, Env: append(os.Environ(), "RCLONE_CONFIG_PASS=")}
+}
+
+// resolveBinary 见 NewRunner 的说明。
+func resolveBinary() string {
+	if bin := os.Getenv("RCLONE_BINARY"); bin != "" {
+		return bin
+	}
+	if bin, err := exec.LookPath("rclone"); err == nil {
+		return bin
+	}
+	return "/app/rclone/rclone"
 }
 
 // Config 是临时 rclone 配置的上下文。
