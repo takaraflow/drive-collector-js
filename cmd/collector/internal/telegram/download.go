@@ -54,7 +54,10 @@ func (c *Client) DownloadTo(ctx context.Context, chatID, msgID int64, destPath s
 	}()
 
 	writer := &progressWriter{w: tmp, total: loc.TotalSize, progress: progress}
-	builder := c.tg.Downloader().Download(nil, loc.Location)
+	// 第一个参数是 RPC client,不是「可选参数」—— 传 nil 会在
+	// master.Chunk 里解引用 nil 接口,直接 SIGSEGV(生产实测:
+	// 每次下载都 panic,容器反复重启)。
+	builder := c.tg.Downloader().Download(c.tg.API(), loc.Location)
 	if _, err := builder.Stream(ctx, writer); err != nil {
 		return fmt.Errorf("telegram: 下载失败: %w", err)
 	}
@@ -102,6 +105,11 @@ type file struct {
 }
 
 // locationOf 从 MessageMedia 解析出可下载的位置。
+//
+// 必须用 gotd 的 As*FileLocation helper,不能自己拼结构体:
+// InputDocumentFileLocation / InputPhotoFileLocation 除了 ID 还要
+// AccessHash 和 FileReference,少任何一个 Telegram 都会拒绝下载。
+// 而 FileReference 是服务端下发的、会过期的凭据 —— 只能从消息里带出来。
 func locationOf(m tg.MessageMediaClass) (file, error) {
 	switch v := m.(type) {
 	case *tg.MessageMediaDocument:
@@ -109,8 +117,9 @@ func locationOf(m tg.MessageMediaClass) (file, error) {
 		if !ok {
 			return file{}, fmt.Errorf("telegram: 文档内容为空")
 		}
+		// thumbSize 传空串 = 要文件本体,不是缩略图。
 		return file{
-			Location:  &tg.InputDocumentFileLocation{ID: doc.GetID()},
+			Location:  doc.AsInputDocumentFileLocation(""),
 			TotalSize: doc.GetSize(),
 		}, nil
 
@@ -119,23 +128,30 @@ func locationOf(m tg.MessageMediaClass) (file, error) {
 		if !ok {
 			return file{}, fmt.Errorf("telegram: 图片内容为空")
 		}
-		// 图片有多档尺寸,取最大的那档
-		sizes := photo.GetSizes()
-		if len(sizes) == 0 {
+		// 图片有多档尺寸,取最大的那档 —— 但必须同时记住它的 Type,
+		// 因为 InputPhotoFileLocation.ThumbSize 要填的就是这个 Type。
+		// 只取 Size 不取 Type 的话,下载请求会指向一个不存在的尺寸。
+		bestType, bestSize := "", int64(0)
+		for _, ps := range photo.GetSizes() {
+			switch s := ps.(type) {
+			case *tg.PhotoSize:
+				if int64(s.Size) > bestSize {
+					bestType, bestSize = s.Type, int64(s.Size)
+				}
+			case *tg.PhotoSizeProgressive:
+				// 渐进式 JPEG:最后一个前缀就是完整图。
+				if n := len(s.Sizes); n > 0 {
+					if full := int64(s.Sizes[n-1]); full > bestSize {
+						bestType, bestSize = s.Type, full
+					}
+				}
+			}
+		}
+		if bestType == "" {
 			return file{}, fmt.Errorf("telegram: 图片没有可用尺寸")
 		}
-		bestSize := int64(0)
-		for _, ps := range sizes {
-			concrete, ok := ps.(*tg.PhotoSize)
-			if !ok {
-				continue
-			}
-			if int64(concrete.Size) > bestSize {
-				bestSize = int64(concrete.Size)
-			}
-		}
 		return file{
-			Location:  &tg.InputPhotoFileLocation{ID: photo.GetID()},
+			Location:  photo.AsInputPhotoFileLocation(bestType),
 			TotalSize: bestSize,
 		}, nil
 
