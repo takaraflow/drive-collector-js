@@ -62,14 +62,25 @@ func fromMessage(m tg.MessageClass) (messageInfo, bool) {
 	}
 	if peer, ok := msg.GetPeerID().(*tg.PeerUser); ok {
 		info.ChatID = peer.GetUserID()
+		// 私聊里 from_id 是【可选】字段 —— Telegram 常常不发,因为
+		// 对话对方就是发送者。不从 peer 兜底的话 SenderID 是 0,
+		// 而上传要靠它查用户网盘,结果是「用户 0 没有绑定网盘」:
+		// 文件下载成功却永远传不上去。
+		//
+		// 生产实测:一条真实消息的 source_ref 从 peer 取到了正确的
+		// 7428626313,而 user_id 是 0 —— 就是这个缺失。
+		//
+		// 只对【收到】的消息兜底:自己发出的消息(out)peer 也是对方,
+		// 但发送者是 bot 自己,兜底会把 bot 的回复当成用户消息建任务。
+		if info.SenderID == 0 && !msg.GetOut() {
+			info.SenderID = peer.GetUserID()
+		}
 	}
 	if peer, ok := msg.GetPeerID().(*tg.PeerChat); ok {
 		info.ChatID = peer.GetChatID()
 	}
 	gid, _ := msg.GetGroupedID()
 	info.GroupedID = gid
-
-	info.Text = msg.GetMessage()
 
 	info.Text = msg.GetMessage()
 
