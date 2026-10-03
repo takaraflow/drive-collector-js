@@ -99,7 +99,13 @@ func (m *Manager) HandleDownload(ctx context.Context, taskID string) (Result, er
 		return resolveBlocked("download", claim.FromStatus), nil
 	}
 
-	return m.run(ctx, *dbTask, "download", m.Download)
+	// 下载完成发 finish_download(→ downloaded),不是 complete。
+	//
+	// 发 complete 会让任务直接跳到终态 completed —— 紧接着的
+	// HandleUpload 就会被状态机拒绝("Cannot transition from completed"),
+	// 而 resolveBlocked 对终态回 200,于是调用方以为上传成功了。
+	// 生产实测:文件下载了但从没传到网盘,日志里还写着「任务转存完成」。
+	return m.run(ctx, *dbTask, "download", contract.EventFinishDownload, m.Download)
 }
 
 // HandleUpload 处理上传 webhook。
@@ -127,10 +133,15 @@ func (m *Manager) HandleUpload(ctx context.Context, taskID string) (Result, erro
 		return resolveBlocked("upload", claim.FromStatus), nil
 	}
 
-	return m.run(ctx, *dbTask, "upload", m.Upload)
+	// 上传完成才是真终态。
+	return m.run(ctx, *dbTask, "upload", contract.EventComplete, m.Upload)
 }
 
-// run 执行实际处理并推进到终态。
+// run 执行实际处理,成功时发 done 事件推进状态。
+//
+// done 必须由调用方指定:下载和上传的「成功」是两个不同状态
+// (downloaded / completed)。写死一个会让另一段永远走不到 ——
+// 而它不报错,只是一切都停在中间态或提前判完成。
 //
 // 失败一律记为 failed 并保留原因 —— 状态停在 downloading/uploading
 // 会让用户永远等不到结果,而 FindStalledTasks 只能捞回一部分。
@@ -138,6 +149,7 @@ func (m *Manager) run(
 	ctx context.Context,
 	task store.Task,
 	kind string,
+	done contract.TaskEvent,
 	work func(context.Context, store.Task) error,
 ) (Result, error) {
 	if work == nil {
@@ -155,7 +167,7 @@ func (m *Manager) run(
 		return Result{Success: false, StatusCode: 500, Message: kind + " failed"}, nil
 	}
 
-	if _, err := m.repo.Transition(ctx, task.ID, contract.EventComplete, nil); err != nil {
+	if _, err := m.repo.Transition(ctx, task.ID, done, nil); err != nil {
 		m.log.Error("标记完成时出错", "taskId", task.ID, "err", err)
 		return Result{Success: false, StatusCode: 500, Message: "finalize failed"}, nil
 	}
@@ -168,7 +180,7 @@ func (m *Manager) run(
 // download webhook,只能靠 upload webhook 或启动扫描捞回来。
 func (m *Manager) enqueueDownloadedForUpload(ctx context.Context, task *store.Task) (Result, error) {
 	m.log.Info("任务已下载,补投上传队列", "taskId", task.ID)
-	return m.run(ctx, *task, "upload", m.Upload)
+	return m.run(ctx, *task, "upload", contract.EventComplete, m.Upload)
 }
 
 // resolveBlocked 复刻 JS 侧 _resolveBlockedWebhookResult。

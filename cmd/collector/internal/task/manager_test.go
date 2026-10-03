@@ -188,7 +188,13 @@ func TestNotFoundIs404(t *testing.T) {
 }
 
 // TestHappyPathAdvancesToCompleted 正常路径:queued → downloading → completed。
-func TestHappyPathAdvancesToCompleted(t *testing.T) {
+// TestDownloadStopsAtDownloaded 下载阶段的终态是 downloaded,不是 completed。
+//
+// 这条曾经写错过:下载完直接发 complete → 任务跳到终态,紧接着的
+// 上传就被状态机拒绝,而 resolveBlocked 对终态回 200 —— 调用方以为
+// 上传成功了。生产实测:文件下载了但从没传到网盘,日志里还写着
+// 「任务转存完成」。
+func TestDownloadStopsAtDownloaded(t *testing.T) {
 	repo := newMemRepo(store.Task{ID: "t1", Status: contract.StatusQueued})
 	m := newManager(repo, noopWork, noopWork)
 
@@ -199,8 +205,63 @@ func TestHappyPathAdvancesToCompleted(t *testing.T) {
 	if res.StatusCode != 200 {
 		t.Fatalf("应回 200,实际 %d (%s)", res.StatusCode, res.Message)
 	}
+	if got := repo.status("t1"); got != contract.StatusDownloaded {
+		t.Errorf("下载后状态 = %s,期望 downloaded", got)
+	}
+}
+
+// TestTwoPhaseReachesCompleted 下载 → 上传两阶段走完才是 completed。
+//
+// 这是 processTask 的真实序列。任一步的事件写错都会让任务停在中间态,
+// 或者提前判完成 —— 两种都不报错。
+func TestTwoPhaseReachesCompleted(t *testing.T) {
+	repo := newMemRepo(store.Task{ID: "t1", Status: contract.StatusQueued})
+	m := newManager(repo, noopWork, noopWork)
+
+	if _, err := m.HandleDownload(context.Background(), "t1"); err != nil {
+		t.Fatal(err)
+	}
+	if got := repo.status("t1"); got != contract.StatusDownloaded {
+		t.Fatalf("下载后 = %s,期望 downloaded", got)
+	}
+
+	res, err := m.HandleUpload(context.Background(), "t1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != 200 {
+		t.Fatalf("上传应回 200,实际 %d (%s)", res.StatusCode, res.Message)
+	}
 	if got := repo.status("t1"); got != contract.StatusCompleted {
-		t.Errorf("最终状态 = %s,期望 completed", got)
+		t.Errorf("上传后 = %s,期望 completed", got)
+	}
+}
+
+// TestUploadAfterDownloadIsNotBlocked 守住上面那个 bug 的直接形态:
+// 下载完之后调上传,不能被状态机拒绝。
+//
+// 拒绝本身不报错 —— resolveBlocked 对终态回 200,所以它伪装成成功。
+// 这里同时断言状态真的推进了,而不只是「返回 200」。
+func TestUploadAfterDownloadIsNotBlocked(t *testing.T) {
+	repo := newMemRepo(store.Task{ID: "t1", Status: contract.StatusQueued})
+	uploaded := false
+	m := newManager(repo, noopWork, func(context.Context, store.Task) error {
+		uploaded = true
+		return nil
+	})
+
+	if _, err := m.HandleDownload(context.Background(), "t1"); err != nil {
+		t.Fatal(err)
+	}
+	res, err := m.HandleUpload(context.Background(), "t1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode == 200 && !uploaded {
+		t.Fatal("上传返回 200 但执行器没被调用 —— 这正是静默丢文件的形态")
+	}
+	if !uploaded {
+		t.Error("上传执行器没被调用")
 	}
 }
 
