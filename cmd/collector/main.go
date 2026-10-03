@@ -159,6 +159,11 @@ func runWorker(log *slog.Logger) error {
 	ctx, stop := signalCtx()
 	defer stop()
 
+	// 健康端点最先起,甚至在配置校验之前 ——
+	// 配置缺失时进程会立刻退出,但那段时间里探针至少能拿到
+	// 「HTTP 栈在工作」的信号,而不是笼统的 503。
+	serveHealth(ctx, log)
+
 	sessionStr := os.Getenv("SETTING_TG_SESSION")
 	if sessionStr == "" {
 		return errors.New("SETTING_TG_SESSION 未配置 —— worker 模式需要已登录的 session 串")
@@ -231,15 +236,10 @@ func runWorker(log *slog.Logger) error {
 func runHealthcheck() {
 	port := envInt("PORT", 7861)
 
-	// worker 模式不起 HTTP 端口。此时探针没有意义,直接成功 ——
-	// 否则编排器会不停重启一个健康的 worker。
-	if os.Getenv("RUN_MODE") == "worker" {
-		os.Exit(0)
-	}
-
 	client := &http.Client{Timeout: 3 * time.Second}
-	// 探针打自己的 /healthz:edge 模式会 404(那属于 Node),
-	// 但「404」本身证明 HTTP 栈在工作,这就是我们要的。
+	// 打 /healthz:edge 模式下该路径由 edge 自己实现;worker 模式下由
+	// serveHealth 提供。两种模式都该真的应答 —— 探针只会因为「无响应」
+	// 而失败,不会因为「返回 404」而失败,所以语义上够用。
 	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/healthz", port))
 	if err != nil {
 		os.Exit(1)
@@ -253,4 +253,50 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// serveHealth 在 worker 模式旁边起一个只含健康端点的 HTTP 服务。
+//
+// 为什么需要:worker 模式的主循环是 Telegram 长连接,不监听端口 —
+// 而 Northflank 的探针打的就是 /health。缺了它容器会被判不健康
+// 并无限重启,而业务(Telegram)其实已经连上了。
+//
+// 刻意只暴露 /health 与 /version,不做 webhook:worker 模式下
+// webhook 由 edge 节点负责,这里再开一遍会造成两个入口争抢。
+func serveHealth(ctx context.Context, log *slog.Logger) {
+	port := envInt("PORT", 7860)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	})
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	})
+	mux.HandleFunc("/version", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		v := envOr("APP_VERSION", "dev")
+		sha := envOr("GIT_SHA", "unknown")
+		_, _ = fmt.Fprintf(w, `{"version":%q,"sha":%q,"mode":"worker"}`, v, sha)
+	})
+
+	srv := &http.Server{
+		Addr:              ":" + strconv.Itoa(port),
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	go func() {
+		log.Info("健康端点已启动", "port", port, "路径", "/health /healthz /version")
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Error("健康服务异常退出", "err", err)
+		}
+	}()
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutdownCtx)
+	}()
 }
