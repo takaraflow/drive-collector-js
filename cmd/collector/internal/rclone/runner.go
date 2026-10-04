@@ -133,7 +133,7 @@ func (r *Runner) Run(ctx context.Context, cfg Config, args []string, progress Pr
 		return nil, fmt.Errorf("rclone: 启动失败(%s): %w", r.Binary, err)
 	}
 
-	entries, scanErr := scanLogs(stderr, progress)
+	entries, rawLines, scanErr := scanLogs(stderr, progress)
 
 	waitErr := cmd.Wait()
 	if ctxErr := ctx.Err(); ctxErr != nil {
@@ -141,7 +141,7 @@ func (r *Runner) Run(ctx context.Context, cfg Config, args []string, progress Pr
 	}
 	if waitErr != nil {
 		return entries, fmt.Errorf("rclone: 执行失败(退出码 %d): %s",
-			cmd.ProcessState.ExitCode(), summarizeErrors(entries))
+			cmd.ProcessState.ExitCode(), summarizeErrors(entries, rawLines))
 	}
 	return entries, scanErr
 }
@@ -151,8 +151,14 @@ func (r *Runner) Run(ctx context.Context, cfg Config, args []string, progress Pr
 // rclone 会把人类可读的日志和进度都写在 stderr 上,用 --use-json-log
 // 之后每行是一个 JSON —— 这是 JS 侧用 --use-json-log 的理由,
 // 这里沿用同样的做法,免得再造一个解析器。
-func scanLogs(r io.Reader, progress ProgressFunc) ([]LogEntry, error) {
-	var entries []LogEntry
+// scanLogs 解析 rclone 的 stderr。
+//
+// 返回两组东西:解析成功的 JSON 条目,以及【原样的非 JSON 行】。
+//
+// 后者必须留着:rclone 的致命错误有时走纯文本,而它往往是唯一的诊断
+// 依据。早期版本直接丢弃它们,于是失败信息只剩「(无错误详情)」——
+// 生产上排查时等于什么都拿不到。
+func scanLogs(r io.Reader, progress ProgressFunc) (entries []LogEntry, raw []string, err error) {
 	scanner := bufio.NewScanner(r)
 	// rclone 的单行 JSON 可能很长(进度对象里字段多),默认 64KB 不够。
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
@@ -163,8 +169,10 @@ func scanLogs(r io.Reader, progress ProgressFunc) ([]LogEntry, error) {
 			continue
 		}
 		var entry LogEntry
-		if err := json.Unmarshal([]byte(line), &entry); err != nil {
-			// 不是 JSON —— rclone 有些警告走纯文本,不该因此中断。
+		if uerr := json.Unmarshal([]byte(line), &entry); uerr != nil {
+			// 不是 JSON —— rclone 有些警告走纯文本。不该因此中断,
+			// 也不能丢掉:失败时它就是唯一的证据。
+			raw = append(raw, line)
 			continue
 		}
 		entries = append(entries, entry)
@@ -174,11 +182,16 @@ func scanLogs(r io.Reader, progress ProgressFunc) ([]LogEntry, error) {
 				entry.Stats.Bytes, entry.Stats.TotalBytes)
 		}
 	}
-	return entries, scanner.Err()
+	return entries, raw, scanner.Err()
 }
 
 // summarizeErrors 把日志里的错误汇总成一句可读的话。
-func summarizeErrors(entries []LogEntry) string {
+// summarizeErrors 从日志里提炼失败原因。
+//
+// raw 是非 JSON 行 —— 只有在 JSON 里找不到任何错误时才回头看它们。
+// 顺序不能反:JSON 里的 error 字段是结构化的、干净;纯文本常常夹着
+// 进度条残留和使用提示,只在没有更好的东西时才用。
+func summarizeErrors(entries []LogEntry, raw []string) string {
 	var errs []string
 	for _, e := range entries {
 		if e.Level == "error" || e.Error != "" {
@@ -191,10 +204,19 @@ func summarizeErrors(entries []LogEntry) string {
 			}
 		}
 	}
-	if len(errs) == 0 {
-		return "(无错误详情)"
+	if len(errs) > 0 {
+		return strings.Join(errs, "; ")
 	}
-	return strings.Join(errs, "; ")
+
+	// JSON 里没有错误 —— 用纯文本,取最后几行(最接近退出点)。
+	if n := len(raw); n > 0 {
+		start := n - 5
+		if start < 0 {
+			start = 0
+		}
+		return strings.Join(raw[start:], " | ")
+	}
+	return "(无错误详情:rclone 没输出任何可解析的错误)"
 }
 
 // RemoteTarget 把连接串和路径拼成 rclone 认识的完整目标。
