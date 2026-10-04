@@ -111,6 +111,21 @@ func fileNameOf(m tg.MessageMediaClass) string {
 	return ""
 }
 
+// truncate 按【字符】截断,不是按字节。
+//
+// 日志里会打印用户消息和文件名,而中间文占 3 字节 —— 按字节切会把
+// 一个汉字劈成半个,日志里就是一堆乱码。截断点必须落在字符边界上。
+func truncate(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
+}
+
 // newTaskID 生成任务主键。
 //
 // 用随机 hex 而不是自增 —— 任务 id 会出现在文件名和日志里,
