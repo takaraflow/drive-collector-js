@@ -45,7 +45,7 @@ func (a *App) flushMediaGroup(ctx context.Context, gid string, meta task.GroupMe
 			UserID:      fmt.Sprintf("%d", m.SenderID),
 			SourceType:  "telegram_media",
 			FileName:    nullableString(m.FileName),
-			SourceRef:   nullableString(fmt.Sprintf("%d/%d", m.ChatID, m.ID)),
+			SourceRef:   nullableString(BuildSourceRef(m.ChatID, int64(m.ID))),
 			MsgID:       nullableInt(int64(m.ID)),
 			SourceMsgID: nullableInt(m.SourceMsgID),
 			// GroupedID 标识这批来自同一个媒体组,批量取消按它归组。

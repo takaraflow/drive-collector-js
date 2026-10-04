@@ -381,14 +381,25 @@ func TestUploadUsesUserRemoteFolder(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(repo.srcRef, "/global/") {
-		t.Errorf("远端路径 = %q,应以全局目录为底", repo.srcRef)
+	// 断言传给 rclone 的远端路径,而不是「有没有写回 D1」——
+	// 路径的世界在 rclone 那一侧,写回 D1 的那次(已删除)反而是错的:
+	// source_ref 是消息引用,被覆盖后回滚到 Node 会静默失灵。
+	if len(a.rclone.(*fakeRclone).uploadCalls) != 1 {
+		t.Fatalf("rclone 上传调用 %d 次", len(a.rclone.(*fakeRclone).uploadCalls))
+	}
+	got := a.rclone.(*fakeRclone).uploadCalls[0]
+	if !strings.Contains(got, "/global/") {
+		t.Errorf("远端路径 = %q,应以全局目录为底", got)
 	}
 }
 
-// TestUploadRecordsRemotePath 上传成功后要记下远端路径 ——
-// 出问题时能告诉用户文件本该去哪。
-func TestUploadRecordsRemotePath(t *testing.T) {
+// TestUploadDoesNotTouchSourceRef 上传成功【不能】改写 source_ref。
+//
+// source_ref 是「这条消息从哪来」的引用,JS 侧靠它 JSON.parse 出
+// messageId 去拉原始消息。覆盖成远端路径之后,回滚到 Node 时这条任务
+// 会静默退化成「用 source_msg_id 兜底」—— 不报错,只是行为不对。
+// JS 侧对 telegram 媒体也从不改写它。
+func TestUploadDoesNotTouchSourceRef(t *testing.T) {
 	repo := &fakeRepo{}
 	a, _ := newTestApp(t, &fakeDL{}, repo, &fakeDrives{
 		drive: &drive.Drive{
@@ -401,11 +412,8 @@ func TestUploadRecordsRemotePath(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if repo.srcRef == "" {
-		t.Error("上传后没记下远端路径 —— 出错时无法定位文件")
-	}
-	if !strings.HasSuffix(repo.srcRef, "photo.jpg") {
-		t.Errorf("远端路径应含文件名,得到 %q", repo.srcRef)
+	if repo.srcRef != "" {
+		t.Errorf("上传改写了 source_ref = %q —— 它会破坏回滚到 Node 的能力", repo.srcRef)
 	}
 }
 

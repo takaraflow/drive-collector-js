@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -458,7 +459,7 @@ func (a *App) createTaskFrom(ctx context.Context, u tgclient.Update) error {
 		UserID:     fmt.Sprintf("%d", msg.SenderID),
 		SourceType: "telegram_media",
 		FileName:   nullableString(msg.FileName),
-		SourceRef:  nullableString(fmt.Sprintf("%d/%d", msg.ChatID, msg.ID)),
+		SourceRef:  nullableString(BuildSourceRef(msg.ChatID, int64(msg.ID))),
 		// MsgID 是这条状态消息本身;SourceMsgID 是【被转存的那条消息】。
 		// 两者都是单条消息 id —— Node 侧 addBatchTasks 写的也是 msg.id。
 		// 曾经写成 grouped_id,会让「按源消息反查任务」全部失效,
@@ -485,8 +486,8 @@ func (a *App) download(ctx context.Context, t store.Task) error {
 	if !t.SourceRef.Valid || t.SourceRef.String == "" {
 		return fmt.Errorf("任务 %s 没有源引用", t.ID)
 	}
-	var chatID, msgID int64
-	if _, err := fmt.Sscanf(t.SourceRef.String, "%d/%d", &chatID, &msgID); err != nil {
+	chatID, msgID, err := ParseSourceRef(t.SourceRef.String)
+	if err != nil {
 		return fmt.Errorf("任务 %s 的 sourceRef 无法解析: %w", t.ID, err)
 	}
 
@@ -535,8 +536,12 @@ func (a *App) upload(ctx context.Context, t store.Task) error {
 
 	cfg := rclone.Config{Connection: conn, Timeout: 6 * time.Hour}
 	// 用户在 UI 里设的目录优先,退回全局默认。
+	//
+	// 传的是【不含连接串】的路径 —— 拼接由 rclone 层做(见 RemoteTarget),
+	// 在调用方拼的话每个调用点都要记得拼一次,漏一个就会把网盘路径
+	// 当成本地目录,报出来却是「permission denied」那种误导性错误。
 	remoteBase := d.RemotePath(a.cfg.RemoteBase)
-	remote := filepath.Join(remoteBase, t.FileName.String)
+	remote := path.Join(remoteBase, t.FileName.String)
 
 	if err := a.rclone.Mkdir(ctx, cfg, remoteBase); err != nil {
 		return fmt.Errorf("创建远端目录失败: %w", err)
@@ -549,10 +554,13 @@ func (a *App) upload(ctx context.Context, t store.Task) error {
 		if err := a.rclone.Upload(ctx, cfg, local, remote, nil); err != nil {
 			return fmt.Errorf("上传失败: %w", err)
 		}
-		// 记下远端路径:出问题时能告诉用户文件原本该去哪。
-		if err := a.repo.UpdateSourceRef(ctx, t.ID, remote); err != nil {
-			return err
-		}
+		// 【不要】把远端路径写回 source_ref。
+		//
+		// source_ref 是「这条消息从哪来」的引用,JS 侧靠它 JSON.parse
+		// 出 messageId 去拉原始消息。覆盖成远端路径之后,回滚到 Node
+		// 时这条任务会静默退化成「用 source_msg_id 兜底」—— 不报错,
+		// 只是行为不对。JS 侧对 telegram 媒体也从不改写它。
+		//
 		// 上传成功才删本地。失败时保留 —— 排查和手工重试都要用。
 		//
 		// 不删的话容器磁盘(1GB)会被撑爆,而撑满之后是【所有】任务
