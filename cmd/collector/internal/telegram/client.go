@@ -75,6 +75,10 @@ type Client struct {
 	selfID    int64
 	username  string
 	readyOnce chan struct{}
+
+	// peers 缓存用户的 AccessHash —— 发私聊消息要用它构造 InputPeerUser。
+	// 用 InputPeerChat 会得到 400: CHAT_ID_INVALID。
+	peers *peerCache
 }
 
 // New 构造客户端。此时不连接。
@@ -97,6 +101,7 @@ func New(cfg Config) (*Client, error) {
 	c := &Client{
 		log:       cfg.Log,
 		readyOnce: make(chan struct{}),
+		peers:     newPeerCache(),
 	}
 	c.tg = telegram.NewClient(cfg.APIID, cfg.APIHash, telegram.Options{
 		SessionStorage: storage,
@@ -154,11 +159,15 @@ func (c *Client) dispatch(h MessageHandler) telegram.UpdateHandlerFunc {
 			c.emit(ctx, h, v.Update, int(v.Date))
 			return nil
 		case *tg.Updates:
+			// 容器里带着 Users —— 顺手记下 AccessHash,后面发消息要用。
+			// 这条路径是免费的:消息本来就带过来,不额外花 RPC。
+			c.peers.store(v.Users)
 			for _, uu := range v.Updates {
 				c.emit(ctx, h, uu, int(v.Date))
 			}
 			return nil
 		case *tg.UpdatesCombined:
+			c.peers.store(v.Users)
 			for _, uu := range v.Updates {
 				c.emit(ctx, h, uu, int(v.Date))
 			}
@@ -247,8 +256,12 @@ func (c *Client) SelfID() int64 { return c.selfID }
 // 不自己生成 RandomID —— gotd 在 RandomID==0 时会用 RandInt64 生成,
 // 自己造反而可能和它的实现不一致。
 func (c *Client) SendMessage(ctx context.Context, chatID int64, text string) error {
+	peer, err := c.peerFor(ctx, chatID)
+	if err != nil {
+		return err
+	}
 	req := &tg.MessagesSendMessageRequest{
-		Peer:    &tg.InputPeerChat{ChatID: chatID},
+		Peer:    peer,
 		Message: text,
 	}
 	if err := c.tg.SendMessage(ctx, req); err != nil {
@@ -262,11 +275,15 @@ func (c *Client) SendMessage(ctx context.Context, chatID int64, text string) err
 // gotd 没有这个便捷方法,直接 Invoke。返回值里的 MessageClass
 // 可能是 nil(消息被删了),所以只看错误码。
 func (c *Client) EditMessage(ctx context.Context, chatID int64, msgID int, text string) error {
+	peer, err := c.peerFor(ctx, chatID)
+	if err != nil {
+		return err
+	}
 	// output 用具体类型:Invoke 的签名是 bin.Decoder,
 	// 而 MessagesAffectedMessagesClass 是接口,不是 bin.Decoder。
 	var result tg.MessagesAffectedMessages
-	err := c.tg.Invoke(ctx, &tg.MessagesEditMessageRequest{
-		Peer:    &tg.InputPeerChat{ChatID: chatID},
+	err = c.tg.Invoke(ctx, &tg.MessagesEditMessageRequest{
+		Peer:    peer,
 		ID:      msgID,
 		Message: text,
 	}, &result)

@@ -57,12 +57,18 @@ func InlineKeyboard(log Logger, rows ...[]Button) tg.ReplyMarkupClass {
 
 // sendWithMarkup 发消息并带内联键盘。
 func (c *Client) sendWithMarkup(ctx context.Context, chatID int64, text string, markup tg.ReplyMarkupClass) error {
-	peer := &tg.InputPeerChat{ChatID: chatID}
-	return c.tg.SendMessage(ctx, &tg.MessagesSendMessageRequest{
+	peer, err := c.peerFor(ctx, chatID)
+	if err != nil {
+		return err
+	}
+	if err := c.tg.SendMessage(ctx, &tg.MessagesSendMessageRequest{
 		Peer:        peer,
 		Message:     text,
 		ReplyMarkup: markup,
-	})
+	}); err != nil {
+		return fmt.Errorf("telegram: 发送消息失败(chat=%d): %w", chatID, err)
+	}
+	return nil
 }
 
 // EditWithMarkup 改消息并更新键盘。
@@ -70,9 +76,12 @@ func (c *Client) sendWithMarkup(ctx context.Context, chatID int64, text string, 
 // 进度更新、翻页都走这里 —— 用户看到的是同一条消息在变,
 // 而不是刷出一堆新消息。
 func (c *Client) EditWithMarkup(ctx context.Context, chatID int64, msgID int, text string, markup tg.ReplyMarkupClass) error {
-	peer := &tg.InputPeerChat{ChatID: chatID}
+	peer, err := c.peerFor(ctx, chatID)
+	if err != nil {
+		return err
+	}
 	var result tg.MessagesAffectedMessages
-	err := c.tg.Invoke(ctx, &tg.MessagesEditMessageRequest{
+	err = c.tg.Invoke(ctx, &tg.MessagesEditMessageRequest{
 		Peer:        peer,
 		ID:          msgID,
 		Message:     text,
