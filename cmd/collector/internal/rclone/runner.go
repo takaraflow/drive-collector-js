@@ -171,8 +171,15 @@ func (r *Runner) Run(ctx context.Context, cfg Config, args []string, progress Pr
 		return entries, fmt.Errorf("rclone: %w", ctxErr)
 	}
 	if waitErr != nil {
+		// 把 scanner 自己的错误也带上 —— 读流失败时 entries/raw 都是空的,
+		// 于是报「没输出任何可解析的错误」,而真实原因是「我们没读到」。
+		// 这两者排查方向完全不同,不能混成一句话。
+		detail := summarizeErrors(entries, rawLines)
+		if scanErr != nil {
+			detail = fmt.Sprintf("%s(读取输出时出错: %v)", detail, scanErr)
+		}
 		return entries, fmt.Errorf("rclone: 执行失败(退出码 %d): %s",
-			cmd.ProcessState.ExitCode(), summarizeErrors(entries, rawLines))
+			cmd.ProcessState.ExitCode(), detail)
 	}
 	return entries, scanErr
 }
@@ -214,6 +221,19 @@ func scanLogs(r io.Reader, progress ProgressFunc) (entries []LogEntry, raw []str
 	return entries, raw, scanner.Err()
 }
 
+// isErrorLevel 判断 rclone 的日志等级是否代表失败。
+//
+// rclone 用的等级比想象的多:除了 error 还有 critical 和 fatal。
+// 启动阶段的失败(连不上后端、配置解析不了)报的是 critical ——
+// 只认 error 会把这些漏掉,而它们恰恰是最需要看原因的。
+func isErrorLevel(level string) bool {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "error", "critical", "fatal", "panic":
+		return true
+	}
+	return false
+}
+
 // summarizeErrors 从日志里提炼失败原因。
 //
 // raw 是非 JSON 行 —— 只有在 JSON 里找不到任何错误时才回头看它们。
@@ -222,7 +242,11 @@ func scanLogs(r io.Reader, progress ProgressFunc) (entries []LogEntry, raw []str
 func summarizeErrors(entries []LogEntry, raw []string) string {
 	var errs []string
 	for _, e := range entries {
-		if e.Level == "error" || e.Error != "" {
+		// critical / fatal 也算 —— rclone 在【启动阶段】失败(连不上
+		// 后端、配置解析不了)时用的是 "critical",不是 "error"。
+		// 只认 error 的话这类失败会滑过去,只剩「无错误详情」,
+		// 而那恰恰是最需要看原因的一类。
+		if isErrorLevel(e.Level) || e.Error != "" {
 			msg := e.Error
 			if msg == "" {
 				msg = e.Msg

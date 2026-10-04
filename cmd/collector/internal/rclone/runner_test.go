@@ -316,6 +316,29 @@ exit 1`)
 	}
 }
 
+// TestCriticalLevelIsSurfaced rclone 的 critical 等级也是错误。
+//
+// 实测(真 rclone v1.75.1):
+//
+//	{"level":"critical","msg":"Failed to create file system for ...:
+//	 couldn't decrypt password: base64 decode failed ... illegal base64 data"}
+//
+// 启动阶段的失败(连不上后端、配置解析不了)报的是 critical,不是 error。
+// 只认 error 的话这类失败会滑过去,只剩「无错误详情」—— 而那恰恰是
+// 最需要看原因的一类。
+func TestCriticalLevelIsSurfaced(t *testing.T) {
+	bin := fakeRclone(t, `echo '{"level":"critical","msg":"Failed to create file system for \":protondrive,u:p:bot\": couldn'"'"'t decrypt password"}' >&2; exit 1`)
+
+	_, err := quietRunner(bin).Run(context.Background(), Config{Timeout: 5 * time.Second},
+		[]string{"mkdir", "conn:path"}, nil)
+	if err == nil {
+		t.Fatal("非零退出应报错")
+	}
+	if !strings.Contains(err.Error(), "couldn't decrypt password") {
+		t.Errorf("critical 等级的错误被漏掉了:%q", err.Error())
+	}
+}
+
 // TestStdoutErrorIsSurfaced stdout 上的错误也必须被看到。
 //
 // rclone 的致命错误有时走 stdout(尤其启动阶段的失败,比如配置解析)。
