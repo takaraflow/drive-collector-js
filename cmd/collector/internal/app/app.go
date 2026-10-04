@@ -382,6 +382,14 @@ func (a *App) onUpdate(ctx context.Context, u tgclient.Update) error {
 			return nil
 		}
 
+		// 到达日志。级别是 Info 而不是 Debug —— 排「发消息没反应」时,
+		// 「消息到了但后续分支出错」和「消息压根没到」在日志里必须能分开,
+		// Debug 级在生产默认不可见,等于没记。
+		a.log.Info("收到消息",
+			"msgId", msg.ID, "chatId", msg.ChatID,
+			"senderId", msg.SenderID, "hasMedia", msg.HasMedia,
+			"text", truncate(msg.Text, 64))
+
 		// 命令优先:带媒体的消息里也可能带 / 开头的内容,
 		// 但命令是用户明确的意图,不能被当成文件投递。
 		if strings.HasPrefix(strings.TrimSpace(msg.Text), "/") {
@@ -410,15 +418,22 @@ func (a *App) onUpdate(ctx context.Context, u tgclient.Update) error {
 // routeCommand 把命令交给 Dispatcher。
 func (a *App) routeCommand(ctx context.Context, msg messageInfo) error {
 	if a.dispatcher == nil {
-		a.log.Debug("命令被忽略:dispatcher 未装配", "text", msg.Text)
+		// dispatcher 没装配是配置事故,不是「没什么可做」——
+		// 之前记成 Debug,而生产是 Info 级,于是「机器人装死」和
+		// 「消息没到」在日志里完全一样。
+		a.log.Error("命令被丢弃:dispatcher 未装配", "text", msg.Text)
 		return nil
 	}
-	_, err := a.dispatcher.HandleText(ctx, msg.ChatID, fmt.Sprintf("%d", msg.SenderID), msg.Text)
+	handled, err := a.dispatcher.HandleText(ctx, msg.ChatID, fmt.Sprintf("%d", msg.SenderID), msg.Text)
 	if err != nil {
 		// 命令处理失败不该让客户端重连 —— 否则一条坏命令会变成
 		// 断线重连风暴。记日志就好。
 		a.log.Error("命令处理失败", "text", msg.Text, "err", err)
+		return nil
 	}
+	// 成功也要记。用户报「发消息没反应」时,这条是唯一能区分
+	// 「命令跑完了但用户没收到」和「命令根本没跑」的证据。
+	a.log.Info("命令已处理", "text", msg.Text, "handled", handled)
 	return nil
 }
 

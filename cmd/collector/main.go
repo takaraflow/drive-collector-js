@@ -33,6 +33,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -56,7 +57,7 @@ func main() {
 		return
 	}
 
-	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel()}))
 
 	mode := os.Getenv("RUN_MODE")
 	if mode == "" {
@@ -150,6 +151,24 @@ func envInt(key string, def int) int {
 		}
 	}
 	return def
+}
+
+// logLevel 读 LOG_LEVEL,默认 info。
+//
+// 为什么要有这个开关:排障全靠 Debug 日志 —— 「收到 update 但没认出来」
+// 和「压根没收到」在 Info 级下长得一模一样,线上出问题时只能靠猜。
+// 生产默认仍是 info(不淹日志),需要时把环境变量调成 debug 即可。
+func logLevel() slog.Level {
+	switch strings.ToLower(os.Getenv("LOG_LEVEL")) {
+	case "debug":
+		return slog.LevelDebug
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
 }
 
 // runWorker 启动完整的 Go worker:连 Telegram、建任务、下载、上传。
