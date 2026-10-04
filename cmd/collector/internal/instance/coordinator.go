@@ -32,6 +32,10 @@ const (
 	// instanceTimeout 与 JS 侧 InstanceRepository.findAllActive 一致(45s)。
 	// 超过这个时间没心跳的实例不算活跃,它的锁可以被抢占。
 	instanceTimeout = 45 * time.Second
+
+	// heartbeatEvery 是实例心跳间隔。TTL(instanceTimeout*2=90s)的 1/6,
+	// 留足重试余量:单次心跳失败不该让实例键过期。
+	heartbeatEvery = 15 * time.Second
 )
 
 // LockValue 是锁在 Redis 里的 JSON 结构。
@@ -67,6 +71,11 @@ type Coordinator struct {
 	log    *slog.Logger
 	now    func() time.Time
 	region string
+
+	// heartbeatEvery 是实例心跳间隔。默认 15s,测试里缩短以验证
+	// 「心跳真的在持续刷新」—— 这个行为出问题时是静默的(实例键
+	// 过期消失,但锁还在续),只有真跑过几次心跳才测得出来。
+	heartbeatEvery time.Duration
 }
 
 // NewCoordinator 构造协调器。
@@ -88,12 +97,13 @@ func NewCoordinator(rdb *redis.Client, id, publicURL string, log *slog.Logger) *
 		region = "unknown"
 	}
 	return &Coordinator{
-		redis:  rdb,
-		id:     id,
-		url:    publicURL,
-		log:    log,
-		now:    time.Now,
-		region: region,
+		redis:          rdb,
+		id:             id,
+		url:            publicURL,
+		log:            log,
+		now:            time.Now,
+		region:         region,
+		heartbeatEvery: heartbeatEvery,
 	}
 }
 
@@ -112,9 +122,24 @@ func (c *Coordinator) Register(ctx context.Context) error {
 		return err
 	}
 
-	ticker := time.NewTicker(15 * time.Second)
-	defer ticker.Stop()
+	// ticker 必须由这个 goroutine 自己拥有。
+	//
+	// 曾经写成 `ticker := time.NewTicker(...); defer ticker.Stop()` 再起
+	// goroutine —— 但 Register 是【非阻塞】的:它一 return,defer 就执行,
+	// ticker 当场停摆,channel 再不发信号,心跳 goroutine 永久卡在
+	// <-ticker.C 上。结果是 registerOnce 一生只跑启动那一次,实例键
+	// 90 秒后过期消失,而 lock:telegram_client 还在续租 ——
+	// 「锁在续、实例没了」这个自相矛盾的现象就是这么来的。
+	//
+	// (RunLockHeartbeat 里同样的写法没问题,因为那个函数【阻塞】在
+	// 循环里,defer 只在真正退出时才跑。差别就在这里。)
+	every := c.heartbeatEvery
+	if every <= 0 {
+		every = heartbeatEvery
+	}
 	go func() {
+		ticker := time.NewTicker(every)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
@@ -336,6 +361,9 @@ func (c *Coordinator) RenewTelegramLock(ctx context.Context) (bool, error) {
 // 失去锁时返回 error —— 调用方必须断开 Telegram 客户端。这是「切流量」
 // 的触发点:LB 下一��请求就打到新主人了。
 func (c *Coordinator) RunLockHeartbeat(ctx context.Context) error {
+	// 这里的 `defer ticker.Stop()` 是【对的】,别照 Register 的教训改它:
+	// 本函数阻塞在这个循环里,defer 只在真正退出时才执行。
+	// Register 之所以出过 bug,是因为它非阻塞 —— 一 return defer 就跑了。
 	ticker := time.NewTicker(lockRenewEvery)
 	defer ticker.Stop()
 	for {
