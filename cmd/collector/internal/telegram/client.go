@@ -173,7 +173,22 @@ func (c *Client) dispatch(h MessageHandler) telegram.UpdateHandlerFunc {
 			}
 			return nil
 		default:
-			c.log.Debug("未识别的 update 容器", "kind", u.TypeName())
+			// default 是「收到了但我不知道怎么处理」—— 恰恰最需要留痕,
+			// 静默丢弃会让消息凭空消失,而排查时看不出任何异常。
+			//
+			// 两个已知形态必须看得见:
+			//   UpdatesTooLong         服务端判定客户端落后太多,已丢弃部分 update
+			//   UpdateShortSentMessage 自己发出去的消息的回执
+			//                          (gotd 的 SendMessage 末尾会走回 processUpdates)
+			switch u.(type) {
+			case *tg.UpdatesTooLong:
+				c.log.Warn("收到 UpdatesTooLong —— 服务端已丢弃部分 update",
+					"hint", "客户端 pts 落后,后续消息会持续丢失直到重新同步")
+			case *tg.UpdateShortSentMessage:
+				c.log.Info("已发送消息的回执", "kind", u.TypeName())
+			default:
+				c.log.Debug("未识别的 update 容器", "kind", u.TypeName())
+			}
 			return nil
 		}
 	}
