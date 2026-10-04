@@ -132,6 +132,20 @@ func (f *fakeRclone) Upload(_ context.Context, _ rclone.Config, localPath, remot
 type fakeDrives struct {
 	drive *drive.Drive
 	err   error
+	// saved 记录写回的 config_data —— 收割 Proton session 的断言点。
+	saved     *drive.DriveConfig
+	savedErr  error
+	saveCalls int
+}
+
+func (f *fakeDrives) UpdateConfigData(_ context.Context, _, _ string, cfg drive.DriveConfig) error {
+	f.saveCalls++
+	if f.savedErr != nil {
+		return f.savedErr
+	}
+	c := cfg
+	f.saved = &c
+	return nil
 }
 
 func (f *fakeDrives) DefaultDrive(context.Context, string) (*drive.Drive, error) {

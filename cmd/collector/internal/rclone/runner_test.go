@@ -272,6 +272,50 @@ func TestResolveBinaryFallsBackWhenNoPath(t *testing.T) {
 	}
 }
 
+// TestPlainTextErrorIsSurfaced 纯文本错误必须出现在报错里。
+//
+// rclone 的致命错误有时走纯文本(不走 --use-json-log),而早期版本会
+// 直接丢弃非 JSON 行 —— 于是失败信息只剩「(无错误详情)」。生产上
+// 排查时等于什么都拿不到:明明有证据,被我们自己扔了。
+func TestPlainTextErrorIsSurfaced(t *testing.T) {
+	bin := fakeRclone(t, `echo "Failed to create directory: permission denied" >&2; exit 1`)
+
+	r := quietRunner(bin)
+	_, err := r.Run(context.Background(), Config{Timeout: 5 * time.Second},
+		[]string{"mkdir", "conn:path"}, nil)
+	if err == nil {
+		t.Fatal("非零退出应报错")
+	}
+	if !strings.Contains(err.Error(), "permission denied") {
+		t.Errorf("报错里没有 rclone 的原文 —— 诊断线索被丢了:%q", err.Error())
+	}
+	if strings.Contains(err.Error(), "无错误详情") {
+		t.Errorf("有纯文本证据却报「无错误详情」:%q", err.Error())
+	}
+}
+
+// TestJSONErrorStillWins JSON 里有结构化错误时,优先用它。
+//
+// 纯文本常常夹着进度条残留和 usage 提示,只在没有更好的东西时才用。
+func TestJSONErrorStillWins(t *testing.T) {
+	bin := fakeRclone(t, `echo "noise line one" >&2
+echo '{"level":"error","msg":"real reason","error":"Code=10013"}' >&2
+echo "noise line two" >&2
+exit 1`)
+
+	_, err := quietRunner(bin).Run(context.Background(), Config{Timeout: 5 * time.Second},
+		[]string{"copyto", "a", "b"}, nil)
+	if err == nil {
+		t.Fatal("应报错")
+	}
+	if !strings.Contains(err.Error(), "10013") {
+		t.Errorf("应优先用 JSON 里的结构化错误:%q", err.Error())
+	}
+	if strings.Contains(err.Error(), "noise") {
+		t.Errorf("不该把纯文本混进来:%q", err.Error())
+	}
+}
+
 // TestMissingBinaryIsAClearError 二进制不存在要给清楚的错误。
 func TestMissingBinaryIsAClearError(t *testing.T) {
 	r := &Runner{Binary: "/nonexistent/rclone", Env: []string{}}
