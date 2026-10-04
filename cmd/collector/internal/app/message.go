@@ -32,6 +32,13 @@ type messageInfo struct {
 	FileName    string
 	// Text 是消息文本 —— 命令路由要用它判断用户是不是在敲 /status。
 	Text string
+	// Out 标记这条消息是本账号自己发出的。
+	//
+	// 必须留着:bot 每次回复都会经 gotd 的 processUpdates 回灌一条
+	// Out=true 的合成消息(upconv.ShortSentMessage),不丢弃就会把
+	// 自己的回复当成用户投递 —— 带媒体的回复会再建一个任务,
+	// 而那条合成消息没有 peer,user_id 会是 0。
+	Out bool
 }
 
 // messageOf 从 update 里提取消息信息。
@@ -54,7 +61,7 @@ func fromMessage(m tg.MessageClass) (messageInfo, bool) {
 		// 空消息没有可提取的信息
 		return messageInfo{}, false
 	}
-	info := messageInfo{ID: msg.GetID(), SourceMsgID: int64(msg.GetID())}
+	info := messageInfo{ID: msg.GetID(), SourceMsgID: int64(msg.GetID()), Out: msg.GetOut()}
 	if from, ok := msg.GetFromID(); ok {
 		if user, isUser := from.(*tg.PeerUser); isUser {
 			info.SenderID = user.GetUserID()
