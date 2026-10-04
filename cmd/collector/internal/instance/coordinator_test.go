@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -275,5 +276,130 @@ func TestHasLockReportsOwnership(t *testing.T) {
 	}
 	if heldByB {
 		t.Error("B 不该认为自己持锁")
+	}
+}
+
+// TestRegisterKeepsHeartbeatAlive 心跳必须【持续】刷新实例键。
+//
+// 这是生产事故的回归测试:Register 里写了
+//
+//	ticker := time.NewTicker(15 * time.Second)
+//	defer ticker.Stop()        // ← 函数一返回就停
+//	go func(){ <-ticker.C ... }()
+//	return nil                 // ← 到这里 ticker 已经死了
+//
+// ticker 被 defer 停掉后,那个 channel 再也不会发信号,心跳 goroutine
+// 永远阻塞在 <-ticker.C 上。于是 registerOnce 一辈子只跑启动那一次,
+// 实例键 90 秒后过期消失 —— 而 lock:telegram_client 仍在续租。
+//
+// 症状极难发现:服务看起来正常(锁在续),但 instance:<id> 不见了。
+// 这正是生产上观察到的现象。
+//
+// 修法:ticker 必须由 goroutine 自己拥有并在退出时 Stop,
+// 不能挂在 Register 上 defer —— Register 是【非阻塞】的。
+func TestRegisterKeepsHeartbeatAlive(t *testing.T) {
+	c, mr := newTest(t, "go-1", "https://go.example.com")
+	c.heartbeatEvery = 5 * time.Millisecond // 别让测试等 15 秒
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := c.Register(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	const key = "instance:go-1"
+	// 先确认启动时写进去了
+	if !mr.Exists(key) {
+		t.Fatalf("注册后 %s 应存在", key)
+	}
+
+	// 让键过期。心跳如果活着,会把它写回来。
+	mr.FastForward(instanceTimeout * 2)
+	if mr.Exists(key) {
+		t.Fatal("测试前提有误:键应该已过期")
+	}
+
+	// 等几轮心跳周期。
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if mr.Exists(key) {
+			return // 心跳把键写回来了 —— 正确
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	t.Fatalf("心跳已死:实例键 %s 过期后再也没被写回。"+
+		"registerOnce 只会在启动时跑一次 —— 检查 ticker 是不是被 defer Stop 了", key)
+}
+
+// TestRegisterHeartbeatRefreshesTimestamp 心跳要更新 lastHeartbeat。
+//
+// 光看「键存在」还不够:如果每次写的是同一份旧 payload,
+// Node 会因为 lastHeartbeat 太旧而判定实例已下线,进而抢占它的锁。
+func TestRegisterHeartbeatRefreshesTimestamp(t *testing.T) {
+	c, mr := newTest(t, "go-1", "https://go.example.com")
+	c.heartbeatEvery = 5 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// 假时钟必须用原子量:心跳 goroutine 在另一条协程上读它,
+	// 直接改一个普通变量会被 -race 判定为数据竞争。
+	// (生产里 c.now 构造后就不再写,不存在这个问题。)
+	var clock atomic.Int64
+	clock.Store(time.Unix(1791100000, 0).UnixNano())
+	c.now = func() time.Time { return time.Unix(0, clock.Load()) }
+
+	if err := c.Register(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	read := func() InstanceInfo {
+		raw, err := mr.Get("instance:go-1")
+		if err != nil {
+			t.Fatalf("读实例键失败:%v", err)
+		}
+		var info InstanceInfo
+		if err := json.Unmarshal([]byte(raw), &info); err != nil {
+			t.Fatal(err)
+		}
+		return info
+	}
+
+	first := read().LastHeartbeat
+
+	// 推进时钟,等心跳跑一轮。
+	clock.Store(time.Unix(1791100000+30, 0).UnixNano())
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if read().LastHeartbeat > first {
+			return // 心跳推进了时间戳 —— 正确
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	t.Errorf("心跳没刷新 lastHeartbeat(仍是 %d)—— "+
+		"Node 会据此判定本实例已下线并抢占锁", first)
+}
+
+// TestRegisterDoesNotDeregisterWhileCtxAlive 只要 ctx 没结束,实例键就得在。
+//
+// 这是「非阻塞 Register」的另一面:Register 返回后调用方继续跑,
+// 心跳必须一直活着 —— 而不是随 Register 的返回一起结束。
+func TestRegisterDoesNotDeregisterWhileCtxAlive(t *testing.T) {
+	c, mr := newTest(t, "go-1", "https://go.example.com")
+	c.heartbeatEvery = 5 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := c.Register(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// 模拟「调用方继续干别的事」——睡够好几轮心跳周期。
+	mr.FastForward(instanceTimeout * 2)
+	time.Sleep(100 * time.Millisecond)
+
+	if !mr.Exists("instance:go-1") {
+		t.Error("ctx 还活着,实例键不该消失")
 	}
 }
