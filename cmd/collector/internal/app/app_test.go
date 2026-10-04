@@ -12,6 +12,7 @@ import (
 
 	"github.com/gotd/td/tg"
 
+	tgclient "github.com/youngsx/drive-collector/cmd/collector/internal/telegram"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/tgsession"
 )
 
@@ -210,6 +211,9 @@ func TestFromMessageDoesNotInferForOutgoing(t *testing.T) {
 	if info.SenderID != 0 {
 		t.Errorf("发出消息的 SenderID = %d,期望 0(不能兜底)", info.SenderID)
 	}
+	if !info.Out {
+		t.Error("Out 标志丢失 —— onUpdate 靠它丢弃自己的回声,丢了就会当成用户消息")
+	}
 }
 
 // TestFromMessagePrefersExplicitFromID 有 from_id 时必须用它,不能被兜底覆盖。
@@ -253,6 +257,113 @@ func TestNullableString(t *testing.T) {
 	}
 	if !nullableString("x").Valid {
 		t.Error("非空串应是有效值")
+	}
+}
+
+// newEchoApp 造一个只够测 onUpdate 的 App。
+//
+// tg 刻意给零值(而不是 nil):SelfID() 返回 0,模拟「客户端还没连上」——
+// 那正是 createTaskFrom 里的 SelfID 守卫失效的时刻,只有 Out 判据兜得住。
+func newEchoApp(buf *strings.Builder, repo *fakeRepo) *App {
+	return &App{
+		log: slog.New(slog.NewTextHandler(buf,
+			&slog.HandlerOptions{Level: slog.LevelDebug})),
+		repo:    repo,
+		pending: make(chan string, pendingQueueSize),
+		tg:      &tgclient.Client{},
+	}
+}
+
+// TestOnUpdateDropsSelfEcho 自己发出的消息不能当成用户消息。
+//
+// 生产现场:每次 bot 回复完,日志里紧跟一条
+// 「收到消息 msgId:4572 chatId:0 senderId:0 hasMedia:false text:""」。
+//
+// 这不是用户发的,是回声:gotd 的 SendMessage 结尾就是
+// processUpdates(telegram/send_message.go),服务端返回的
+// UpdateShortSentMessage 被 upconv 转成一条 Out=true、没有 PeerID
+// 的合成 UpdateNewMessage,又绕回了 onUpdate。
+//
+// 危害不只是噪音:合成消息可以带媒体,那时就会用 user_id=0 建任务,
+// 文件下载完因为「用户 0 没有绑定网盘」永远传不上去 —— 而日志里一切正常。
+//
+// JS 侧在入口丢弃(MessageHandler.handleEvent 的 message.out === true),
+// Go 侧之前照单全收。
+func TestOnUpdateDropsSelfEcho(t *testing.T) {
+	cases := []struct {
+		name  string
+		media bool
+	}{
+		{"回声带媒体(会建 user_id=0 的任务)", true},
+		{"回声是纯文本(污染到达日志)", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf strings.Builder
+			repo := &fakeRepo{}
+			a := newEchoApp(&buf, repo)
+
+			// 合成消息的真实形态:有 ID、有 Out,没有 PeerID。
+			msg := &tg.Message{ID: 4572}
+			msg.SetOut(true)
+			if tc.media {
+				msg.SetMedia(&tg.MessageMediaDocument{
+					Document: &tg.Document{ID: 1, Size: 10},
+				})
+			}
+			u := tgclient.Update{
+				Kind: tgclient.KindNewMessage,
+				Raw:  &tg.UpdateNewMessage{Message: msg},
+			}
+
+			if err := a.onUpdate(context.Background(), u); err != nil {
+				t.Fatalf("不该报错:%v", err)
+			}
+			if len(repo.created) != 0 {
+				t.Errorf("回声建了 %d 个任务:%+v —— user_id 会是 0,文件永远传不上去",
+					len(repo.created), repo.created)
+			}
+			if out := buf.String(); strings.Contains(out, "收到消息") {
+				t.Errorf("回声被记成「收到消息」:%q —— 排查时会以为用户在发消息", out)
+			}
+		})
+	}
+}
+
+// TestOnUpdateKeepsIncomingMessages 守卫不能误伤正常消息。
+//
+// 上面那条守卫加在入口,最容易犯的错是顺手写成「有 Out 字段就丢」——
+// 而 Out 是 flag 位,正常消息里根本没有这个字段。这里用一个和回声
+// 同形态(无 from_id、私聊)的真实消息守住:它必须照常建任务。
+func TestOnUpdateKeepsIncomingMessages(t *testing.T) {
+	var buf strings.Builder
+	repo := &fakeRepo{}
+	a := newEchoApp(&buf, repo)
+
+	msg := &tg.Message{
+		ID:     4571,
+		PeerID: &tg.PeerUser{UserID: 7428626313},
+	}
+	msg.SetMedia(&tg.MessageMediaDocument{
+		Document: &tg.Document{ID: 7, Size: 10},
+	})
+	u := tgclient.Update{
+		Kind: tgclient.KindNewMessage,
+		Raw:  &tg.UpdateNewMessage{Message: msg},
+	}
+
+	if err := a.onUpdate(context.Background(), u); err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.created) != 1 {
+		t.Fatalf("用户消息应建 1 个任务,实际 %d", len(repo.created))
+	}
+	if got := repo.created[0].UserID; got != "7428626313" {
+		t.Errorf("user_id = %q,期望 7428626313 —— 写成 0 会让上传静默失败", got)
+	}
+	if !strings.Contains(buf.String(), "收到消息") {
+		t.Error("用户消息必须留到达日志 —— 否则「用户在不在用」看不见")
 	}
 }
 

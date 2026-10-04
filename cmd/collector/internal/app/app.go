@@ -382,6 +382,26 @@ func (a *App) onUpdate(ctx context.Context, u tgclient.Update) error {
 			return nil
 		}
 
+		// 自己发出的消息不是用户投递,必须在任何处理之前丢弃 ——
+		// 包括那条「收到消息」日志。
+		//
+		// gotd 发消息的收尾就是 processUpdates(telegram/send_message.go),
+		// 所以 bot 每次回复都会有一条 Out=true 的合成消息绕回这里
+		// (upconv.ShortSentMessage 只填 ID/Date/Out,没有 PeerID)。
+		// 生产现场就是日志里紧跟「命令已处理」的一条
+		// 「收到消息 chatId:0 senderId:0 text:""」。
+		//
+		// 现在它只是噪音,但合成消息可以带媒体 —— 那时就会用
+		// user_id=0 建任务,文件下载完因为「用户 0 没有绑定网盘」
+		// 永远传不上去,而日志里一切正常。
+		//
+		// JS 侧同样在入口丢弃(MessageHandler.handleEvent 的
+		// message.out === true),这里保持一致。
+		if msg.Out {
+			a.log.Debug("跳过自己发出的消息", "msgId", msg.ID)
+			return nil
+		}
+
 		// 到达日志。级别是 Info 而不是 Debug —— 排「发消息没反应」时,
 		// 「消息到了但后续分支出错」和「消息压根没到」在日志里必须能分开,
 		// Debug 级在生产默认不可见,等于没记。
