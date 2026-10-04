@@ -189,7 +189,6 @@ EOF`)
 	}
 }
 
-// TestMissingBinaryIsAClearError 二进制不存在要给清楚的错误。
 // TestRemoteTargetStripsLeadingSlash 是「上传必失败」的回归测试。
 //
 // 连接串形式的 remote 后面直接跟路径,路径【不能】以 / 开头 —— 带斜杠
@@ -273,6 +272,7 @@ func TestResolveBinaryFallsBackWhenNoPath(t *testing.T) {
 	}
 }
 
+// TestMissingBinaryIsAClearError 二进制不存在要给清楚的错误。
 func TestMissingBinaryIsAClearError(t *testing.T) {
 	r := &Runner{Binary: "/nonexistent/rclone", Env: []string{}}
 	_, err := r.Run(context.Background(), Config{Timeout: time.Second},
