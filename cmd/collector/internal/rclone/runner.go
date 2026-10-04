@@ -197,22 +197,59 @@ func summarizeErrors(entries []LogEntry) string {
 	return strings.Join(errs, "; ")
 }
 
+// RemoteTarget 把连接串和路径拼成 rclone 认识的完整目标。
+//
+// 连接串形式的 remote(`:backend,param=value:`)后面【直接跟路径】,
+// 路径不能以 / 开头 —— 带斜杠时 rclone 把整串当成【本地绝对路径】,
+// 报出来的错是「mkdir /X: permission denied」,看着像网盘权限问题,
+// 实际是路径根本没指向网盘。
+//
+// 生产实测:上传一直失败在 mkdir,而下载完全正常 —— 因为下载用的是
+// message 里的 location,不经过这条路径。
+//
+// 拼接规则与 JS 侧 _joinRemotePath 逐字对应(见 src/services/rclone.js):
+// 段的前后斜杠都剥掉,空段丢弃,连接串本身以 ':' 或 '/' 结尾时不补分隔符。
+func RemoteTarget(connection string, segments ...string) string {
+	base := strings.TrimSpace(connection)
+
+	cleaned := make([]string, 0, len(segments))
+	for _, s := range segments {
+		s = strings.Trim(s, "/")
+		if s != "" {
+			cleaned = append(cleaned, s)
+		}
+	}
+	if len(cleaned) == 0 {
+		return base
+	}
+	suffix := strings.Join(cleaned, "/")
+	if strings.HasSuffix(base, ":") || strings.HasSuffix(base, "/") {
+		return base + suffix
+	}
+	return base + "/" + suffix
+}
+
 // Upload 把本地文件传到 remote 路径。
+//
+// remotePath 是【不含连接串】的路径 —— 连接串由 cfg.Connection 提供,
+// 在这里拼。让调用方拼的话,每个调用点都要记得拼一次,漏一个就是
+// 「路径被当成本地目录」这种极难定位的故障。
 func (r *Runner) Upload(ctx context.Context, cfg Config, localPath, remotePath string, progress ProgressFunc) error {
-	_, err := r.Run(ctx, cfg, []string{"copyto", localPath, remotePath, "--progress"}, progress)
+	target := RemoteTarget(cfg.Connection, remotePath)
+	_, err := r.Run(ctx, cfg, []string{"copyto", localPath, target, "--progress"}, progress)
 	return err
 }
 
 // Mkdir 确保远端目录存在。
 func (r *Runner) Mkdir(ctx context.Context, cfg Config, remotePath string) error {
-	_, err := r.Run(ctx, cfg, []string{"mkdir", remotePath}, nil)
+	_, err := r.Run(ctx, cfg, []string{"mkdir", RemoteTarget(cfg.Connection, remotePath)}, nil)
 	return err
 }
 
 // ListRemote 列远端目录,用于确认上传是否真的落地。
 func (r *Runner) ListRemote(ctx context.Context, cfg Config, remotePath string) ([]string, error) {
 	entries, err := r.Run(ctx, Config{Connection: cfg.Connection, Timeout: 30 * time.Second},
-		[]string{"lsjson", cfg.Connection + remotePath, "--max-depth", "1"}, nil)
+		[]string{"lsjson", RemoteTarget(cfg.Connection, remotePath), "--max-depth", "1"}, nil)
 	if err != nil {
 		return nil, err
 	}

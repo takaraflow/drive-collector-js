@@ -54,7 +54,6 @@ type TaskRepo interface {
 	FindStalledTasks(ctx context.Context, timeout time.Duration) ([]store.Task, error)
 	Transition(ctx context.Context, taskID string, ev contract.TaskEvent, errMsg *string) (store.TransitionResult, error)
 	UpdateFileMetadata(ctx context.Context, taskID, fileName string, fileSize int64) error
-	UpdateSourceRef(ctx context.Context, taskID, sourceRef string) error
 }
 
 // DriveRepo 是 upload() 需要的网盘仓储能力。

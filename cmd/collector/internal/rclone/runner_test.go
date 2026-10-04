@@ -189,7 +189,65 @@ EOF`)
 	}
 }
 
-// TestMissingBinaryIsAClearError 二进制不存在要给清楚的错误。
+// TestRemoteTargetStripsLeadingSlash 是「上传必失败」的回归测试。
+//
+// 连接串形式的 remote 后面直接跟路径,路径【不能】以 / 开头 —— 带斜杠
+// 时 rclone 把整串当成本地绝对路径,报「mkdir /X: permission denied」,
+// 看着像网盘权限问题,实际是路径根本没指向网盘。
+//
+// 生产实测:上传一直卡在 mkdir,而下载完全正常(下载不经过这条路径)。
+func TestRemoteTargetStripsLeadingSlash(t *testing.T) {
+	conn := ":protondrive,username=u,password=p:"
+
+	got := RemoteTarget(conn, "/DriveCollectorBot")
+	// 关键:连接串闭合的 ':' 后面直接跟路径名,不能有 '/'
+	if got != conn+"DriveCollectorBot" {
+		t.Errorf("RemoteTarget = %q,期望 %q", got, conn+"DriveCollectorBot")
+	}
+	if strings.Contains(got, ":/") {
+		t.Errorf("路径以 / 开头 —— rclone 会当成【本地】路径,报 permission denied")
+	}
+}
+
+// TestRemoteTargetJoinsSegments 多段拼接与 JS 侧 _joinRemotePath 一致。
+func TestRemoteTargetJoinsSegments(t *testing.T) {
+	conn := ":mega,user=u:"
+
+	for _, c := range []struct {
+		segs []string
+		want string
+	}{
+		{[]string{"/a", "b.txt"}, conn + "a/b.txt"},
+		{[]string{"a/", "/b.txt"}, conn + "a/b.txt"},
+		{[]string{"/a/b/", "//c//"}, conn + "a/b/c"},
+		{[]string{"/only"}, conn + "only"},
+		// 空段被丢弃 —— 否则会拼出 "a//b" 这种路径
+		{[]string{"", "/a", "", "b"}, conn + "a/b"},
+		// 全空时原样返回连接串(指向网盘根)
+		{[]string{"", "/"}, conn},
+		{nil, conn},
+	} {
+		if got := RemoteTarget(conn, c.segs...); got != c.want {
+			t.Errorf("RemoteTarget(%v) = %q,期望 %q", c.segs, got, c.want)
+		}
+	}
+}
+
+// TestRemoteTargetKeepsBackendColon 连接串以 ':' 结尾时不能再补 '/'。
+//
+// 补了的话变成 ":protondrive...:/path",rclone 解析出的 remote 名就是空
+// —— 又一个「看着像网盘问题」的失败。
+func TestRemoteTargetKeepsBackendColon(t *testing.T) {
+	conn := ":protondrive,a=b:"
+	got := RemoteTarget(conn, "dir", "f.bin")
+	if !strings.HasPrefix(got, conn) {
+		t.Errorf("连接串被改动了:%q", got)
+	}
+	if strings.HasPrefix(strings.TrimPrefix(got, conn), "/") {
+		t.Errorf("闭合 ':' 之后不该再有 '/':%q", got)
+	}
+}
+
 // TestResolveBinaryPrefersExplicitEnv 显式指定优先。
 func TestResolveBinaryPrefersExplicitEnv(t *testing.T) {
 	t.Setenv("RCLONE_BINARY", "/custom/rclone")
@@ -214,6 +272,7 @@ func TestResolveBinaryFallsBackWhenNoPath(t *testing.T) {
 	}
 }
 
+// TestMissingBinaryIsAClearError 二进制不存在要给清楚的错误。
 func TestMissingBinaryIsAClearError(t *testing.T) {
 	r := &Runner{Binary: "/nonexistent/rclone", Env: []string{}}
 	_, err := r.Run(context.Background(), Config{Timeout: time.Second},
