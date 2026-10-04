@@ -136,19 +136,37 @@ func (r *Runner) Run(ctx context.Context, cfg Config, args []string, progress Pr
 		return nil
 	}
 
-	stderr, err := cmd.StderrPipe()
+	// stdout 和 stderr 都接进同一个管道。
+	//
+	// 不能只接 stderr:rclone 的致命错误有时走 stdout(尤其启动阶段
+	// 的失败,比如配置解析),而早期版本把 stdout 丢进 io.Discard ——
+	// 于是失败信息是「rclone 没输出任何可解析的错误」,生产上排查时
+	// 等于什么都拿不到。
+	//
+	// 用 os.Pipe 而不是 io.Pipe:exec 会为每个 writer 起一个拷贝
+	// goroutine,而 io.Pipe 的写端被父进程关掉后那些 goroutine 会
+	// 写失败,Wait 于是返回一个「退出码 0 却报错」的假失败。
+	// os.Pipe 的写端会被 dup 进子进程,父进程关掉自己的副本后,
+	// 子进程退出时写端自然全关,读端拿到 EOF。
+	pr, pw, err := os.Pipe()
 	if err != nil {
-		return nil, fmt.Errorf("rclone: 取 stderr 失败: %w", err)
+		return nil, fmt.Errorf("rclone: 建管道失败: %w", err)
 	}
-	cmd.Stdout = io.Discard
+	cmd.Stdout = pw
+	cmd.Stderr = pw
 
 	if err := cmd.Start(); err != nil {
+		_ = pw.Close()
+		_ = pr.Close()
 		return nil, fmt.Errorf("rclone: 启动失败(%s): %w", r.Binary, err)
 	}
+	// 父进程必须关掉写端副本,否则 pr 永远等不到 EOF。
+	_ = pw.Close()
 
-	entries, rawLines, scanErr := scanLogs(stderr, progress)
+	entries, rawLines, scanErr := scanLogs(pr, progress)
 
 	waitErr := cmd.Wait()
+	_ = pr.Close()
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return entries, fmt.Errorf("rclone: %w", ctxErr)
 	}
