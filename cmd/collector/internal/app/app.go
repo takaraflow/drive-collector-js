@@ -529,31 +529,47 @@ func (a *App) upload(ctx context.Context, t store.Task) error {
 		return fmt.Errorf("用户 %s 没有绑定网盘", t.UserID)
 	}
 
-	conn, err := drive.ToConnectionString(d)
-	if err != nil {
-		return err
-	}
-
-	cfg := rclone.Config{Connection: conn, Timeout: 6 * time.Hour}
 	// 用户在 UI 里设的目录优先,退回全局默认。
 	//
-	// 传的是【不含连接串】的路径 —— 拼接由 rclone 层做(见 RemoteTarget),
+	// 传的是【不含连接串】的路径 —— 拼接由 rclone 层做(见 Config.target),
 	// 在调用方拼的话每个调用点都要记得拼一次,漏一个就会把网盘路径
 	// 当成本地目录,报出来却是「permission denied」那种误导性错误。
 	remoteBase := d.RemotePath(a.cfg.RemoteBase)
 	remote := path.Join(remoteBase, t.FileName.String)
 
-	if err := a.rclone.Mkdir(ctx, cfg, remoteBase); err != nil {
-		return fmt.Errorf("创建远端目录失败: %w", err)
-	}
-
 	// Proton 的 session 操作必须串行 —— refresh_token 是一次性的,
 	// 并发用会导致 Code=10013 账号永久砖化(记忆里的 proton-refresh-token-race)。
+	//
+	// 锁包住【整段】:建 runtime、mkdir、上传、收割、写回。任何一步漏在
+	// 锁外,两个同账号任务就能同时拿着同一个 refresh_token 去认证。
 	key := drive.Key(drive.Type(d.Type), t.UserID)
 	return a.locks.WithSession(ctx, key, func() error {
+		cfg, harvest, err := a.buildRuntime(ctx, d)
+		if err != nil {
+			return err
+		}
+
+		if err := a.rclone.Mkdir(ctx, cfg, remoteBase); err != nil {
+			return fmt.Errorf("创建远端目录失败: %w", err)
+		}
 		if err := a.rclone.Upload(ctx, cfg, local, remote, nil); err != nil {
 			return fmt.Errorf("上传失败: %w", err)
 		}
+
+		// 上传成功之后才收割并写回 session。
+		//
+		// 顺序不能反:rclone 在这次运行里已经把 refresh_token 换掉了,
+		// 不回写的话下次拿旧 token 认证就是 Code=10013 —— 而 rclone
+		// 那边不报错,只是把这个网盘静默变成用不了。
+		if harvest != nil {
+			if err := harvest(); err != nil {
+				// 收割失败不该让整个任务判失败:文件已经传上去了。
+				// 但必须显眼 —— 下一次上传就会因为 session 过期而失败。
+				a.log.Error("收割 Proton session 失败,下次上传可能因 token 过期而失败",
+					"taskId", t.ID, "err", err)
+			}
+		}
+
 		// 【不要】把远端路径写回 source_ref。
 		//
 		// source_ref 是「这条消息从哪来」的引用,JS 侧靠它 JSON.parse
@@ -568,4 +584,52 @@ func (a *App) upload(ctx context.Context, t store.Task) error {
 		_ = os.Remove(local)
 		return nil
 	})
+}
+
+// buildRuntime 为这次上传准备 rclone 的运行上下文。
+//
+// 两种网盘两种走法:
+//   - 静态凭据(Mega):连接串就够,没有可收割的东西,harvest 返回 nil
+//   - 可旋转 session(Proton):必须写临时 conf,跑完把新 token 读回来
+//
+// 后者不是可选项。连接串形式没有回读的余地 —— 参数传进去就没了,
+// rclone 旋转出的新 refresh_token 只存在于它自己的临时状态里,
+// 进程退出即丢失,而服务端那侧的旧 token 已经作废。
+func (a *App) buildRuntime(ctx context.Context, d *drive.Drive) (rclone.Config, func() error, error) {
+	if !d.WritableRuntime() {
+		conn, err := drive.ToConnectionString(d)
+		if err != nil {
+			return rclone.Config{}, nil, err
+		}
+		return rclone.Config{Connection: conn, Timeout: 6 * time.Hour}, nil, nil
+	}
+
+	remoteName, entries, err := d.RuntimeEntries()
+	if err != nil {
+		return rclone.Config{}, nil, err
+	}
+	rt, err := rclone.NewRuntime(remoteName, entries)
+	if err != nil {
+		return rclone.Config{}, nil, err
+	}
+
+	harvest := func() error {
+		// 先读后删 —— 反了就读不到旋转后的 token。
+		defer rt.Dispose()
+
+		section, err := rt.ReadSection()
+		if err != nil {
+			return err
+		}
+		next, changed := d.HarvestSession(section)
+		if !changed {
+			// rclone 没换 token。不写库 —— 少一次 D1 写,也少一次
+			// 无谓的 updated_at 抖动。
+			return nil
+		}
+		a.log.Info("Proton session 已旋转,写回数据库",
+			"user", d.UserID, "drive", d.ID)
+		return a.drives.UpdateConfigData(ctx, d.ID, d.UserID, next)
+	}
+	return rclone.Config{Runtime: rt, Timeout: 6 * time.Hour}, harvest, nil
 }

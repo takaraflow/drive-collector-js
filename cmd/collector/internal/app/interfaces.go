@@ -60,6 +60,9 @@ type TaskRepo interface {
 type DriveRepo interface {
 	DefaultDrive(ctx context.Context, userID string) (*drive.Drive, error)
 	DriveByID(ctx context.Context, id string) (*drive.Drive, error)
+	// UpdateConfigData 写回网盘配置 —— 唯一用途是收割 Proton 旋转后的
+	// session。不做这一步,那个网盘会在下一次上传时静默失效。
+	UpdateConfigData(ctx context.Context, driveID, userID string, cfg drive.DriveConfig) error
 }
 
 // 接口实现断言 —— 编译期保证真实实现满足它们。

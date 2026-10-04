@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/youngsx/drive-collector/cmd/collector/internal/d1"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/drive"
@@ -50,6 +51,29 @@ func (r *DriveRepository) DriveByID(ctx context.Context, id string) (*drive.Driv
 		return nil, nil
 	}
 	return rowToDrive(row)
+}
+
+// UpdateConfigData 写回 config_data。
+//
+// 存在的唯一理由是 Proton 的 session 收割:rclone 跑完会把
+// client_refresh_token 旋转掉(旧的立即作废),新 token 必须回到库里。
+// 不写回的话下次拿旧 token 去认证就是 Code=10013,账号砖化 ——
+// 而 rclone 那边【不报错】,只是静默用不了。
+//
+// 条件与 JS 侧 updateConfigData 一致(AND status='active'):
+// 已停用的网盘不该被后台任务悄悄改回去。
+func (r *DriveRepository) UpdateConfigData(ctx context.Context, driveID, userID string, cfg drive.DriveConfig) error {
+	blob, err := json.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("序列化 config_data 失败: %w", err)
+	}
+	if _, err := r.db.Exec(ctx,
+		`UPDATE drives SET config_data = ?, updated_at = ?
+		 WHERE id = ? AND user_id = ? AND status = 'active'`,
+		string(blob), time.Now().UnixMilli(), driveID, userID); err != nil {
+		return fmt.Errorf("写回网盘 %s 的配置失败: %w", driveID, err)
+	}
+	return nil
 }
 
 func rowToDrive(row map[string]interface{}) (*drive.Drive, error) {

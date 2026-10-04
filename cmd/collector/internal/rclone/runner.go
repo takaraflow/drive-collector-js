@@ -61,12 +61,20 @@ func resolveBinary() string {
 
 // Config 是临时 rclone 配置的上下文。
 //
-// rclone 支持把连接串直接作为 remote 传给命令行(我们用这种),
-// 配 `--config /dev/null` 避免它去读磁盘上的默认配置 ——
-// 那会让「机器上碰巧有个 rclone.conf」变成一个无法解释的变量。
+// 两种传参方式,二选一:
+//
+//   - Connection:把连接串直接作为 remote 传命令行,配 --config /dev/null
+//     避免它去读磁盘上的默认配置 —— 那会让「机器上碰巧有个 rclone.conf」
+//     变成一个无法解释的变量。适用于静态凭据(Mega)。
+//
+//   - Runtime:写临时 conf 文件,跑完能把旋转过的 session 读回来。
+//     适用于可旋转 session 的网盘(Proton)—— 连接串形式没有回读的余地,
+//     新 token 会随进程退出一起丢失,下次拿旧 token 就是 Code=10013。
 type Config struct {
 	// Connection 是 drive.ConnectionString 拼出来的串。
 	Connection string
+	// Runtime 覆盖 Connection —— 有它时用它的 conf。
+	Runtime *Runtime
 	// Timeout 是这次操作的上限。
 	Timeout time.Duration
 }
@@ -106,7 +114,12 @@ func (r *Runner) Run(ctx context.Context, cfg Config, args []string, progress Pr
 	runCtx, cancel := context.WithTimeout(ctx, cfg.Timeout)
 	defer cancel()
 
-	full := append([]string{"--config", "/dev/null", "--use-json-log"}, args...)
+	// 隔离配置:不让 rclone 去读机器上碰巧存在的默认配置。
+	configArgs := []string{"--config", "/dev/null"}
+	if cfg.Runtime != nil {
+		configArgs = cfg.Runtime.Args()
+	}
+	full := append(append(configArgs, "--use-json-log"), args...)
 
 	cmd := exec.CommandContext(runCtx, r.Binary, full...)
 	cmd.Env = r.Env
@@ -146,12 +159,10 @@ func (r *Runner) Run(ctx context.Context, cfg Config, args []string, progress Pr
 	return entries, scanErr
 }
 
-// scanLogs 逐行解析 rclone 的 JSON 日志。
-//
-// rclone 会把人类可读的日志和进度都写在 stderr 上,用 --use-json-log
-// 之后每行是一个 JSON —— 这是 JS 侧用 --use-json-log 的理由,
-// 这里沿用同样的做法,免得再造一个解析器。
 // scanLogs 解析 rclone 的 stderr。
+//
+// rclone 把人类可读的日志和进度都写在 stderr 上,用 --use-json-log
+// 之后每行是一个 JSON —— 沿用 JS 侧同样的做法,免得再造一个解析器。
 //
 // 返回两组东西:解析成功的 JSON 条目,以及【原样的非 JSON 行】。
 //
@@ -185,7 +196,6 @@ func scanLogs(r io.Reader, progress ProgressFunc) (entries []LogEntry, raw []str
 	return entries, raw, scanner.Err()
 }
 
-// summarizeErrors 把日志里的错误汇总成一句可读的话。
 // summarizeErrors 从日志里提炼失败原因。
 //
 // raw 是非 JSON 行 —— 只有在 JSON 里找不到任何错误时才回头看它们。
@@ -257,21 +267,32 @@ func RemoteTarget(connection string, segments ...string) string {
 // 在这里拼。让调用方拼的话,每个调用点都要记得拼一次,漏一个就是
 // 「路径被当成本地目录」这种极难定位的故障。
 func (r *Runner) Upload(ctx context.Context, cfg Config, localPath, remotePath string, progress ProgressFunc) error {
-	target := RemoteTarget(cfg.Connection, remotePath)
-	_, err := r.Run(ctx, cfg, []string{"copyto", localPath, target, "--progress"}, progress)
+	_, err := r.Run(ctx, cfg, []string{"copyto", localPath, cfg.target(remotePath), "--progress"}, progress)
 	return err
 }
 
 // Mkdir 确保远端目录存在。
 func (r *Runner) Mkdir(ctx context.Context, cfg Config, remotePath string) error {
-	_, err := r.Run(ctx, cfg, []string{"mkdir", RemoteTarget(cfg.Connection, remotePath)}, nil)
+	_, err := r.Run(ctx, cfg, []string{"mkdir", cfg.target(remotePath)}, nil)
 	return err
+}
+
+// target 把远端路径拼成 rclone 认识的目标。
+//
+// 有两种 base:连接串(Mega)或临时 conf 的段名(Proton)。调用方
+// 只管传路径,拼法由这里统一决定 —— 让调用方拼的话每个调用点都要
+// 记得拼一次,漏一个就是把网盘路径当成本地目录。
+func (c Config) target(remotePath string) string {
+	if c.Runtime != nil {
+		return c.Runtime.Target(remotePath)
+	}
+	return RemoteTarget(c.Connection, remotePath)
 }
 
 // ListRemote 列远端目录,用于确认上传是否真的落地。
 func (r *Runner) ListRemote(ctx context.Context, cfg Config, remotePath string) ([]string, error) {
-	entries, err := r.Run(ctx, Config{Connection: cfg.Connection, Timeout: 30 * time.Second},
-		[]string{"lsjson", RemoteTarget(cfg.Connection, remotePath), "--max-depth", "1"}, nil)
+	cfg.Timeout = 30 * time.Second
+	entries, err := r.Run(ctx, cfg, []string{"lsjson", cfg.target(remotePath), "--max-depth", "1"}, nil)
 	if err != nil {
 		return nil, err
 	}
