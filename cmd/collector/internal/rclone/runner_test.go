@@ -316,6 +316,38 @@ exit 1`)
 	}
 }
 
+// TestStdoutErrorIsSurfaced stdout 上的错误也必须被看到。
+//
+// rclone 的致命错误有时走 stdout(尤其启动阶段的失败,比如配置解析)。
+// 早期版本把 stdout 丢进 io.Discard —— 于是失败信息是「rclone 没输出
+// 任何可解析的错误」,生产上排查时等于什么都拿不到。
+func TestStdoutErrorIsSurfaced(t *testing.T) {
+	bin := fakeRclone(t, `echo "Fatal error: config parse failed"; exit 1`)
+
+	_, err := quietRunner(bin).Run(context.Background(), Config{Timeout: 5 * time.Second},
+		[]string{"mkdir", "conn:path"}, nil)
+	if err == nil {
+		t.Fatal("非零退出应报错")
+	}
+	if !strings.Contains(err.Error(), "config parse failed") {
+		t.Errorf("stdout 上的错误被丢了:%q", err.Error())
+	}
+}
+
+// TestSuccessWithNoOutputIsNotAnError 退出码 0 就是成功,不管有没有输出。
+//
+// 用 io.Pipe 接两个流时踩过这个坑:父进程关掉写端会让 exec 的拷贝
+// goroutine 写失败,Wait 于是返回「退出码 0 却报错」的假失败。
+// 换成 os.Pipe 才对 —— 这条测试守着它不被改回去。
+func TestSuccessWithNoOutputIsNotAnError(t *testing.T) {
+	bin := fakeRclone(t, `exit 0`)
+
+	if _, err := quietRunner(bin).Run(context.Background(), Config{Timeout: 5 * time.Second},
+		[]string{"mkdir", "conn:path"}, nil); err != nil {
+		t.Errorf("退出码 0 不该报错:%v", err)
+	}
+}
+
 // TestMissingBinaryIsAClearError 二进制不存在要给清楚的错误。
 func TestMissingBinaryIsAClearError(t *testing.T) {
 	r := &Runner{Binary: "/nonexistent/rclone", Env: []string{}}
