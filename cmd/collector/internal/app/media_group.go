@@ -21,6 +21,15 @@ func (a *App) flushMediaGroup(ctx context.Context, gid string, meta task.GroupMe
 		return nil
 	}
 
+	// 没绑盘就不建任务 —— 与单条路径同一道门。
+	//
+	// 必须在【刷盘时】再查一次:组是 1 秒缓冲后才刷的,这期间用户
+	// 可能刚解绑。返回 nil 让组被清掉 —— 这批文件本来就不该处理,
+	// 留着只会在下一轮再撞一次同一道门。
+	if !a.requireDrive(ctx, meta.ChatID, meta.UserID) {
+		return nil
+	}
+
 	// 每条消息都重新从 Telegram 取 —— 缓冲里只存 id,不存内容。
 	// 存内容的话,消息被编辑或删除后就会拿着过期数据建任务。
 	msgs, err := a.tg.FetchMessages(ctx, meta.ChatID, msgIDs)

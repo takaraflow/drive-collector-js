@@ -11,6 +11,15 @@ import (
 	tgclient "github.com/youngsx/drive-collector/cmd/collector/internal/telegram"
 )
 
+// Notifier 是「给用户发一句话」的能力。
+//
+// 抽接口的理由与 TaskRepo 相同:没绑盘的提示必须能测 —— 而真的发消息
+// 需要连上 Telegram(要真实凭据,且会真的给用户发消息)。默认实现
+// 就是 tg 客户端。
+type Notifier interface {
+	SendMessage(ctx context.Context, chatID int64, text string) error
+}
+
 // Downloader 是 download() 需要的 Telegram 下载能力。
 //
 // 抽接口而不是直接用 *telegram.Client:download 是「真正把用户文件
