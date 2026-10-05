@@ -12,6 +12,8 @@ import (
 
 	"github.com/gotd/td/tg"
 
+	"github.com/youngsx/drive-collector/cmd/collector/internal/drive"
+	"github.com/youngsx/drive-collector/cmd/collector/internal/task"
 	tgclient "github.com/youngsx/drive-collector/cmd/collector/internal/telegram"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/tgsession"
 )
@@ -264,14 +266,34 @@ func TestNullableString(t *testing.T) {
 //
 // tg 刻意给零值(而不是 nil):SelfID() 返回 0,模拟「客户端还没连上」——
 // 那正是 createTaskFrom 里的 SelfID 守卫失效的时刻,只有 Out 判据兜得住。
-func newEchoApp(buf *strings.Builder, repo *fakeRepo) *App {
+func newEchoApp(buf *strings.Builder, repo *fakeRepo, drives *fakeDrives) *App {
 	return &App{
 		log: slog.New(slog.NewTextHandler(buf,
 			&slog.HandlerOptions{Level: slog.LevelDebug})),
-		repo:    repo,
-		pending: make(chan string, pendingQueueSize),
-		tg:      &tgclient.Client{},
+		repo:     repo,
+		drives:   drives,
+		notifier: &fakeNotifier{},
+		pending:  make(chan string, pendingQueueSize),
+		tg:       &tgclient.Client{},
 	}
+}
+
+// boundDrive 是「用户有盘」的最小形态 —— 门禁要靠它放行。
+func boundDrive() *fakeDrives {
+	return &fakeDrives{drive: &drive.Drive{Type: "protondrive"}}
+}
+
+// fakeNotifier 记录发给用户的提示 —— 没绑盘的提示是本包唯一给用户
+// 发消息的地方,它的内容会直接进用户眼睛。
+type fakeNotifier struct {
+	chatID int64
+	texts  []string
+}
+
+func (f *fakeNotifier) SendMessage(_ context.Context, chatID int64, text string) error {
+	f.chatID = chatID
+	f.texts = append(f.texts, text)
+	return nil
 }
 
 // TestOnUpdateDropsSelfEcho 自己发出的消息不能当成用户消息。
@@ -302,7 +324,7 @@ func TestOnUpdateDropsSelfEcho(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var buf strings.Builder
 			repo := &fakeRepo{}
-			a := newEchoApp(&buf, repo)
+			a := newEchoApp(&buf, repo, boundDrive())
 
 			// 合成消息的真实形态:有 ID、有 Out,没有 PeerID。
 			msg := &tg.Message{ID: 4572}
@@ -339,7 +361,7 @@ func TestOnUpdateDropsSelfEcho(t *testing.T) {
 func TestOnUpdateKeepsIncomingMessages(t *testing.T) {
 	var buf strings.Builder
 	repo := &fakeRepo{}
-	a := newEchoApp(&buf, repo)
+	a := newEchoApp(&buf, repo, boundDrive())
 
 	msg := &tg.Message{
 		ID:     4571,
@@ -364,6 +386,62 @@ func TestOnUpdateKeepsIncomingMessages(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "收到消息") {
 		t.Error("用户消息必须留到达日志 —— 否则「用户在不在用」看不见")
+	}
+}
+
+// TestCreateTaskRefusesWithoutDrive 没绑盘不建任务,并且【必须告诉用户】。
+//
+// JS 侧 _handleMediaMessage 就是这么做的(发 no_drive_found、不建任务)。
+// Go 之前一句不说:文件先被完整下载,上传阶段才失败,而用户那边什么都
+// 收不到 —— 只看到「发了文件没反应」,这正是最难排查的那类故障。
+func TestCreateTaskRefusesWithoutDrive(t *testing.T) {
+	var buf strings.Builder
+	repo := &fakeRepo{}
+	nf := &fakeNotifier{}
+	a := newEchoApp(&buf, repo, &fakeDrives{}) // 没有任何盘
+	a.notifier = nf
+
+	// mediaUpdate 的 peer 是 chat 999、发送者是 555。
+	if err := a.createTaskFrom(context.Background(), mediaUpdate(42, 555)); err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.created) != 0 {
+		t.Fatalf("没绑盘却建了 %d 个任务 —— 文件会被白下载一遍再失败",
+			len(repo.created))
+	}
+	if len(nf.texts) != 1 {
+		t.Fatalf("提示发了 %d 条,期望 1 条(用户必须知道为什么没反应)", len(nf.texts))
+	}
+	if !strings.Contains(nf.texts[0], "绑定网盘") {
+		t.Errorf("提示内容 = %q,应告诉用户去绑定网盘", nf.texts[0])
+	}
+	if nf.chatID != 999 {
+		t.Errorf("提示发到了 chat %d,期望 999", nf.chatID)
+	}
+}
+
+// TestFlushMediaGroupRefusesWithoutDrive 媒体组刷盘要过同一道门。
+//
+// 组是缓冲窗口之后才刷的,这期间用户可能刚解绑 —— 所以刷盘时必须
+// 重新查一次,只在入口查一次是不够的。
+func TestFlushMediaGroupRefusesWithoutDrive(t *testing.T) {
+	var buf strings.Builder
+	repo := &fakeRepo{}
+	nf := &fakeNotifier{}
+	a := newEchoApp(&buf, repo, &fakeDrives{})
+	a.notifier = nf
+
+	err := a.flushMediaGroup(context.Background(), "g1", task.GroupMeta{
+		GID: "g1", ChatID: 999, UserID: 555,
+	}, []int64{42})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.batch) != 0 {
+		t.Errorf("没绑盘却建了 %d 个批次任务", len(repo.batch))
+	}
+	if len(nf.texts) != 1 {
+		t.Fatalf("提示发了 %d 条,期望 1 条", len(nf.texts))
 	}
 }
 

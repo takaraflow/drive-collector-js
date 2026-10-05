@@ -46,7 +46,9 @@ func mediaUpdate(msgID, senderID int64) tgclient.Update {
 // 没人处理」的地方 —— 而那个故障在日志里完全看不见。
 func TestCreateTaskEnqueuesForProcessing(t *testing.T) {
 	repo := &fakeRepo{}
-	a, _ := newTestApp(t, &fakeDL{content: "x"}, repo, &fakeDrives{})
+	// 给一个盘 —— 没盘时门禁会拦下任务(见
+	// TestCreateTaskRefusesWithoutDrive),那测的就不是排队这件事了。
+	a, _ := newTestApp(t, &fakeDL{content: "x"}, repo, boundDrive())
 	// createTaskFrom 要读 tg.SelfID() 判断「是不是自己发的」。
 	// 真实客户端只在连上之后才有值,这里用一个不上网的实例 ——
 	// SelfID 会是 0,于是「自己发的」判断被跳过,正是我们要的路径。

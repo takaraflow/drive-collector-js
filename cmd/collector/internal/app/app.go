@@ -93,6 +93,9 @@ type App struct {
 	repo        TaskRepo
 	drives      DriveRepo
 	dispatcher  *dispatcher.Dispatcher
+	// notifier 默认是 tg;测试注入假实现 —— 没绑盘的提示是本包
+	// 唯一会给用户发消息的地方,必须能测。
+	notifier Notifier
 	cfg         Config
 	log         *slog.Logger
 
@@ -157,6 +160,7 @@ func New(cfg Config) (*App, error) {
 
 	a.tg = tg
 	a.downloader = tg
+	a.notifier = tg
 	a.tasks = manager
 
 	// 媒体组缓冲:用户连发多图时聚合成一批。
@@ -474,6 +478,42 @@ func (a *App) handleCallback(ctx context.Context, u tgclient.Update) error {
 	return nil
 }
 
+// noDriveHint 与 JS 侧 STRINGS.drive.no_drive_found 逐字一致。
+//
+// 逐字一致是刻意的:切换期两边可能同时在跑,用户看到的应该是同一句话;
+// 排查时也不必先分辨「这是哪个实现说的」。
+const noDriveHint = "🚫 <b>还没有绑定网盘</b>\n\n请先绑定网盘,然后再发送文件或链接。"
+
+// requireDrive 检查用户有没有可用网盘;没有就提示并返回 false。
+//
+// 与 JS 侧 _handleMediaMessage 一致:没绑盘时不建任务、不下载,直接提示。
+//
+// 不检查的代价不是「任务失败」那么轻:文件会先被【完整下载】下来
+// (浪费带宽和磁盘),上传阶段才报「用户 X 没有绑定网盘」—— 而用户
+// 那边一个字都收不到,只看到「发了文件没反应」。这正是最难排查的
+// 那类静默故障。
+func (a *App) requireDrive(ctx context.Context, chatID, userID int64) bool {
+	d, err := a.drives.DefaultDrive(ctx, fmt.Sprintf("%d", userID))
+	if err != nil {
+		// 查询失败 ≠ 没绑盘。这里【放行】:拦下来会把「数据库抖了一下」
+		// 变成「用户不能转存」,而且提示还是错的。真没盘的话,上传
+		// 阶段会再查一次并让任务带着明确错误失败。
+		a.log.Error("查询用户网盘失败,放行建任务", "userId", userID, "err", err)
+		return true
+	}
+	if d != nil {
+		return true
+	}
+
+	if err := a.notifier.SendMessage(ctx, chatID, noDriveHint); err != nil {
+		// 提示发不出去不该升级成别的 —— 任务本来就没建,用户下次
+		// 发文件会再收到一次提示。
+		a.log.Error("发送绑盘提示失败", "chatId", chatID, "err", err)
+	}
+	a.log.Info("用户未绑定网盘,任务不建", "userId", userID, "chatId", chatID)
+	return false
+}
+
 func (a *App) createTaskFrom(ctx context.Context, u tgclient.Update) error {
 	msg, ok := messageOf(u)
 	if !ok {
@@ -485,6 +525,11 @@ func (a *App) createTaskFrom(ctx context.Context, u tgclient.Update) error {
 	}
 	if !msg.HasMedia {
 		// 纯文本消息不建任务 —— 这个 bot 收的是文件不是聊天。
+		return nil
+	}
+
+	// 没绑盘就不建任务,先提示去绑定 —— 与 JS 侧 _handleMediaMessage 一致。
+	if !a.requireDrive(ctx, msg.ChatID, msg.SenderID) {
 		return nil
 	}
 
