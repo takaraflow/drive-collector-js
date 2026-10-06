@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"encoding/base64"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +12,41 @@ import (
 
 	"github.com/youngsx/drive-collector/cmd/collector/internal/rclone"
 )
+
+// protonPlainPassword 是测试用的明文密码。
+const protonPlainPassword = "Sup3rSecret!"
+
+// protonObscuredSample 是 protonPlainPassword 经【真 rclone v1.71.1】
+// `rclone obscure` 得到的输出（逐字节原样粘进来的常量）：
+//
+//	$ rclone obscure -- 'Sup3rSecret!'
+//	5j3vudjNBx1PIELa_tKpcIHUMYwb5-mGl0WEnw
+//	$ rclone reveal -- '5j3vudjNBx1PIELa_tKpcIHUMYwb5-mGl0WEnw'
+//	Sup3rSecret!
+//
+// 为什么要用真 rclone 造的值:假 rclone 如果回一句 "obscured:$5"，
+// 那么「写成 obſcured:明文」和「真的混淆过」在这个测试里长得一模一样，
+// 而线上那个非法 base64 恰恰是「长得像」的那类值。用真样本才能钉死格式。
+const protonObscuredSample = "5j3vudjNBx1PIELa_tKpcIHUMYwb5-mGl0WEnw"
+
+// looksLikeRcloneObscured 复刻 rclone reveal() 的两个前置条件，
+// 逐字照抄 fs/config/obscure/obscure.go 的 Reveal()：
+//
+//	base64.RawURLEncoding.DecodeString(x)   // ① 纯 base64url，无 '=' 补位
+//	if len(ciphertext) < aes.BlockSize { ... } // ② 解码后至少 16 字节（IV）
+//
+// 测试里重现它，是为了让「明文被写进 conf」这个 bug 产生和线上
+// 同一类的失败（illegal base64），而不是靠断言字符串匹配。
+func looksLikeRcloneObscured(s string) error {
+	if _, err := base64.RawURLEncoding.DecodeString(s); err != nil {
+		return fmt.Errorf("not base64url: %w", err)
+	}
+	decoded, _ := base64.RawURLEncoding.DecodeString(s)
+	if len(decoded) < 16 {
+		return fmt.Errorf("decoded %d bytes, 少于 AES BlockSize(16)", len(decoded))
+	}
+	return nil
+}
 
 // protonFakeRclone 造一个假 rclone,并把「rclone 真正看到的那份临时 conf」
 // 抓下来 —— 抓完再把 session 四件套追加进【同一个段】,模拟 rclone 旋转 token
@@ -20,7 +57,8 @@ func protonFakeRclone(t *testing.T, confCapture string, session map[string]strin
 	bin := filepath.Join(dir, "rclone")
 	var b strings.Builder
 	b.WriteString("#!/bin/sh\n")
-	b.WriteString("if [ \"$3\" = \"obscure\" ]; then\n  echo \"obscured:$5\"\n  exit 0\nfi\n")
+	// obscure 回【真 rclone 造的值】，不是带明文的假串 —— 理由见 protonObscuredSample。
+	b.WriteString("if [ \"$3\" = \"obscure\" ]; then\n  echo '" + protonObscuredSample + "'\n  exit 0\nfi\n")
 	b.WriteString("conf=\n")
 	b.WriteString("for a in \"$@\"; do\n  case \"$a\" in\n    /tmp/rclone-rt-*/rclone.conf) cp \"$a\" " + confCapture + "; conf=\"$a\" ;;\n  esac\ndone\n")
 	// 追加到 rclone 被给到的【那个】 conf —— 模拟它把旋转后的 token 回写进去。
@@ -43,7 +81,7 @@ func newTestProtonRuntime(bin string) *protonRuntime {
 }
 
 // TestValidateProtonObscuresPasswordBeforeWritingConf 绑定验证的临时 conf
-// 里,密码必须是 obscure 过的。
+// 里,密码必须是 rclone 真正能 reveal 回去的混淆值。
 //
 // 线上事故:rclone 报 "couldn't decrypt password: base64 decode failed
 // when revealing password - is it obscured?: illegal base64 data at input
@@ -57,7 +95,7 @@ func TestValidateProtonObscuresPasswordBeforeWritingConf(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	_, reason, details := p.ValidateProton(ctx, "user@proton.me", "Sup3rSecret!", "")
+	_, reason, details := p.ValidateProton(ctx, "user@proton.me", protonPlainPassword, "")
 	if reason != "" {
 		t.Fatalf("验证失败: reason=%s details=%s", reason, details)
 	}
@@ -67,32 +105,102 @@ func TestValidateProtonObscuresPasswordBeforeWritingConf(t *testing.T) {
 		t.Fatalf("没抓到 conf: %v", err)
 	}
 	body := string(conf)
-	// obscure 是带前缀的 AES 结果,明文恰好是它的后缀 ——
-	// 所以只能按【整行】判,不能按子串判。
-	if strings.Contains(body, "\npassword = Sup3rSecret!\n") {
-		t.Errorf("明文密码进了临时 conf:\n%s", body)
+
+	// 从抓到的 conf 里解析出 password,而不是整行匹配 ——
+	// rclone 只认这个值,断言就该对着它成立。
+	got := parseConfValue(body, "password")
+	if got == "" {
+		t.Fatalf("conf 里没有 password:\n%s", body)
 	}
-	if !strings.Contains(body, "password = obscured:Sup3rSecret!") {
-		t.Errorf("conf 里的密码不是 obscure 过的:\n%s", body)
+	if got == protonPlainPassword {
+		t.Fatalf("明文密码进了临时 conf:\n%s", body)
 	}
+	// 复刻 reveal() 的前置条件:这一条挂了,线上就是 illegal base64 data。
+	if err := looksLikeRcloneObscured(got); err != nil {
+		t.Errorf("conf 里的密码 reveal 不了(%v),线上会报 illegal base64 data:\n%s", err, body)
+	}
+	if got != protonObscuredSample {
+		t.Errorf("conf 里的密码 = %q,期望真 rclone 的 obscure 输出 %q", got, protonObscuredSample)
+	}
+}
+
+// parseConfValue 从 conf 文本里取 key 的值(测试用,只认最简形式)。
+func parseConfValue(conf, key string) string {
+	for _, line := range strings.Split(conf, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), key+" = ") {
+			return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), key+" = "))
+		}
+	}
+	return ""
 }
 
 // TestValidateProtonRejectsBlankCredentials 没有凭据必须立刻失败。
 //
 // 少一步就会走到 obscure 空密码那一步,报错信息会指向混淆而不是缺输入。
 func TestValidateProtonRejectsBlankCredentials(t *testing.T) {
-	bin := protonFakeRclone(t, filepath.Join(t.TempDir(), "seen.conf"), nil)
-	p := newTestProtonRuntime(bin)
-
-	for _, tc := range []struct{ user, pass string }{
-		{"", "pw"},
-		{"u@x.com", ""},
-		{"   ", "pw"},
+	for _, tc := range []struct {
+		name     string
+		user     string
+		pass     string
+		twoF     string
+		wantFail bool
+	}{
+		{name: "空用户名", user: "", pass: "pw", wantFail: true},
+		{name: "空密码", user: "u@x.com", pass: "", wantFail: true},
+		{name: "空白用户名", user: "   ", pass: "pw", wantFail: true},
+		{name: "空白密码", user: "u@x.com", pass: "  \t ", wantFail: true},
+		// 输入两端空白要被 trim 掉 —— 写进 conf 的不能是带空格的版本。
+		{name: "带空白但非空", user: "  u@x.com  ", pass: "  pw  "},
+		// 空白密码会被 trim 到空,所以它必须像空密码一样失败。
+		{name: "trim 后为空", user: "u@x.com", pass: " \t\n ", wantFail: true},
+		{name: "2FA 照常通过", user: "u@x.com", pass: "pw", twoF: "123456"},
 	} {
-		_, reason, _ := p.ValidateProton(context.Background(), tc.user, tc.pass, "")
-		if reason == "" {
-			t.Errorf("user=%q pass=%q 应该失败,却通过了", tc.user, tc.pass)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			capture := filepath.Join(t.TempDir(), "seen.conf")
+			p := newTestProtonRuntime(protonFakeRclone(t, capture, nil))
+
+			_, reason, _ := p.ValidateProton(context.Background(), tc.user, tc.pass, tc.twoF)
+			if tc.wantFail {
+				if reason == "" {
+					t.Fatalf("应该失败,却通过了")
+				}
+				return
+			}
+			if reason != "" {
+				t.Fatalf("应该通过,却失败: %s", reason)
+			}
+			body, _ := os.ReadFile(capture)
+			if got := parseConfValue(string(body), "username"); got != "u@x.com" {
+				t.Errorf("conf 里的 username = %q,期望 trim 后的 u@x.com", got)
+			}
+		})
+	}
+}
+
+// TestValidateProtonOmitsEmptyTwoFactor conf 里不该出现空的 2fa。
+//
+// 空值不写进去,是 rclone runtime 层 buildConf 的既有约定
+// (runtime_test.go 有对应覆盖);这里从调用侧钉住「有验证码才写」。
+func TestValidateProtonOmitsEmptyTwoFactor(t *testing.T) {
+	capture := filepath.Join(t.TempDir(), "seen.conf")
+	p := newTestProtonRuntime(protonFakeRclone(t, capture, nil))
+
+	if _, reason, _ := p.ValidateProton(context.Background(), "u@x.com", "pw", ""); reason != "" {
+		t.Fatalf("验证失败: %s", reason)
+	}
+	body, _ := os.ReadFile(capture)
+	if got := parseConfValue(string(body), "2fa"); got != "" {
+		t.Errorf("没给验证码时 conf 里却有 2fa = %q", got)
+	}
+
+	capture2 := filepath.Join(t.TempDir(), "seen2.conf")
+	p2 := newTestProtonRuntime(protonFakeRclone(t, capture2, nil))
+	if _, reason, _ := p2.ValidateProton(context.Background(), "u@x.com", "pw", "123456"); reason != "" {
+		t.Fatalf("验证失败: %s", reason)
+	}
+	body2, _ := os.ReadFile(capture2)
+	if got := parseConfValue(string(body2), "2fa"); got != "123456" {
+		t.Errorf("conf 里的 2fa = %q,期望 123456", got)
 	}
 }
 
@@ -127,7 +235,7 @@ func TestValidateProtonClassifies2FAError(t *testing.T) {
 	bin := filepath.Join(dir, "rclone")
 	script := `#!/bin/sh
 if [ "$3" = "obscure" ]; then
-  echo "obscured:$5"
+  echo '` + protonObscuredSample + `'
   exit 0
 fi
 echo '{"level":"error","msg":"Failed to create file system","error":"Multi-factor authentication required for user"}' >&2
