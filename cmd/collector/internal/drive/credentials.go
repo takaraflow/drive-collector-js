@@ -30,6 +30,11 @@ type DriveConfig struct {
 	// rclone 自己会反解。Go 侧若试图解码只会得到垃圾。
 	PassFormat string `json:"pass_format"`
 
+	// TwoFactorEnabled 是 Proton 绑定时用户报告的 2FA 状态。
+	// 只用于「绑定成功但没拿到 session」的判断 —— 一次性验证码本身
+	// 绝不入库(30 秒就过期,存了只会让后续转存撞 422)。
+	TwoFactorEnabled bool `json:"two_factor_enabled"`
+
 	// SchemaVersion 用于将来格式演进时分支处理。
 	SchemaVersion int `json:"config_schema_version"`
 
