@@ -48,16 +48,18 @@ func (f *fakeDL) DownloadTo(_ context.Context, chatID, msgID int64, dest string,
 type fakeRepo struct {
 	// mu 只护 trans/transByID:并发测试会让多个 goroutine 同时调
 	// Transition,append 不加锁就是 data race。其余字段只在单线程里读写。
-	mu         sync.Mutex
-	created    []store.Task
-	batch      []store.Task
-	stalled    []store.Task
-	byID       *store.Task
-	transByID  map[string][]contract.TaskEvent
-	trans      []contract.TaskEvent
-	fileSize   int64
-	fileName   string
-	srcRef     string
+	mu        sync.Mutex
+	created   []store.Task
+	batch     []store.Task
+	stalled   []store.Task
+	byID      *store.Task
+	transByID map[string][]contract.TaskEvent
+	trans     []contract.TaskEvent
+	fileSize  int64
+	fileName  string
+	srcRef    string
+	// msgIDs 记回填的状态消息 id —— 媒体组「先落库再发消息」要靠它断言。
+	msgIDs     []int
 	createErr  error
 	batchErr   error
 	stalledErr error
@@ -136,6 +138,13 @@ func (f *fakeRepo) UpdateFileMetadata(_ context.Context, _ string, name string, 
 
 func (f *fakeRepo) UpdateSourceRef(_ context.Context, _ string, ref string) error {
 	f.srcRef = ref
+	return nil
+}
+
+func (f *fakeRepo) UpdateMsgID(_ context.Context, _ string, msgID int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.msgIDs = append(f.msgIDs, msgID)
 	return nil
 }
 

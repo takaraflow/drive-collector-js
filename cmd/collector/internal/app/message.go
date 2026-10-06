@@ -100,23 +100,11 @@ func fromMessage(m tg.MessageClass) (messageInfo, bool) {
 }
 
 // fileNameOf 从媒体里取文件名。
-func fileNameOf(m tg.MessageMediaClass) string {
-	switch v := m.(type) {
-	case *tg.MessageMediaDocument:
-		doc, ok := v.Document.(*tg.Document)
-		if !ok {
-			return ""
-		}
-		for _, attr := range doc.Attributes {
-			if name, ok := attr.(*tg.DocumentAttributeFilename); ok {
-				return name.FileName
-			}
-		}
-	case *tg.MessageMediaPhoto:
-		return ""
-	}
-	return ""
-}
+//
+// 复用 telegram 包那一份而不是自己抄:两份拷贝早就在照片上分叉了 ——
+// 这一份对 MessageMediaPhoto 返回空,于是相册里每一张都塌成
+// "unnamed",10 张图网盘上只剩 1 张。见 tgclient.FileNameOf 的说明。
+func fileNameOf(m tg.MessageMediaClass) string { return tgclient.FileNameOf(m) }
 
 // truncate 按【字符】截断,不是按字节。
 //
