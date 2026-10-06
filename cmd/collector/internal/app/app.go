@@ -476,9 +476,10 @@ func (a *App) onUpdate(ctx context.Context, u tgclient.Update) error {
 
 // routeCommand 把命令交给 Dispatcher。
 //
-// 绑定命令(/drive /unbind /set_remote_folder /cancel)在进 Dispatcher
-// 之前拦截 —— 它们要么要写会话/落库,要么要读绑定状态,Dispatcher
-// 的接口面(只读权限+任务)不够用。其余命令照旧走 Dispatcher。
+// 绑定命令(/drive /unbind /set_remote_folder /cancel)和 /files 在进
+// Dispatcher 之前拦截 —— 它们要么要写会话/落库,要么要读网盘凭据跑
+// rclone,Dispatcher 的接口面(只读权限+任务)不够用。其余命令照旧
+// 走 Dispatcher。
 func (a *App) routeCommand(ctx context.Context, msg messageInfo) error {
 	text := strings.TrimSpace(msg.Text)
 	command := strings.ToLower(strings.Fields(text)[0])
@@ -490,6 +491,8 @@ func (a *App) routeCommand(ctx context.Context, msg messageInfo) error {
 		return a.handleUnbindCommand(ctx, msg)
 	case "/set_remote_folder", "/remote_folder":
 		return a.handleRemoteFolderCommand(ctx, msg)
+	case "/files":
+		return a.handleFilesCommand(ctx, msg)
 	}
 
 	if a.dispatcher == nil {
@@ -607,7 +610,7 @@ func escapeHTMLText(s string) string {
 	return r.Replace(s)
 }
 
-// handleCallback 处理按钮点击 —— 绑定面板的全部交互都在这。
+// handleCallback 处理按钮点击 —— 绑定面板与 /files 翻页的全部交互都在这。
 func (a *App) handleCallback(ctx context.Context, u tgclient.Update) error {
 	cb, ok := tgclient.CallbackOf(u)
 	if !ok {
@@ -666,10 +669,10 @@ func (a *App) handleCallback(ctx context.Context, u tgclient.Update) error {
 		answer("已返回", false)
 		return a.editDriveManager(ctx, cb)
 
-	case data == "files_page_0":
-		// 文件浏览还没迁移 —— 明说,别让用户以为按钮坏了。
-		answer("文件浏览暂未迁移到新服务", false)
-		return nil
+	case strings.HasPrefix(data, "files_page_"), strings.HasPrefix(data, "files_refresh_"):
+		// 先回应再拉清单:lsjson 要几秒,不先回应客户端会一直转圈。
+		answer("", false)
+		return a.handleFilesCallback(ctx, cb, data)
 	}
 
 	a.log.Debug("收到未处理的按钮点击", "data", data)

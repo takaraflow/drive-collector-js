@@ -11,6 +11,7 @@ package rclone
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -114,12 +115,7 @@ func (r *Runner) Run(ctx context.Context, cfg Config, args []string, progress Pr
 	runCtx, cancel := context.WithTimeout(ctx, cfg.Timeout)
 	defer cancel()
 
-	// 隔离配置:不让 rclone 去读机器上碰巧存在的默认配置。
-	configArgs := []string{"--config", "/dev/null"}
-	if cfg.Runtime != nil {
-		configArgs = cfg.Runtime.Args()
-	}
-	full := append(append(configArgs, "--use-json-log"), args...)
+	full := append(append(cfg.execArgs(), "--use-json-log"), args...)
 
 	cmd := exec.CommandContext(runCtx, r.Binary, full...)
 	cmd.Env = r.Env
@@ -355,6 +351,77 @@ func (r *Runner) Validate(ctx context.Context, conn string) error {
 	_, err := r.Run(ctx, Config{Timeout: 30 * time.Second},
 		[]string{"lsjson", conn, "--max-depth", "1", "--timeout", "15s"}, nil)
 	return err
+}
+
+// FileEntry 是 lsjson 清单里的一条(字段名与 rclone lsjson 的输出一致)。
+type FileEntry struct {
+	Name    string `json:"Name"`
+	Size    int64  `json:"Size"`
+	ModTime string `json:"ModTime"`
+	IsDir   bool   `json:"IsDir"`
+}
+
+// ListFiles 列远端目录,带 Name/Size/ModTime/IsDir —— /files 的数据源。
+//
+// 刻意不走 Run:lsjson 的清单是【命令输出】,写在 stdout;而 Run 把
+// stdout+stderr 合进同一条 JSON 日志流,清单行会解析不成 LogEntry
+// 而被当成「无法解析的行」丢掉。所以像 Obscure 一样直接 exec、
+// 单独收 stdout。
+//
+// 目录还不存在(新用户没传过任何东西)不算错,返回空清单 ——
+// 不像 JS 侧那样顺手 mkdir:列表是只读操作,写盘当副作用太越权,
+// 真正的 mkdir 由上传链路负责。
+func (r *Runner) ListFiles(ctx context.Context, cfg Config, remotePath string) ([]FileEntry, error) {
+	if cfg.Timeout <= 0 {
+		cfg.Timeout = 30 * time.Second
+	}
+	runCtx, cancel := context.WithTimeout(ctx, cfg.Timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(runCtx, r.Binary, append(cfg.execArgs(), "lsjson", cfg.target(remotePath))...)
+	cmd.Env = r.Env
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if runCtx.Err() != nil {
+		return nil, fmt.Errorf("rclone: lsjson 超时: %w", runCtx.Err())
+	}
+	if err != nil {
+		detail := strings.TrimSpace(stderr.String())
+		if detail == "" {
+			detail = err.Error()
+		}
+		if isDirNotFound(detail) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("rclone: lsjson 失败: %s", detail)
+	}
+	var files []FileEntry
+	if err := json.Unmarshal(out, &files); err != nil {
+		return nil, fmt.Errorf("rclone: 解析 lsjson 输出失败: %w", err)
+	}
+	return files, nil
+}
+
+// isDirNotFound 判断错误详情是不是「目录不存在」。
+//
+// rclone 的原文是 "directory not found",个别后端报 "no such directory"。
+// 认不全的代价是:每个还没传过东西的新用户,第一次 /files 就看到报错。
+func isDirNotFound(detail string) bool {
+	d := strings.ToLower(detail)
+	return strings.Contains(d, "directory not found") ||
+		strings.Contains(d, "no such directory")
+}
+
+// execArgs 返回这次调用该带的 --config 参数。
+//
+// 语义与 Run 里一致:不让 rclone 去读机器上碰巧存在的默认配置;
+// 有可写 Runtime 时改用它的临时 conf(Proton 要回读旋转后的 session)。
+func (c Config) execArgs() []string {
+	if c.Runtime != nil {
+		return c.Runtime.Args()
+	}
+	return []string{"--config", "/dev/null"}
 }
 
 // Obscure 调 rclone obscure 混淆密码。

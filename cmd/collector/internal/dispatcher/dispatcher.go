@@ -67,7 +67,6 @@ type Renderer interface {
 	Welcome(userID string) string
 	Help() string
 	Status(userID string, tasks []TaskBrief) string
-	FilesHeader(total int) string
 }
 
 // Dispatcher 分发命令。
@@ -137,8 +136,6 @@ func (d *Dispatcher) HandleText(ctx context.Context, chatID int64, userID, text 
 		return true, d.send(ctx, chatID, d.deps.Renders.Help())
 	case "/status":
 		return true, d.handleStatus(ctx, chatID, userID)
-	case "/files":
-		return true, d.send(ctx, chatID, d.deps.Renders.FilesHeader(0))
 	case "/drive":
 		return true, d.send(ctx, chatID, "🔑 网盘绑定\n\n请用 /remote_folder 设置保存目录。")
 	case "/unbind":
@@ -240,7 +237,7 @@ func (d *Dispatcher) send(ctx context.Context, chatID int64, text string) error 
 func unsupportedMsg(command string) string {
 	return fmt.Sprintf("⚠️ 命令 <code>%s</code> 暂未迁移到新服务。\n\n"+
 		"当前可用:<code>/start</code> <code>/help</code> <code>/status</code> "+
-		"<code>/files</code> <code>/drive</code> <code>/set_remote_folder</code>",
+		"<code>/drive</code> <code>/set_remote_folder</code>",
 		escapeHTML(command))
 }
 

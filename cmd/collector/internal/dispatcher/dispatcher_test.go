@@ -74,7 +74,6 @@ func (fakeRenders) Help() string              { return "help-text" }
 func (fakeRenders) Status(uid string, ts []TaskBrief) string {
 	return "status:" + uid + ":" + string(rune('0'+len(ts)))
 }
-func (fakeRenders) FilesHeader(n int) string { return "files:" + string(rune('0'+n)) }
 
 type harness struct {
 	d     *Dispatcher
