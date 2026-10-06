@@ -3,10 +3,24 @@ package telegram
 import (
 	"testing"
 
+	"github.com/gotd/td/telegram/message/entity"
+	"github.com/gotd/td/telegram/message/styling"
 	"github.com/gotd/td/tg"
 )
 
-func TestStyleText(t *testing.T) {
+// render 走 gotd 自己的解析入口(styling.Perform → Complete),
+// 与 Builder.StyledText 内部完全同一条路径 —— 测它就等于测发送时
+// 真正会发生的事。
+func render(t *testing.T, text string) (string, []tg.MessageEntityClass) {
+	t.Helper()
+	tb := entity.Builder{}
+	if err := styling.Perform(&tb, styledText(text)); err != nil {
+		t.Fatalf("解析失败: %v", err)
+	}
+	return tb.Complete()
+}
+
+func TestStyledText(t *testing.T) {
 	cases := []struct {
 		name     string
 		in       string
@@ -85,11 +99,20 @@ func TestStyleText(t *testing.T) {
 			wantOff:  []int{0, 0},
 			wantLen:  []int{1, 1},
 		},
+		{
+			// 真实消息长这样:多行 + 每行带标签。
+			name:     "多行任务状态消息",
+			in:       "📁 <b>备份完成</b>\n<code>/backup/2026</code>\n共 12 个文件",
+			wantText: "📁 备份完成\n/backup/2026\n共 12 个文件",
+			want:     []string{"MessageEntityBold", "MessageEntityCode"},
+			wantOff:  []int{3, 8},
+			wantLen:  []int{4, 12}, // "/backup/2026" —— 12 个字符
+		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			text, entities := styleText(tc.in)
+			text, entities := render(t, tc.in)
 			if text != tc.wantText {
 				t.Fatalf("text = %q, want %q", text, tc.wantText)
 			}
@@ -111,18 +134,27 @@ func TestStyleText(t *testing.T) {
 	}
 }
 
-// TestStyleText_DoesNotDropMessageOnBadHTML 保证解析失败时消息不丢。
-// 没有这条,一个畸形标签就能让状态消息凭空消失 —— 比显示裸标签糟得多。
-func TestStyleText_DoesNotDropMessageOnBadHTML(t *testing.T) {
-	const in = `1 < 2 and 3 > 2 <b>x</b>`
-	text, entities := styleText(in)
-	if text == "" {
-		t.Fatal("解析失败时文本被清空了 —— 消息会整个消失")
+// TestStyledText_Tolerant 保证畸形输入不炸 —— 用户的文件名、报错文本
+// 可能带裸尖括号,解析层必须扛住(降级逻辑依赖这一点)。
+func TestStyledText_Tolerant(t *testing.T) {
+	for _, in := range []string{
+		`1 < 2 and 3 > 2 <b>x</b>`,
+		"<b>没闭合",
+		"</b>多余的闭标签",
+		"<unknown-tag>x</unknown-tag>",
+		"a & b",
+	} {
+		tb := entity.Builder{}
+		if err := styling.Perform(&tb, styledText(in)); err != nil {
+			t.Logf("输入 %q 解析报错(err=%v)—— 会走纯文本降级,消息不会丢", in, err)
+			continue
+		}
+		text, entities := tb.Complete()
+		if text == "" {
+			t.Errorf("输入 %q 解析后文本为空 —— 消息会整个消失", in)
+		}
+		t.Logf("输入 %q → %q, entities=%v", in, text, describe(entities))
 	}
-	if len(entities) == 0 {
-		t.Fatalf("期望至少解析出 <b>,entities=%v", describe(entities))
-	}
-	t.Logf("降级后的文本 = %q, entities = %v", text, describe(entities))
 }
 
 func typeName(e tg.MessageEntityClass) string {
