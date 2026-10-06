@@ -39,8 +39,33 @@ func (r *DriveRepository) DefaultDrive(ctx context.Context, userID string) (*dri
 	return rowToDrive(row)
 }
 
+// DrivesByUser 列用户的全部在用网盘 —— /scan_dup 的「扫描所有网盘」。
+//
+// 与 DefaultDrive 一样只取 status='active':停用的网盘不该被扫,
+// 它的凭据多半也已经失效,扫了只会报一个看不懂的错。
+func (r *DriveRepository) DrivesByUser(ctx context.Context, userID string) ([]drive.Drive, error) {
+	rows, err := r.db.FetchAll(ctx, `
+		SELECT id, user_id, name, type, config_data, remote_folder, status, is_default
+		FROM drives
+		WHERE user_id = ? AND status = 'active'
+		ORDER BY is_default DESC, created_at DESC`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("查询用户 %s 的网盘列表失败: %w", userID, err)
+	}
+	drives := make([]drive.Drive, 0, len(rows))
+	for _, row := range rows {
+		d, err := rowToDrive(row)
+		if err != nil {
+			return nil, err
+		}
+		drives = append(drives, *d)
+	}
+	return drives, nil
+}
+
 // DriveByID 按主键取网盘。
 func (r *DriveRepository) DriveByID(ctx context.Context, id string) (*drive.Drive, error) {
+
 	row, err := r.db.FetchOne(ctx, `
 		SELECT id, user_id, name, type, config_data, remote_folder, status, is_default
 		FROM drives WHERE id = ?`, id)

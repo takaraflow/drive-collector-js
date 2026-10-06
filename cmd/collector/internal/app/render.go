@@ -30,6 +30,7 @@ func (a *App) Help(ctx context.Context, userID string) string {
 		"<code>/start</code>    开始使用\n" +
 		"<code>/status</code>   查看我的任务(可加 <code>queue</code>/<code>user</code> 看队列或历史)\n" +
 		"<code>/files</code>    查看已转存文件\n" +
+		"<code>/scan_dup</code> 扫描网盘里的重复文件(只列清单,不删除)\n" +
 		"<code>/drive</code>    网盘绑定\n" +
 		"<code>/set_remote_folder &lt;目录&gt;</code>  设置保存目录\n" +
 		"<code>/help</code>     本帮助\n\n" +
@@ -38,9 +39,7 @@ func (a *App) Help(ctx context.Context, userID string) string {
 		return base
 	}
 	// 管理员那一段与 JS STRINGS.system.help_admin 一致。
-	// 刻意不列 /pro_admin /de_admin(JS 的 help_owner 有,Go 没实现)——
-	// 列一个不存在的命令比不列更糟:用户会照着敲,然后得到「暂未迁移」。
-	return base + "\n\n<b>管理员工具</b>\n" +
+	out := base + "\n\n<b>管理员工具</b>\n" +
 		"<code>/users</code> - 查看用户列表\n" +
 		"<code>/task_queue</code> - 查看全局任务队列\n" +
 		"<code>/diagnosis</code> - 系统诊断\n" +
@@ -48,6 +47,13 @@ func (a *App) Help(ctx context.Context, userID string) string {
 		"<code>/close_service</code> - 进入维护模式\n" +
 		"<code>/ban</code> - 封禁用户\n" +
 		"<code>/unban</code> - 解封用户"
+	// 升降管理员只有 owner 能执行(JS 的 help_owner 段),别列给 admin ——
+	// 列一个按下去只会得到「没有权限」的命令,比不列更糟。
+	if a.ownerID != "" && userID == a.ownerID {
+		out += "\n<code>/pro_admin</code> - 设为管理员\n" +
+			"<code>/de_admin</code> - 取消管理员"
+	}
+	return out
 }
 
 // statusIcon 给状态配图标 —— 与 JS _getTaskStatusIcon 逐字一致。

@@ -552,6 +552,8 @@ func (a *App) routeCommand(ctx context.Context, msg messageInfo) error {
 		return a.handleFilesCommand(ctx, msg)
 	case "/status":
 		return a.handleStatusCommand(ctx, msg)
+	case "/scan_dup":
+		return a.handleScanDupCommand(ctx, msg)
 
 	// 管理看板。放在 Dispatcher 之前的原因与 /status 相同:重试失败
 	// 任务要写状态机,而 Dispatcher 的接口面只有只读权限。
@@ -780,6 +782,9 @@ func (a *App) handleCallback(ctx context.Context, u tgclient.Update) error {
 
 	case strings.HasPrefix(data, "mode_switch_"):
 		return a.handleModeSwitchCallback(ctx, cb, data)
+
+	case strings.HasPrefix(data, "dupscan_"):
+		return a.handleDupScanCallback(ctx, cb, data)
 	}
 
 	a.log.Debug("收到未处理的按钮点击", "data", data)

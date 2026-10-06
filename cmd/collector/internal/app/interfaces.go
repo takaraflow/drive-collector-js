@@ -38,6 +38,9 @@ type Rclone interface {
 	Mkdir(ctx context.Context, cfg rclone.Config, remotePath string) error
 	Upload(ctx context.Context, cfg rclone.Config, localPath, remotePath string, progress rclone.ProgressFunc) error
 	ListFiles(ctx context.Context, cfg rclone.Config, remotePath string) ([]rclone.FileEntry, error)
+	// ScanFiles 是 /scan_dup 专用:递归 + 内容哈希。判重没有哈希就退化成
+	// 「按大小猜」,所以它必须是另一个方法而不是 ListFiles 的参数。
+	ScanFiles(ctx context.Context, cfg rclone.Config, remotePath string) ([]rclone.FileEntry, error)
 }
 
 // MessageFetcher 是媒体组刷盘时重新取回消息的能力。
@@ -68,6 +71,8 @@ type TaskRepo interface {
 // DriveRepo 是 upload() 需要的网盘仓储能力。
 type DriveRepo interface {
 	DefaultDrive(ctx context.Context, userID string) (*drive.Drive, error)
+	// DrivesByUser 只被 /scan_dup 的「扫描所有网盘」用。
+	DrivesByUser(ctx context.Context, userID string) ([]drive.Drive, error)
 	DriveByID(ctx context.Context, id string) (*drive.Drive, error)
 	// UpdateConfigData 写回网盘配置 —— 唯一用途是收割 Proton 旋转后的
 	// session。不做这一步,那个网盘会在下一次上传时静默失效。
