@@ -75,7 +75,9 @@ func TestCancelRunningTerminatesTheTask(t *testing.T) {
 //
 // 掐错人就是「封 A 把 B 的转存杀了」—— B 没做错任何事,文件却传不上去了。
 func TestCancelUserTasksOnlyTouchesOwnUser(t *testing.T) {
-	a := &App{}
+	// 封禁现在还要落终态,所以得有 manager —— 账本本身仍是纯内存的。
+	a, _ := newTestApp(t, &fakeDL{}, &fakeRepo{}, &fakeDrives{})
+	a.wireManagerForTest()
 	type entry struct {
 		ctx    context.Context
 		cancel context.CancelFunc
@@ -115,7 +117,8 @@ func TestCancelUserTasksOnlyTouchesOwnUser(t *testing.T) {
 
 // TestCancelUserTasksOnEmptyLedger 没人跑时不该 panic。
 func TestCancelUserTasksOnEmptyLedger(t *testing.T) {
-	a := &App{}
+	a, _ := newTestApp(t, &fakeDL{}, &fakeRepo{}, &fakeDrives{})
+	a.wireManagerForTest()
 	if n := a.CancelUserTasks(context.Background(), "u1"); n != 0 {
 		t.Errorf("空账本应返回 0,得到 %d", n)
 	}
@@ -129,6 +132,39 @@ func cancelTestTask() *store.Task {
 		UserID:    "555",
 		FileName:  sqlStr("photo.jpg"),
 		SourceRef: sqlStr("555/42"),
+	}
+}
+
+// TestBanLeavesTaskCancelled 封禁掐掉的任务必须落成终态。
+//
+// 只 cancel 不改库的话,任务卡在 uploading/downloading —— 而
+// recoverOnStart 每 2.5 分钟就把这类「僵尸」重置成 queued 重新排队。
+// 结果是封禁不但没生效,还白搭一次重下:被封的人 5 分钟后照样传上去。
+// 取消按钮那条路没这个问题(它先 MarkCancelled 再杀),封禁这条路原本
+// 只有 cancel —— 所以它必须自己把状态改掉。
+func TestBanLeavesTaskCancelled(t *testing.T) {
+	tsk := cancelTestTask()
+	repo := &fakeRepo{byID: tsk}
+	a, _ := newTestApp(t, &fakeDL{content: "data"}, repo, &fakeDrives{})
+	a.wireManagerForTest()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	a.registerRunning("t1", "555", cancel)
+
+	a.CancelUserTasks(context.Background(), "555")
+
+	if ctx.Err() == nil {
+		t.Error("封禁掐了账本却没真的取消 ctx —— 进程还在跑")
+	}
+	var sawCancel bool
+	for _, ev := range repo.events() {
+		if ev == contract.EventCancel {
+			sawCancel = true
+		}
+	}
+	if !sawCancel {
+		t.Errorf("封禁掐掉任务却没落终态,trans = %v —— recoverOnStart 会把它重新排队", repo.events())
 	}
 }
 
@@ -201,13 +237,13 @@ func TestCancelTaskButtonKillsTheProcess(t *testing.T) {
 		t.Error("点了取消,任务却没被终止 —— 文件会继续传上云盘")
 	}
 	var sawCancel bool
-	for _, ev := range repo.trans {
+	for _, ev := range repo.events() {
 		if ev == contract.EventCancel {
 			sawCancel = true
 		}
 	}
 	if !sawCancel {
-		t.Errorf("状态机没收到 cancel 事件,trans = %v", repo.trans)
+		t.Errorf("状态机没收到 cancel 事件,trans = %v", repo.events())
 	}
 }
 
@@ -270,7 +306,8 @@ func TestUploadHarvestsRotatedTokenEvenWhenKilled(t *testing.T) {
 
 // TestConcurrentCancelAndRegister 账本本身不能有竞态。
 func TestConcurrentCancelAndRegister(t *testing.T) {
-	a := &App{}
+	a, _ := newTestApp(t, &fakeDL{}, &fakeRepo{}, &fakeDrives{})
+	a.wireManagerForTest()
 	var wg sync.WaitGroup
 	for i := 0; i < 50; i++ {
 		wg.Add(3)

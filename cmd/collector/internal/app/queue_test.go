@@ -142,7 +142,7 @@ func TestProcessTaskRunsDownloadThenUpload(t *testing.T) {
 	}
 
 	var sawDownload, sawUpload bool
-	for _, ev := range repo.trans {
+	for _, ev := range repo.events() {
 		switch ev {
 		case contract.EventStartDownload:
 			sawDownload = true
@@ -152,7 +152,7 @@ func TestProcessTaskRunsDownloadThenUpload(t *testing.T) {
 	}
 	if !sawDownload || !sawUpload {
 		t.Errorf("状态推进不完整:download=%v upload=%v (events=%v)",
-			sawDownload, sawUpload, repo.trans)
+			sawDownload, sawUpload, repo.events())
 	}
 }
 
@@ -186,7 +186,7 @@ func TestRecoverRequeuesStalledTasks(t *testing.T) {
 	}
 
 	// queued 那条不该被重置 —— 状态机不允许。
-	for _, ev := range repo.transByID["stuck-queued"] {
+	for _, ev := range repo.eventsByID("stuck-queued") {
 		if ev == contract.EventResetStalled {
 			t.Errorf("对 queued 任务发了 reset_stalled —— 状态机会拒绝,任务反而卡死")
 		}
@@ -194,7 +194,7 @@ func TestRecoverRequeuesStalledTasks(t *testing.T) {
 	// downloading 那条必须被重置,否则它会带着 downloading 状态重新入队,
 	// 而 start_download 只接受 queued —— 同样卡死。
 	var sawReset bool
-	for _, ev := range repo.transByID["stuck-downloading"] {
+	for _, ev := range repo.eventsByID("stuck-downloading") {
 		if ev == contract.EventResetStalled {
 			sawReset = true
 		}

@@ -85,19 +85,33 @@ func (a *App) cancelRunning(taskID string) bool {
 // 封禁时必须调:人被封了任务却还在替他上传,等于封禁没生效。
 // 和 ClearUserSessions 并排放在封禁那一步 —— 都是「封了之后要收拾
 // 干净的东西」。
-func (a *App) CancelUserTasks(_ context.Context, userID string) int {
+//
+// 【顺序不能反】先落终态,再 cancel。只 cancel 不改库的话,任务卡在
+// uploading —— 而 recoverOnStart 每 StalledThreshold/2 扫一次,会把
+// 这类非终态的「僵尸」重置成 queued 重新排队。结果是封禁白做:
+// 被封的人过两分半钟照样把文件传上去,还白搭一次重下。
+// 取消按钮那条路天生没这个问题(它先 MarkCancelled 再杀),封禁这条路
+// 原本只有 cancel,所以必须自己把状态改掉。
+func (a *App) CancelUserTasks(ctx context.Context, userID string) int {
 	a.runningMu.Lock()
-	var hit []*runningTask
-	for _, t := range a.running {
+	var ids []string
+	var cancels []context.CancelFunc
+	for id, t := range a.running {
 		if t.userID == userID {
-			hit = append(hit, t)
+			ids = append(ids, id)
+			cancels = append(cancels, t.cancel)
 		}
 	}
 	a.runningMu.Unlock()
-	for _, t := range hit {
-		t.cancel()
+
+	for i, id := range ids {
+		if _, err := a.tasks.CancelTask(ctx, id); err != nil {
+			// 落终态失败也要继续杀 —— 进程得停,状态下次再补。
+			a.log.Error("封禁时标记任务失败", "taskId", id, "err", err)
+		}
+		cancels[i]()
 	}
-	return len(hit)
+	return len(ids)
 }
 
 // enqueue 把新建的任务排进处理队列。
