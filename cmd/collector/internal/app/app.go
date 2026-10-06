@@ -260,6 +260,9 @@ func New(cfg Config) (*App, error) {
 			Auth:     cfg.Auth,
 			Renders:  a,
 			Log:      cfg.Log,
+			// Sessions 传 a 自己:封禁成功后要清掉被封用户的绑定
+			// 会话(里面有密码)。App 是唯一知道有哪些会话的地方。
+			Sessions: a,
 		})
 	}
 	return a, nil
@@ -903,12 +906,12 @@ func (a *App) createTaskFrom(ctx context.Context, u tgclient.Update) error {
 	noticeID := a.postNotice(ctx, msg.ChatID, taskID)
 
 	t := store.Task{
-		ID:          taskID,
-		UserID:      fmt.Sprintf("%d", msg.SenderID),
-		ChatID:      nullableString(fmt.Sprintf("%d", msg.ChatID)),
-		SourceType:  "telegram_media",
-		FileName:    nullableString(msg.FileName),
-		SourceRef:   nullableString(BuildSourceRef(msg.ChatID, int64(msg.ID))),
+		ID:         taskID,
+		UserID:     fmt.Sprintf("%d", msg.SenderID),
+		ChatID:     nullableString(fmt.Sprintf("%d", msg.ChatID)),
+		SourceType: "telegram_media",
+		FileName:   nullableString(msg.FileName),
+		SourceRef:  nullableString(BuildSourceRef(msg.ChatID, int64(msg.ID))),
 		// MsgID 是 bot 自己那条状态消息 —— 后面每个阶段都编辑它。
 		// 以前这里写的是 msg.ID(用户发来的那条),于是所有针对任务
 		// 的编辑都会落到用户的文件消息上。
