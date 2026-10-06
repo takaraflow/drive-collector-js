@@ -50,6 +50,9 @@ type Deps struct {
 // 只有封禁那一条路径要。
 type Sessions interface {
 	ClearUserSessions(ctx context.Context, userID string) error
+	// CancelUserTasks 掐死该用户在跑的任务,返回掐了几条。
+	// 封了人却让他的文件继续往网盘传,等于封禁没生效。
+	CancelUserTasks(ctx context.Context, userID string) int
 }
 
 // ownerID 从 Authorizer 拿 owner id —— 不设 Deps 字段。
@@ -244,10 +247,34 @@ func (d *Dispatcher) handleRoleCommand(ctx context.Context, chatID int64, userID
 	}
 	// 角色已落库,清理失败不能改口说「失败」—— 用户会以为没封上而
 	// 重发一遍。只记日志:残留会话最坏是过期,谎报才是真问题。
+	//
+	// 在跑任务必须一起掐:封了人却让他的文件继续往网盘传,等于封禁
+	// 没生效,他还白占了 quota。走 Sessions 同一个接口 —— 它本来就是
+	// 「封禁后要收拾干净的东西」,不必为第二个方法另开一个。
+	killed := 0
 	if spec.role == auth.RoleBanned {
 		d.clearSessions(ctx, target)
+		killed = d.cancelRunningTasks(ctx, target)
 	}
-	return d.send(ctx, chatID, fmt.Sprintf("✅ 已%s 用户 <code>%s</code>", spec.verb, escapeHTML(target)))
+	reply := fmt.Sprintf("✅ 已%s 用户 <code>%s</code>", spec.verb, escapeHTML(target))
+	// 掐了几条要说明白:只回「已封禁」的话,被封的人会以为停了,而文件
+	// 正在半路上。塞进已有通知文本,不加新的 i18n 键。
+	if killed > 0 {
+		reply += fmt.Sprintf("\n\n🚫 已终止其 %d 个运行中的任务。", killed)
+	}
+	return d.send(ctx, chatID, reply)
+}
+
+// cancelRunningTasks 掐死被封用户的在跑任务,返回掐了几条。
+func (d *Dispatcher) cancelRunningTasks(ctx context.Context, userID string) int {
+	if d.deps.Sessions == nil {
+		return 0
+	}
+	n := d.deps.Sessions.CancelUserTasks(ctx, userID)
+	if n > 0 {
+		d.deps.Log.Info("已终止被封用户的运行中任务", "userId", userID, "任务数", n)
+	}
+	return n
 }
 
 // clearSessions 清被封用户的残留状态。

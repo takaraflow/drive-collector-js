@@ -289,6 +289,13 @@ func (a *App) cancelTask(ctx context.Context, userID, taskID string) string {
 		a.log.Error("取消任务失败", "taskId", taskID, "err", err)
 		return statusTaskNotFound
 	}
+	// 改完库必须【真杀】。只改状态的话进程照跑到底:文件照样传上网盘,
+	// 而随后那个 EventComplete 会被状态机拒掉(已 cancelled 是终态)——
+	// 用户看到「已取消」,文件其实已经在网盘里,还白占了 quota。
+	// 没命中账本不是错误:任务在排队里,或者已经结束了。
+	if a.cancelRunning(taskID) {
+		a.log.Info("已终止运行中的任务", "taskId", taskID)
+	}
 	// 取消按钮就挂在状态消息上 —— 不改那条消息,用户点了取消却看到
 	// 它还在「正在下载」,会以为按钮没生效。
 	a.notify(ctx, a.findTask(ctx, taskID), noticeCancelled, nil)

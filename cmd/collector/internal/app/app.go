@@ -142,6 +142,12 @@ type App struct {
 	// 实例只能处理自己建的任务,否则会重复下载)。
 	pending chan string
 
+	// runningMu/running 是「谁正在跑」的账本,见 queue.go 顶部。
+	// 取消按钮和封禁都要靠它找到「现在该掐谁」—— 没有它,取消就只能
+	// 改数据库状态,进程照跑到底。
+	runningMu sync.Mutex
+	running   map[string]*runningTask
+
 	// filesMu 保护下面两个 /files 的内存层状态(与 JS 侧 localCache
 	// + filesRefreshTimes 对应)。
 	filesMu sync.Mutex
@@ -272,10 +278,10 @@ func New(cfg Config) (*App, error) {
 func (a *App) Run(ctx context.Context) error {
 	// 清掉上次运行残留的下载文件。
 	//
-	// 上传失败的任务会把文件留在盘上(刻意留着,方便排查),而它们
-	// 对应的任务会被 recoverOnStart 重新排队 —— 重跑时会重新下载。
-	// 不清的话容器磁盘(1GB)会一天天涨到满,而盘满的表现是
-	// 【所有】任务一起失败,不是单个任务。
+	// 正常路径下 upload 的 defer 已经把文件删干净了(成功失败都删),
+	// 这里兜的是「进程被 SIGKILL/断电,defer 没来得及跑」那一类 ——
+	// 残留会随着重跑的任务越积越多,而容器磁盘(1GB)满了之后是【所有】
+	// 任务一起失败,不是单个任务。
 	_ = os.RemoveAll(a.cfg.DownloadDir)
 	if err := os.MkdirAll(a.cfg.DownloadDir, 0o755); err != nil {
 		return fmt.Errorf("app: 创建下载目录失败: %w", err)
@@ -950,6 +956,10 @@ func (a *App) download(ctx context.Context, t store.Task) error {
 	if err := a.downloader.DownloadTo(ctx, chatID, msgID, dest, func(ratio float64) {
 		a.log.Debug("下载中", "taskId", t.ID, "ratio", ratio)
 	}); err != nil {
+		// 半截文件必须删。任务被取消/失败时后续流程不会执行,这个残file
+		// 就留在 /tmp/downloads 里等着把 1GB 的盘撑爆 —— 而盘满的表现
+		// 是【所有】任务一起失败,排查时却会往网盘方向找。
+		_ = os.Remove(dest)
 		return fmt.Errorf("下载失败: %w", err)
 	}
 
@@ -972,6 +982,14 @@ func (a *App) upload(ctx context.Context, t store.Task) error {
 		return fmt.Errorf("任务 %s 没有文件名", t.ID)
 	}
 	local := filepath.Join(a.cfg.DownloadDir, sanitize(t.FileName.String))
+
+	// 本地文件【无条件】删,成功失败都删。
+	//
+	// 原先只在上传成功后删,失败/被取消的就留在盘上 —— 而这些任务会被
+	// recoverOnStart 重新排队重跑,重跑会重新下载,留着那份没有任何用处。
+	// 留着的结果是容器 1GB 盘一次次被撑爆,而撑满的表现是【所有】任务
+	// 一起失败,排查时却会往网盘方向找(记忆里「网盘被撑爆」那次)。
+	defer func() { _ = os.Remove(local) }()
 
 	// 凭据从 D1 按用户取 —— 每个用户的网盘凭据不同,存在
 	// drives.config_data 里(明文 JSON,不是加密的)。
@@ -1003,26 +1021,44 @@ func (a *App) upload(ctx context.Context, t store.Task) error {
 		if err != nil {
 			return err
 		}
+		// 临时 conf 目录【无条件】清,和成功无关。
+		//
+		// harvest 里那个 defer Dispose 只在「走到收割」时才跑;任务被取消
+		// 或中途失败时 harvest 根本不会被调用,/tmp/rclone-rt-*(内含 0600
+		// 的 session 凭据)就留在盘上。Dispose 幂等,重复调无害。
+		if cfg.Runtime != nil {
+			defer cfg.Runtime.Dispose()
+		}
+
+		// 收割也【无条件】做 —— 不只是上传成功之后。
+		//
+		// rclone 在被 kill 之前很可能已经把 refresh_token 换掉了,而
+		// 服务端那侧的旧 token 随即作废。不回写的话库里那份就是死的,
+		// 下次认证 Code=10013,账号永久砖化(记忆里的 proton-refresh-token-race)。
+		// 以前这里只在成功路径跑,是因为以前取消【不会真的杀进程】——
+		// 现在会了,不补这一刀就是拿「能取消」换「能砖账号」。
+		//
+		// 用 WithoutCancel:出问题时 ctx 往往正是被掐掉的那条,拿它写库
+		// 必然失败,而这次写库恰恰是唯一能救账号的机会。
+		//
+		// 无变化时 harvest 内部直接返回,不会多写一次库。
+		if harvest != nil {
+			defer func() {
+				// 收割失败不该让任务判失败:文件要么已经传上去了,要么
+				// 任务本来就是失败的。但必须显眼 —— 下一次上传就会因为
+				// session 过期而失败。
+				if err := harvest(); err != nil {
+					a.log.Error("收割 Proton session 失败,下次上传可能因 token 过期而失败",
+						"taskId", t.ID, "err", err)
+				}
+			}()
+		}
 
 		if err := a.rclone.Mkdir(ctx, cfg, remoteBase); err != nil {
 			return fmt.Errorf("创建远端目录失败: %w", err)
 		}
 		if err := a.rclone.Upload(ctx, cfg, local, remote, nil); err != nil {
 			return fmt.Errorf("上传失败: %w", err)
-		}
-
-		// 上传成功之后才收割并写回 session。
-		//
-		// 顺序不能反:rclone 在这次运行里已经把 refresh_token 换掉了,
-		// 不回写的话下次拿旧 token 认证就是 Code=10013 —— 而 rclone
-		// 那边不报错,只是把这个网盘静默变成用不了。
-		if harvest != nil {
-			if err := harvest(); err != nil {
-				// 收割失败不该让整个任务判失败:文件已经传上去了。
-				// 但必须显眼 —— 下一次上传就会因为 session 过期而失败。
-				a.log.Error("收割 Proton session 失败,下次上传可能因 token 过期而失败",
-					"taskId", t.ID, "err", err)
-			}
 		}
 
 		// 【不要】把远端路径写回 source_ref。
@@ -1032,11 +1068,7 @@ func (a *App) upload(ctx context.Context, t store.Task) error {
 		// 时这条任务会静默退化成「用 source_msg_id 兜底」—— 不报错,
 		// 只是行为不对。JS 侧对 telegram 媒体也从不改写它。
 		//
-		// 上传成功才删本地。失败时保留 —— 排查和手工重试都要用。
-		//
-		// 不删的话容器磁盘(1GB)会被撑爆,而撑满之后是【所有】任务
-		// 一起失败,不是单个任务 —— 排查时会往网盘方向找,实际是本地盘。
-		_ = os.Remove(local)
+		// 本地文件的删除在函数出口的 defer 里(成功失败都删),原因见那里。
 		return nil
 	})
 }
@@ -1084,7 +1116,10 @@ func (a *App) buildRuntime(ctx context.Context, d *drive.Drive) (rclone.Config, 
 		}
 		a.log.Info("Proton session 已旋转,写回数据库",
 			"user", d.UserID, "drive", d.ID)
-		return a.drives.UpdateConfigData(ctx, d.ID, d.UserID, next)
+		// WithoutCancel:upload 现在无条件收割,包括任务被取消/上传失败的
+		// 那种 —— 那时 ctx 已经死了,拿它写库必然失败,而这次写库恰恰
+		// 是唯一能救账号的机会(旧 refresh_token 已被服务端作废)。
+		return a.drives.UpdateConfigData(context.WithoutCancel(ctx), d.ID, d.UserID, next)
 	}
 	return rclone.Config{Runtime: rt, Timeout: 6 * time.Hour}, harvest, nil
 }
