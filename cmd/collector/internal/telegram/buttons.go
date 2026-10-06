@@ -57,29 +57,19 @@ func InlineKeyboard(log Logger, rows ...[]Button) tg.ReplyMarkupClass {
 
 // sendWithMarkup 发消息并带内联键盘,返回新消息的 id。
 //
-// 走 API() 而不是 gotd 的 SendMessage 便捷方法:后者把回执扔了,
-// 拿不到 id —— 而任务状态消息必须知道自己的 id(要写进 tasks.msg_id,
-// 后面每个阶段都编辑这一条)。
+// 用 gotd 的 message.Builder 而不是最底层的 tg.Client:Builder 的
+// StyledText 照样返回 Updates 回执(里面就有新消息 id),但样式解析、
+// RandomID、错误包装都归它管。任务状态消息必须知道自己的 id
+// (写进 tasks.msg_id,后面每个阶段都编辑这一条)。
+//
+// 键盘要挂在 Builder 上再 Edit —— EditMessageBuilder 是持有 Builder
+// 的,replyMarkup 从那儿读;顺序反了键盘就丢。
 func (c *Client) sendWithMarkup(ctx context.Context, chatID int64, text string, markup tg.ReplyMarkupClass) (int, error) {
 	peer, err := c.peerFor(ctx, chatID)
 	if err != nil {
 		return 0, err
 	}
-	body, entities := styleText(text)
-	req := &tg.MessagesSendMessageRequest{
-		Peer:        peer,
-		Message:     body,
-		Entities:    entities,
-		ReplyMarkup: markup,
-	}
-	if req.RandomID == 0 {
-		id, err := c.tg.RandInt64()
-		if err != nil {
-			return 0, err
-		}
-		req.RandomID = id
-	}
-	updates, err := c.tg.API().MessagesSendMessage(ctx, req)
+	updates, err := c.sendOrEdit(ctx, c.sender.To(peer).Markup(markup), text)
 	if err != nil {
 		return 0, fmt.Errorf("telegram: 发送消息失败(chat=%d): %w", chatID, err)
 	}
@@ -105,21 +95,14 @@ func (c *Client) EditWithMarkup(ctx context.Context, chatID int64, msgID int, te
 	if err != nil {
 		return err
 	}
-	// 用 gotd 生成的方法而不是 Invoke + 手写 result。
+	// 走 message.Builder 而不是底层 Invoke + 手写 result。
 	//
 	// messages.editMessage 返回的是 Updates 而不是 AffectedMessages,
 	// 手写 result 会让解码器拿 Updates 去填 AffectedMessages,报
 	// "unexpected id 0x74ae4240"(那是 updates 的 TL id)——
 	// 生产现场:所有编辑消息与按钮回应全挂,而 sendMessage 正常,
 	// 于是表现为「/files 一直转圈、按钮点了没反应」。
-	body, entities := styleText(text)
-	if _, err := c.tg.API().MessagesEditMessage(ctx, &tg.MessagesEditMessageRequest{
-		Peer:        peer,
-		ID:          msgID,
-		Message:     body,
-		Entities:    entities,
-		ReplyMarkup: markup,
-	}); err != nil {
+	if _, err := c.sendOrEdit(ctx, c.sender.To(peer).Markup(markup).Edit(msgID), text); err != nil {
 		return fmt.Errorf("telegram: 编辑消息失败(chat=%d msg=%d): %w", chatID, msgID, err)
 	}
 	return nil

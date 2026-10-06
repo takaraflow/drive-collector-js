@@ -18,6 +18,7 @@ import (
 
 	gotdlog "github.com/gotd/log"
 	"github.com/gotd/td/telegram"
+	"github.com/gotd/td/telegram/message"
 	"github.com/gotd/td/tg"
 
 	"github.com/youngsx/drive-collector/cmd/collector/internal/tgsession"
@@ -79,6 +80,10 @@ type Client struct {
 	// peers 缓存用户的 AccessHash —— 发私聊消息要用它构造 InputPeerUser。
 	// 用 InputPeerChat 会得到 400: CHAT_ID_INVALID。
 	peers *peerCache
+
+	// sender 是 gotd 的发送层封装(样式、键盘、RandomID、错误包装都由它管)。
+	// NewSender 会分配 uploader 和 resolver,所以建一次就存着,别每次发送都造。
+	sender *message.Sender
 }
 
 // New 构造客户端。此时不连接。
@@ -109,6 +114,7 @@ func New(cfg Config) (*Client, error) {
 		UpdateHandler:  telegram.UpdateHandlerFunc(c.dispatch(cfg.Handler)),
 		Logger:         logger{log: cfg.Log},
 	})
+	c.sender = message.NewSender(c.tg.API())
 	return c, nil
 }
 
@@ -268,20 +274,13 @@ func (c *Client) SelfID() int64 { return c.selfID }
 
 // SendMessage 给指定 chat 发文本消息。
 //
-// 不自己生成 RandomID —— gotd 在 RandomID==0 时会用 RandInt64 生成,
-// 自己造反而可能和它的实现不一致。
+// RandomID 交给 gotd 生成 —— 自己造反而可能和它的实现不一致。
 func (c *Client) SendMessage(ctx context.Context, chatID int64, text string) error {
 	peer, err := c.peerFor(ctx, chatID)
 	if err != nil {
 		return err
 	}
-	body, entities := styleText(text)
-	req := &tg.MessagesSendMessageRequest{
-		Peer:     peer,
-		Message:  body,
-		Entities: entities,
-	}
-	if err := c.tg.SendMessage(ctx, req); err != nil {
+	if _, err := c.sendOrEdit(ctx, c.sender.To(peer), text); err != nil {
 		return fmt.Errorf("telegram: 发送消息失败(chat=%d): %w", chatID, err)
 	}
 	return nil
@@ -290,7 +289,8 @@ func (c *Client) SendMessage(ctx context.Context, chatID int64, text string) err
 // SendMessageWithID 发消息并返回消息 id —— /files 的占位消息要拿
 // 它做后续编辑。
 //
-// 不走 gotd 的 SendMessage 便捷方法:它把响应扔了,拿不到 id。
+// 走 message.Builder 而不是 gotd 的 SendMessage 便捷方法:后者把回执
+// 扔了,拿不到 id;Builder.StyledText 照样返回 Updates。
 // 也不调 processUpdates —— 那会把这条消息的回声派发回入口,
 // 入口再丢一次;不派发等于少一趟「自己回自己」的噪音。
 func (c *Client) SendMessageWithID(ctx context.Context, chatID int64, text string) (int, error) {
@@ -298,16 +298,7 @@ func (c *Client) SendMessageWithID(ctx context.Context, chatID int64, text strin
 	if err != nil {
 		return 0, err
 	}
-	body, entities := styleText(text)
-	req := &tg.MessagesSendMessageRequest{Peer: peer, Message: body, Entities: entities}
-	if req.RandomID == 0 {
-		id, err := c.tg.RandInt64()
-		if err != nil {
-			return 0, err
-		}
-		req.RandomID = id
-	}
-	updates, err := c.tg.API().MessagesSendMessage(ctx, req)
+	updates, err := c.sendOrEdit(ctx, c.sender.To(peer), text)
 	if err != nil {
 		return 0, fmt.Errorf("telegram: 发送消息失败(chat=%d): %w", chatID, err)
 	}
@@ -356,13 +347,7 @@ func (c *Client) EditMessage(ctx context.Context, chatID int64, msgID int, text 
 	// 走 gotd 生成的方法:它自己知道 messages.editMessage 返回 Updates。
 	// 手写 result(以前写的是 MessagesAffectedMessages)会让【每一次】
 	// 编辑都失败,而 sendMessage 正常 —— 症状是「/files 一直转圈」。
-	body, entities := styleText(text)
-	if _, err := c.tg.API().MessagesEditMessage(ctx, &tg.MessagesEditMessageRequest{
-		Peer:     peer,
-		ID:       msgID,
-		Message:  body,
-		Entities: entities,
-	}); err != nil {
+	if _, err := c.sendOrEdit(ctx, c.sender.To(peer).Edit(msgID), text); err != nil {
 		return fmt.Errorf("telegram: 编辑消息失败(chat=%d msg=%d): %w", chatID, msgID, err)
 	}
 	return nil
