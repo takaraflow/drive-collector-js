@@ -25,10 +25,32 @@ func newProtonRuntime(runner *rclone.Runner) *protonRuntime { return &protonRunt
 // 密码在这里 obscure(运行时格式),一次性 2FA 只在本次 conf 里出现,
 // 绝不进返回值 —— 会话收割只认 client_* 四件套。
 func (p *protonRuntime) ValidateProton(ctx context.Context, username, password, twoFactor string) (map[string]string, string, string) {
+	// 空白也算没输入 —— 与 JS 侧 normalizeBindingText 一致。
+	// 直接扔给 rclone 只会换来一个更费解的报错。
+	username = strings.TrimSpace(username)
+	password = strings.TrimSpace(password)
+	if username == "" || password == "" {
+		return nil, "ERROR", "用户名或密码为空"
+	}
+
+	// conf 里的 password 必须是 obscure 过的。
+	//
+	// rclone 从 conf 读密码时一律走 reveal(解密),不会因为「看起来像明文」
+	// 就自动兼容 —— 明文写进去等于让它解一段普通文本,于是报
+	// "base64 decode failed ... illegal base64 data at input byte N",
+	// 而且这个错在「创建文件系统」阶段就抛,看起来像账号问题,其实密码还没被看过。
+	//
+	// 绑定流程拿到的始终是用户刚输入的明文,所以 obscure 必须在【这里】做一次,
+	// 而不是指望落库前的那个 —— 那份是给数据库用的,和这次验证用的 conf 无关。
+	obscured, err := p.runner.Obscure(ctx, password)
+	if err != nil {
+		return nil, "ERROR", "混淆密码失败: " + sanitizeRclone(err.Error())
+	}
+
 	entries := map[string]string{
 		"type":                   string(drive.TypeProton),
 		"username":               username,
-		"password":               password,
+		"password":               obscured,
 		"replace_existing_draft": "true",
 	}
 	if twoFactor != "" {
