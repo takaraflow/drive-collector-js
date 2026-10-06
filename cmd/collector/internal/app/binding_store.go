@@ -20,6 +20,31 @@ import (
 // bindDriveReady 报告绑定向导的写链路是否装配完整。
 func (a *App) bindDriveReady() bool { return a != nil && a.d1c != nil && a.bindSessions != nil }
 
+// ClearUserSessions 清掉用户的全部残留会话 —— 封禁成功后由
+// Dispatcher 调用,与 JS 侧 SessionManager.clear(targetUid) 对齐。
+//
+// 非可选的理由:绑定会话的 TempData 里存着邮箱密码这类凭据。
+// 封了人却把会话留在 Redis 里,等于让密码一直挂到 TTL 到期。
+// 扫描状态同理 —— 留着的话解封后用户会翻到一页早就不存在的旧结果。
+//
+// 盘锁(SessionLock)是进程内 mutex 且 defer 释放,不用清;正在跑的
+// 任务 JS 侧也不取消,保持一致(要取消得走任务状态机,另一件事)。
+func (a *App) ClearUserSessions(ctx context.Context, userID string) error {
+	var firstErr error
+	keep := func(err error) {
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	if a.bindSessions != nil {
+		keep(a.bindSessions.Clear(ctx, userID))
+	}
+	if a.cfg.Redis != nil {
+		keep(a.cfg.Redis.Del(ctx, dupScanKey(userID)).Err())
+	}
+	return firstErr
+}
+
 // insertDrive 插入新绑定,复用 JS 侧 DriveRepository.create 的语义:
 //   - id 形如 drive_<ts>_<8位随机>
 //   - 同类型已有 deleted 行时复活它(JS 侧复活时显式把 remote_folder 清 NULL)

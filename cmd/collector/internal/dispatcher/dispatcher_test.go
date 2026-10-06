@@ -2,6 +2,7 @@ package dispatcher
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"strings"
@@ -45,11 +46,17 @@ type fakeAuth struct {
 	roles      map[string]auth.Role
 	canRun     bool
 	setRoleErr error
+	ownerID    string
 }
 
 func (a *fakeAuth) CanRunCommand(_ context.Context, _, _ string) (bool, error) {
 	return a.canRun, nil
 }
+
+// OwnerID 让 owner id 只存在于权限层一个地方 —— 与 *auth.Guard 同源。
+// 之前 owner id 是 Deps 上的独立字段,测试填了、生产忘了,于是
+// ownerOnly 那道闸把 owner 自己挡在门外。
+func (a *fakeAuth) OwnerID() string { return a.ownerID }
 
 func (a *fakeAuth) IsBanned(_ context.Context, userID string) (bool, error) {
 	return a.roles[userID] == auth.RoleBanned, nil
@@ -73,22 +80,35 @@ func (fakeRenders) Welcome(uid string) string           { return "welcome:" + ui
 func (fakeRenders) Help(context.Context, string) string { return "help-text" }
 
 type harness struct {
-	d    *Dispatcher
-	tg   *fakeTG
-	auth *fakeAuth
+	d        *Dispatcher
+	tg       *fakeTG
+	auth     *fakeAuth
+	sessions *fakeSessions
+}
+
+// fakeSessions 记录被清理过的用户。
+type fakeSessions struct {
+	cleared []string
+	err     error
+}
+
+func (f *fakeSessions) ClearUserSessions(_ context.Context, userID string) error {
+	f.cleared = append(f.cleared, userID)
+	return f.err
 }
 
 func newHarness() *harness {
 	h := &harness{
-		tg:   &fakeTG{},
-		auth: &fakeAuth{roles: map[string]auth.Role{}, canRun: true},
+		tg:       &fakeTG{},
+		auth:     &fakeAuth{roles: map[string]auth.Role{}, canRun: true, ownerID: "owner"},
+		sessions: &fakeSessions{},
 	}
 	h.d = New(Deps{
 		Telegram: h.tg,
 		Auth:     h.auth,
 		Renders:  fakeRenders{},
 		Log:      quiet(),
-		OwnerID:  "owner",
+		Sessions: h.sessions,
 	})
 	return h
 }
@@ -361,5 +381,88 @@ func TestProAdminRequiresConfirm(t *testing.T) {
 	}
 	if h.auth.roles["12345"] != "" {
 		t.Error("没加 confirm 就授予了管理员")
+	}
+}
+
+// TestBanOwner —— 不能封禁 owner(JS 侧 cannot_ban_owner)。
+//
+// owner 由配置决定、SetRole 对它写了也不生效,但命令会回「✅ 已封禁」:
+// 用户以为封住了其实没封,库里还多一行脏数据。
+func TestBanOwner(t *testing.T) {
+	h := newHarness()
+	if _, err := h.d.HandleText(context.Background(), 1, "admin", "/ban owner confirm"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := h.auth.roles["owner"]; ok {
+		t.Errorf("owner 被写进了角色表,roles = %v", h.auth.roles)
+	}
+	if !strings.Contains(last(t, h), "所有者") {
+		t.Errorf("响应 = %q,应拒绝封禁 owner", last(t, h))
+	}
+}
+
+// TestBanClearsSessions —— 封禁成功后要清掉该用户的会话。
+//
+// 绑定会话里存着邮箱密码(TempData),封了人不删等于把凭据挂在
+// Redis 里到过期。与 JS 侧 SessionManager.clear 同一步。
+func TestBanClearsSessions(t *testing.T) {
+	h := newHarness()
+	if _, err := h.d.HandleText(context.Background(), 1, "admin", "/ban u9 confirm"); err != nil {
+		t.Fatal(err)
+	}
+	if h.auth.roles["u9"] != auth.RoleBanned {
+		t.Fatalf("u9 未被封禁,roles = %v", h.auth.roles)
+	}
+	if len(h.sessions.cleared) != 1 || h.sessions.cleared[0] != "u9" {
+		t.Errorf("会话清理 = %v,应为 [u9]", h.sessions.cleared)
+	}
+}
+
+// TestUnbanKeepsSessions —— 解封不清会话。
+//
+// 解封只是把角色改回 user,之前删掉的东西没理由在这里补:用户
+// 重新走一遍绑定就行,悄悄重建旧会话反而可能带进过期凭据。
+func TestUnbanKeepsSessions(t *testing.T) {
+	h := newHarness()
+	h.auth.roles["u9"] = auth.RoleBanned
+	if _, err := h.d.HandleText(context.Background(), 1, "admin", "/unban u9 confirm"); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.sessions.cleared) != 0 {
+		t.Errorf("解封时不该清会话,却清了 %v", h.sessions.cleared)
+	}
+}
+
+// TestBanSessionErrorDoesNotUndoRole —— 清理失败不能改口说「失败」。
+//
+// 角色已经落库了,这时报失败会让管理员以为没封上而重发一遍。
+// 残留会话最坏是过期,谎报才是真问题。
+func TestBanSessionErrorDoesNotUndoRole(t *testing.T) {
+	h := newHarness()
+	h.sessions.err = errors.New("redis 挂了")
+	if _, err := h.d.HandleText(context.Background(), 1, "admin", "/ban u9 confirm"); err != nil {
+		t.Fatal(err)
+	}
+	if h.auth.roles["u9"] != auth.RoleBanned {
+		t.Errorf("清理失败不该回滚角色,roles = %v", h.auth.roles)
+	}
+	if !strings.Contains(last(t, h), "已封禁") {
+		t.Errorf("响应 = %q,应仍报封禁成功", last(t, h))
+	}
+}
+
+// TestOwnerOnlyFailsClosedWithoutOwnerID —— 没配 OWNER_ID 时,
+// ownerOnly 的命令对所有人关闭。
+//
+// 防的是把 ownerID 默认为「无」后误放行:那样任何人都能升管理员。
+// 真实事故是反过来的 —— owner id 漏装配导致 owner 自己被拒。
+func TestOwnerOnlyFailsClosedWithoutOwnerID(t *testing.T) {
+	h := newHarness()
+	h.auth.ownerID = ""
+	if _, err := h.d.HandleText(context.Background(), 1, "admin", "/pro_admin u1 confirm"); err != nil {
+		t.Fatal(err)
+	}
+	if h.auth.roles["u1"] != "" {
+		t.Errorf("无 owner 配置时仍升了官,roles = %v", h.auth.roles)
 	}
 }

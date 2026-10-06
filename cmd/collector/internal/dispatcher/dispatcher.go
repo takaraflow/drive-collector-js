@@ -38,8 +38,28 @@ type Deps struct {
 	Renders  Renderer
 	Log      *slog.Logger
 
-	// OwnerID 是管理员 telegram id,用于「帮助」里标注。
-	OwnerID string
+	// Sessions 清理被封用户的残留状态(绑定会话里存着邮箱密码、
+	// 扫描状态)。为 nil 时跳过清理 —— 没装配 Redis 就是没有会话
+	// 可清,不该因此把封禁操作判失败。
+	Sessions Sessions
+}
+
+// Sessions 是封禁后需要收拾干净的东西。
+//
+// 单独一个接口而不是复用 Authorizer:判权限是每次命令都要,清会话
+// 只有封禁那一条路径要。
+type Sessions interface {
+	ClearUserSessions(ctx context.Context, userID string) error
+}
+
+// ownerID 从 Authorizer 拿 owner id —— 不设 Deps 字段。
+//
+// 单一来源是被现实逼出来的:OwnerID 曾经是 Deps 上的独立字段,而
+// 生产装配忘了填,于是 ownerOnly 那道闸在生产上把 owner 自己
+// 也拒了(/pro_admin 对所有人不可用),而测试替身填了值,全绿。
+// owner id 本来就住在 *auth.Guard 里,从那儿取就漏不掉。
+type ownerIDer interface {
+	OwnerID() string
 }
 
 // Authorizer 判权限。
@@ -162,6 +182,7 @@ type roleCommandSpec struct {
 	role      auth.Role
 	ownerOnly bool // 是否只有 owner 能下这条命令
 	noSelf    bool // 是否禁止对自己执行
+	noOwner   bool // 是否禁止对 owner 执行(封禁专用)
 }
 
 // roleCommands 把四条改角色的命令归到同一个流程。
@@ -169,7 +190,7 @@ type roleCommandSpec struct {
 // /de_admin 对应 JS 的 removeRole —— 删掉记录、回落到默认角色 user,
 // 与显式写 user 等价,所以共用一个出口。
 var roleCommands = map[string]roleCommandSpec{
-	"/ban":       {verb: "封禁", role: auth.RoleBanned, noSelf: true},
+	"/ban":       {verb: "封禁", role: auth.RoleBanned, noSelf: true, noOwner: true},
 	"/unban":     {verb: "解封", role: auth.RoleUser},
 	"/pro_admin": {verb: "设为管理员", role: auth.RoleAdmin, ownerOnly: true},
 	"/de_admin":  {verb: "取消管理员", role: auth.RoleUser, ownerOnly: true},
@@ -189,8 +210,11 @@ func (d *Dispatcher) handleRoleCommand(ctx context.Context, chatID int64, userID
 	// ownerOnly 是给 CommandPermissions 之上的第二道闸:那里把
 	// ActionUserManage 放行给 admin,而「谁是管理员」只能由 owner 定,
 	// 否则任何 admin 都能给自己升官。
-	if spec.ownerOnly && (d.deps.OwnerID == "" || userID != d.deps.OwnerID) {
-		return d.send(ctx, chatID, "❌ 您没有权限执行此操作。")
+	if spec.ownerOnly {
+		o := d.owner()
+		if o == "" || userID != o {
+			return d.send(ctx, chatID, "❌ 您没有权限执行此操作。")
+		}
 	}
 
 	fields := strings.Fields(text)
@@ -203,6 +227,12 @@ func (d *Dispatcher) handleRoleCommand(ctx context.Context, chatID int64, userID
 	if spec.noSelf && target == userID {
 		return d.send(ctx, chatID, "❌ 不能对自己执行此操作。")
 	}
+	// owner 由配置决定、不落库,SetRole 对它写了也不生效 —— 但命令会回
+	// 「✅ 已封禁」,用户以为封住了其实没封,库里还多一行脏数据。
+	// JS 侧有这道拦截,这里补齐(Dispatcher.js _handleBanCommand)。
+	if spec.noOwner && d.owner() != "" && target == d.owner() {
+		return d.send(ctx, chatID, "❌ 不能封禁系统所有者。")
+	}
 	if len(fields) < 3 || fields[2] != "confirm" {
 		return d.send(ctx, chatID, fmt.Sprintf(
 			"⚠️ 即将%s 用户 <code>%s</code>。\n\n确认请再发一次并加 <code>confirm</code>。",
@@ -212,7 +242,22 @@ func (d *Dispatcher) handleRoleCommand(ctx context.Context, chatID int64, userID
 	if err := d.setRole(ctx, target, spec.role); err != nil {
 		return d.send(ctx, chatID, "❌ 操作失败:"+escapeHTML(err.Error()))
 	}
+	// 角色已落库,清理失败不能改口说「失败」—— 用户会以为没封上而
+	// 重发一遍。只记日志:残留会话最坏是过期,谎报才是真问题。
+	if spec.role == auth.RoleBanned {
+		d.clearSessions(ctx, target)
+	}
 	return d.send(ctx, chatID, fmt.Sprintf("✅ 已%s 用户 <code>%s</code>", spec.verb, escapeHTML(target)))
+}
+
+// clearSessions 清被封用户的残留状态。
+func (d *Dispatcher) clearSessions(ctx context.Context, userID string) {
+	if d.deps.Sessions == nil {
+		return
+	}
+	if err := d.deps.Sessions.ClearUserSessions(ctx, userID); err != nil {
+		d.deps.Log.Error("清理被封用户会话失败", "userId", userID, "err", err)
+	}
 }
 
 // setRole 写角色 —— 需要 Authorizer 支持写入。
@@ -229,6 +274,15 @@ func (d *Dispatcher) setRole(ctx context.Context, target string, role auth.Role)
 
 type roleWriter interface {
 	SetRole(ctx context.Context, userID string, role auth.Role) error
+}
+
+// owner 返回 owner telegram id。拿不到就是空串 —— 空串让 ownerOnly
+// 的命令对所有人关闭(fail-closed),比默认为空后误放行安全。
+func (d *Dispatcher) owner() string {
+	if o, ok := d.deps.Auth.(ownerIDer); ok {
+		return o.OwnerID()
+	}
+	return ""
 }
 
 func (d *Dispatcher) send(ctx context.Context, chatID int64, text string) error {
