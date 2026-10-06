@@ -285,6 +285,63 @@ func (c *Client) SendMessage(ctx context.Context, chatID int64, text string) err
 	return nil
 }
 
+// SendMessageWithID 发消息并返回消息 id —— /files 的占位消息要拿
+// 它做后续编辑。
+//
+// 不走 gotd 的 SendMessage 便捷方法:它把响应扔了,拿不到 id。
+// 也不调 processUpdates —— 那会把这条消息的回声派发回入口,
+// 入口再丢一次;不派发等于少一趟「自己回自己」的噪音。
+func (c *Client) SendMessageWithID(ctx context.Context, chatID int64, text string) (int, error) {
+	peer, err := c.peerFor(ctx, chatID)
+	if err != nil {
+		return 0, err
+	}
+	req := &tg.MessagesSendMessageRequest{Peer: peer, Message: text}
+	if req.RandomID == 0 {
+		id, err := c.tg.RandInt64()
+		if err != nil {
+			return 0, err
+		}
+		req.RandomID = id
+	}
+	updates, err := c.tg.API().MessagesSendMessage(ctx, req)
+	if err != nil {
+		return 0, fmt.Errorf("telegram: 发送消息失败(chat=%d): %w", chatID, err)
+	}
+	return messageIDOf(updates), nil
+}
+
+// messageIDOf 从发送回执里挖出新消息的 id。
+//
+// 回执形态因聊天类型而异:私聊常见 UpdateShortSentMessage,其他情况
+// 包在 Updates 容器里(UpdateMessageID 或 UpdateNewMessage)。
+// 挖不到返回 0 —— 调用方只能放弃编辑,不能放弃发送结果。
+func messageIDOf(u tg.UpdatesClass) int {
+	switch v := u.(type) {
+	case *tg.UpdateShortSentMessage:
+		return v.ID
+	case *tg.Updates:
+		return messageIDFromUpdates(v.Updates)
+	case *tg.UpdatesCombined:
+		return messageIDFromUpdates(v.Updates)
+	}
+	return 0
+}
+
+func messageIDFromUpdates(list []tg.UpdateClass) int {
+	for _, uu := range list {
+		switch v := uu.(type) {
+		case *tg.UpdateMessageID:
+			return v.ID
+		case *tg.UpdateNewMessage:
+			if m, ok := v.Message.(*tg.Message); ok {
+				return m.ID
+			}
+		}
+	}
+	return 0
+}
+
 // EditMessage 改掉已有消息 —— 用户体验上「进度条在同一行更新」。
 //
 // gotd 没有这个便捷方法,直接 Invoke。返回值里的 MessageClass
