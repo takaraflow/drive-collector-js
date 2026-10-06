@@ -116,6 +116,11 @@ type fakeRclone struct {
 	uploadErr   error
 	mkdirCalls  []string
 	uploadCalls []string
+	// list/listErr 是 ListFiles 的预设结果 —— /files 的测试用。
+	list    []rclone.FileEntry
+	listErr error
+	// listCalls 记录 ListFiles 拿到的路径 —— 断言「列的是用户目录」。
+	listCalls []string
 }
 
 func (f *fakeRclone) Mkdir(_ context.Context, _ rclone.Config, remotePath string) error {
@@ -126,6 +131,11 @@ func (f *fakeRclone) Mkdir(_ context.Context, _ rclone.Config, remotePath string
 func (f *fakeRclone) Upload(_ context.Context, _ rclone.Config, localPath, remotePath string, _ rclone.ProgressFunc) error {
 	f.uploadCalls = append(f.uploadCalls, remotePath)
 	return f.uploadErr
+}
+
+func (f *fakeRclone) ListFiles(_ context.Context, _ rclone.Config, remotePath string) ([]rclone.FileEntry, error) {
+	f.listCalls = append(f.listCalls, remotePath)
+	return f.list, f.listErr
 }
 
 // fakeDrives 代替网盘仓储。

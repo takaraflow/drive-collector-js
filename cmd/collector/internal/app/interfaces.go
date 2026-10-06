@@ -29,19 +29,16 @@ type Downloader interface {
 	DownloadTo(ctx context.Context, chatID, msgID int64, destPath string, progress tgclient.ProgressFunc) error
 }
 
-// Rclone 是 upload() 需要的网盘调度能力。
+// Rclone 是 upload() 与 /files 需要的网盘调度能力。
 //
 // 抽接口是因为 upload 的成败完全取决于它 —— 而具体实现要 spawn
 // 真实二进制。测试用假实现就能断言「上传前先建目录」「失败要往上抛」。
 type Rclone interface {
 	Mkdir(ctx context.Context, cfg rclone.Config, remotePath string) error
 	Upload(ctx context.Context, cfg rclone.Config, localPath, remotePath string, progress rclone.ProgressFunc) error
+	ListFiles(ctx context.Context, cfg rclone.Config, remotePath string) ([]rclone.FileEntry, error)
 }
 
-// Rclone 是 upload() 需要的网盘调度能力。
-//
-// 抽接口是因为 upload 的成败完全取决于它 —— 而具体实现要 spawn
-// 真实二进制。测试用假实现就能断言「上传前先建目录」「失败要往上抛」。
 // MessageFetcher 是媒体组刷盘时重新取回消息的能力。
 type MessageFetcher interface {
 	FetchMessages(ctx context.Context, chatID int64, ids []int64) ([]tgclient.MessageInfo, error)

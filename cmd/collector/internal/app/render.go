@@ -69,11 +69,6 @@ func (a *App) Status(userID string, tasks []dispatcher.TaskBrief) string {
 	return out
 }
 
-// FilesHeader 渲染 /files 的头部。
-func (a *App) FilesHeader(total int) string {
-	return fmt.Sprintf("📁 <b>已转存文件</b>(共 %d 个)\n\n文件列表功能暂未迁移,你的文件仍在网盘里。", total)
-}
-
 // statusIcon 给状态配图标 —— 与 JS 侧保持一致的观感。
 func statusIcon(status string) string {
 	switch status {

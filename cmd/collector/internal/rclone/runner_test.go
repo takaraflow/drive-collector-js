@@ -410,3 +410,52 @@ EOF`)
 		t.Errorf("names = %v", names)
 	}
 }
+
+// TestListFilesParsesStdout 清单走 stdout 的 JSON 数组,不走日志流。
+func TestListFilesParsesStdout(t *testing.T) {
+	bin := fakeRclone(t, `cat <<'EOF'
+[{"Name":"a.mp4","Size":10,"ModTime":"2026-10-01T05:06:07.123Z","IsDir":false},{"Name":"sub","Size":0,"ModTime":"2026-09-01T05:06:07Z","IsDir":true}]
+EOF`)
+
+	files, err := quietRunner(bin).ListFiles(context.Background(),
+		Config{Connection: "conn", Timeout: 5 * time.Second}, "/folder")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 2 {
+		t.Fatalf("files = %+v", files)
+	}
+	if files[0].Name != "a.mp4" || files[0].Size != 10 || !files[1].IsDir {
+		t.Errorf("解析结果不对: %+v", files)
+	}
+}
+
+// TestListFilesDirNotFoundIsNotError 目录不存在 = 新用户还没传过东西,
+// 必须给空清单而不是报错 —— 否则每个新用户第一次 /files 就吃一个错误。
+func TestListFilesDirNotFoundIsNotError(t *testing.T) {
+	bin := fakeRclone(t, `echo 'Error: ...: directory not found' >&2; exit 1`)
+
+	files, err := quietRunner(bin).ListFiles(context.Background(),
+		Config{Connection: "conn"}, "/folder")
+	if err != nil {
+		t.Fatalf("目录不存在不该报错: %v", err)
+	}
+	if len(files) != 0 {
+		t.Errorf("应为空清单,得到 %+v", files)
+	}
+}
+
+// TestListFilesFailsOnOtherError 认不得的错误必须带 stderr 原文 ——
+// 排查「列表打不开」时那是唯一的证据。
+func TestListFilesFailsOnOtherError(t *testing.T) {
+	bin := fakeRclone(t, `echo 'some auth failure' >&2; exit 1`)
+
+	_, err := quietRunner(bin).ListFiles(context.Background(),
+		Config{Connection: "conn"}, "/folder")
+	if err == nil {
+		t.Fatal("其他错误必须报错")
+	}
+	if !strings.Contains(err.Error(), "some auth failure") {
+		t.Errorf("错误详情丢了 stderr 原文: %v", err)
+	}
+}
