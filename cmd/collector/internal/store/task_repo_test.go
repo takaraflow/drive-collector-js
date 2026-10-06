@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -45,6 +46,86 @@ func (f *fakeD1) handler() http.HandlerFunc {
 		f.mu.Unlock()
 
 		w.Write([]byte(body))
+	}
+}
+
+// strictD1 在 fakeD1 之上【强制执行 D1 的绑定参数上限】。
+//
+// 为什么必须模拟这条约束:参数上限是「发相册没反应」的直接原因,
+// 而不模拟它的假实现会让 CreateBatch 的分片逻辑永远测不出来 ——
+// 测试全绿而生产必炸。实测报错原文:
+//
+//	"too many SQL variables at offset 388: SQLITE_ERROR"
+type strictD1 struct {
+	*fakeD1
+}
+
+func strictNewTestRepo(t *testing.T) (*Repository, *strictD1) {
+	t.Helper()
+	f := &strictD1{fakeD1: &fakeD1{
+		responder: func(capturedReq) string { return oneWritten },
+	}}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		var req capturedReq
+		_ = json.Unmarshal(raw, &req)
+
+		f.mu.Lock()
+		f.requests = append(f.requests, req)
+		f.mu.Unlock()
+
+		if len(req.Params) > d1MaxParams {
+			w.Write([]byte(`{"success":false,"errors":[{"code":7500,` +
+				`"message":"too many SQL variables: SQLITE_ERROR"}]}`))
+			return
+		}
+		w.Write([]byte(oneWritten))
+	}))
+	t.Cleanup(srv.Close)
+
+	db, err := d1.New(d1.Config{
+		AccountID: "a", DatabaseID: "d", Token: "t",
+		BaseURL: srv.URL, Log: quiet(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return NewTaskRepository(db), f
+}
+
+// TestCreateBatchRespectsD1ParamLimit 相册常有 8~10 张图,而 D1 对绑定
+// 参数有 100 的硬上限:14 列 × 8 行 = 112,整条语句直接失败。
+//
+// 这条测试用【模拟了参数上限】的假 D1 —— 之前的 fakeD1 不检查参数数,
+// 于是 CreateBatch 的 3 条用例(42 参数)永远绿着,生产却 100% 失败。
+func TestCreateBatchRespectsD1ParamLimit(t *testing.T) {
+	r, f := strictNewTestRepo(t)
+
+	const n = 10 // 用户发 10 张图的相册
+	tasks := make([]Task, n)
+	for i := range tasks {
+		tasks[i] = Task{ID: fmt.Sprintf("t%d", i), UserID: "u1"}
+	}
+
+	if err := r.CreateBatch(context.Background(), tasks); err != nil {
+		t.Fatalf("10 条任务建不起来(生产实测 8 条就失败): %v", err)
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.requests) == 0 {
+		t.Fatal("一条请求都没发")
+	}
+	total := 0
+	for _, req := range f.requests {
+		if len(req.Params) > d1MaxParams {
+			t.Errorf("某条语句带了 %d 个参数,超过 D1 上限 %d", len(req.Params), d1MaxParams)
+		}
+		total += len(req.Params) / taskInsertColumns
+	}
+	if total != n {
+		t.Errorf("共插入 %d 行,期望 %d —— 有任务被静默丢掉", total, n)
 	}
 }
 

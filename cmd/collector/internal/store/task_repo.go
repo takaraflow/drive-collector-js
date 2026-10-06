@@ -83,51 +83,84 @@ func (r *Repository) Create(ctx context.Context, t Task) error {
 	return nil
 }
 
+// taskInsertColumns 是 tasks 表的插入列清单,14 列。
+const taskInsertColumns = 14
+
+// d1MaxParams 是 D1 单条语句的绑定参数上限。
+//
+// 实测(生产 D1):超过就整条语句失败,报
+// "too many SQL variables"。于是 8 条任务(14×8=112)必炸 ——
+// 而相册本来就常常有 8~10 张图。这不是理论风险,是「发相册没反应」
+// 的直接原因之一。
+const d1MaxParams = 100
+
+// batchChunkSize 是每个 INSERT 携带多少行:100/14 = 7。
+const batchChunkSize = d1MaxParams / taskInsertColumns
+
 // CreateBatch 批量插入 —— 媒体组一次最多十几条,逐条 INSERT 往返太多。
 //
-// 用多值 INSERT 而不是事务:D1 的 REST 端点没有事务语义,
-// 逐条调用反而更慢。失败时整批回滚不了,但任务都有 id,
-// 调用方可以按状态查询后重建。
+// 用多值 INSERT 而不是逐条调用:D1 的 REST 端点没有事务语义,
+// 逐条调用反而更慢。
+//
+// 【必须按 d1MaxParams 切片】D1 对绑定参数数量有硬上限(见常量),
+// 一条 8 行的多值 INSERT 就超了。切片是唯一的解法 —— 分成几条
+// 语句比退回逐条插入便宜得多,而 D1 的 batch 本来就是逐条独立生效的,
+// 不存在「整批原子」这回事,所以切片不改变语义。
 func (r *Repository) CreateBatch(ctx context.Context, tasks []Task) error {
 	if len(tasks) == 0 {
 		return nil
 	}
 	now := time.Now().UnixMilli()
+	for i := range tasks {
+		if tasks[i].CreatedAt == 0 {
+			tasks[i].CreatedAt = now
+		}
+		if tasks[i].UpdatedAt == 0 {
+			tasks[i].UpdatedAt = now
+		}
+		if tasks[i].SourceType == "" {
+			tasks[i].SourceType = "telegram_media"
+		}
+		if tasks[i].Status == "" {
+			tasks[i].Status = contract.StatusQueued
+		}
+	}
 
+	for start := 0; start < len(tasks); start += batchChunkSize {
+		end := start + batchChunkSize
+		if end > len(tasks) {
+			end = len(tasks)
+		}
+		if err := r.insertChunk(ctx, tasks[start:end]); err != nil {
+			return fmt.Errorf("批量创建任务失败(第 %d~%d 条,共 %d 条): %w",
+				start+1, end, len(tasks), err)
+		}
+	}
+	return nil
+}
+
+// insertChunk 发一条多值 INSERT。
+func (r *Repository) insertChunk(ctx context.Context, tasks []Task) error {
 	var b strings.Builder
 	b.WriteString(`INSERT INTO tasks (
 		id, user_id, chat_id, msg_id, source_msg_id, source_type,
 		source_ref, file_name, file_size, status, error_msg,
 		claimed_by, created_at, updated_at) VALUES `)
-	args := make([]interface{}, 0, len(tasks)*14)
+	args := make([]interface{}, 0, len(tasks)*taskInsertColumns)
 
 	for i, t := range tasks {
 		if i > 0 {
 			b.WriteByte(',')
 		}
 		b.WriteString("(?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
-		if t.CreatedAt == 0 {
-			t.CreatedAt = now
-		}
-		if t.UpdatedAt == 0 {
-			t.UpdatedAt = now
-		}
-		if t.SourceType == "" {
-			t.SourceType = "telegram_media"
-		}
-		if t.Status == "" {
-			t.Status = contract.StatusQueued
-		}
 		args = append(args, t.ID, t.UserID, nullString(t.ChatID), nullInt(t.MsgID),
 			nullInt(t.SourceMsgID), t.SourceType, nullString(t.SourceRef),
 			nullString(t.FileName), t.FileSize, string(t.Status),
 			nullString(t.ErrorMsg), nullString(t.ClaimedBy), t.CreatedAt, t.UpdatedAt)
 	}
 
-	if _, err := r.db.Exec(ctx, b.String(), args...); err != nil {
-		return fmt.Errorf("批量创建任务失败(%d 条): %w", len(tasks), err)
-	}
-	return nil
+	_, err := r.db.Exec(ctx, b.String(), args...)
+	return err
 }
 
 // FindById 按主键查一个任务。
@@ -288,6 +321,23 @@ func (r *Repository) UpdateSourceRef(ctx context.Context, taskID, sourceRef stri
 		sourceRef, time.Now().UnixMilli(), taskID)
 	if err != nil {
 		return fmt.Errorf("更新任务 %s source_ref 失败: %w", taskID, err)
+	}
+	return nil
+}
+
+// UpdateMsgID 回填状态消息的 id。
+//
+// 媒体组路径需要它:那批任务是【先落库、再发状态消息】——顺序反了的话,
+// 建任务失败时用户已经收到 N 条「已捕获」,而每条的取消按钮都指向一个
+// 不存在的任务。所以 msg_id 只能在消息发出后才知道,只能回填。
+func (r *Repository) UpdateMsgID(ctx context.Context, taskID string, msgID int) error {
+	if msgID == 0 {
+		return nil // 发不出去时保持 NULL,后续阶段会退回发新消息
+	}
+	_, err := r.db.Exec(ctx,
+		"UPDATE tasks SET msg_id = ? WHERE id = ?", msgID, taskID)
+	if err != nil {
+		return fmt.Errorf("回填任务 %s 的 msg_id 失败: %w", taskID, err)
 	}
 	return nil
 }

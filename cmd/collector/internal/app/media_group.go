@@ -32,7 +32,7 @@ func (a *App) flushMediaGroup(ctx context.Context, gid string, meta task.GroupMe
 
 	// 每条消息都重新从 Telegram 取 —— 缓冲里只存 id,不存内容。
 	// 存内容的话,消息被编辑或删除后就会拿着过期数据建任务。
-	msgs, err := a.tg.FetchMessages(ctx, meta.ChatID, msgIDs)
+	msgs, err := a.fetcher.FetchMessages(ctx, meta.ChatID, msgIDs)
 	if err != nil {
 		// 返回错误让组留在 Redis 里等重试 —— 返回 nil 会清掉组,
 		// 那批文件就永久丢失。
@@ -49,19 +49,13 @@ func (a *App) flushMediaGroup(ctx context.Context, gid string, meta task.GroupMe
 		if !m.HasMedia {
 			continue // 媒体组里混入的文本消息,跳过
 		}
-		taskID := newTaskID()
-		// 每条任务各发一条状态消息(而不是 JS 侧那种共享一条看板):
-		// 看板要额外一套 group monitor 状态机才画得出来,而这里串行
-		// 消费队列,一人一条最省事 —— 10 张图就是 10 条各自的结果。
-		noticeID := a.postNotice(ctx, meta.ChatID, taskID)
 		tasks = append(tasks, store.Task{
-			ID:          taskID,
+			ID:          newTaskID(),
 			UserID:      fmt.Sprintf("%d", m.SenderID),
 			ChatID:      nullableString(fmt.Sprintf("%d", m.ChatID)),
 			SourceType:  "telegram_media",
 			FileName:    nullableString(m.FileName),
 			SourceRef:   nullableString(BuildSourceRef(m.ChatID, int64(m.ID))),
-			MsgID:       nullableInt(int64(noticeID)),
 			SourceMsgID: nullableInt(int64(m.ID)),
 			// GroupedID 标识这批来自同一个媒体组,批量取消按它归组。
 			// 之前 SourceMsgID 被写成 grouped_id,那是两个不同含义的
@@ -73,9 +67,30 @@ func (a *App) flushMediaGroup(ctx context.Context, gid string, meta task.GroupMe
 		return nil
 	}
 
+	// 【必须先落库,再发状态消息】
+	//
+	// 顺序反了的话,建任务失败时用户已经收到 N 条「已捕获」,而每条的
+	// 取消按钮都指向一个【不存在的任务】—— 点下去只会得到 "task not
+	// found",消息也永远停在「已捕获」不动。相册批量插入本来就可能整批
+	// 失败(D1 参数上限),所以这不是假想场景。
 	if err := a.repo.CreateBatch(ctx, tasks); err != nil {
 		return fmt.Errorf("批量建任务失败(gid=%s, %d 条): %w", gid, len(tasks), err)
 	}
+
+	// 每条任务各发一条状态消息(而不是 JS 侧那种共享一条看板):
+	// 看板要额外一套 group monitor 状态机才画得出来,而这里串行
+	// 消费队列,一人一条最省事 —— 10 张图就是 10 条各自的结果。
+	// msg_id 是 bot 自己那条状态消息,后续每个阶段都编辑它 ——
+	// 消息发出去才知道 id,所以要回填。
+	for i := range tasks {
+		if err := a.repo.UpdateMsgID(ctx, tasks[i].ID,
+			a.postNotice(ctx, meta.ChatID, tasks[i].ID)); err != nil {
+			// 回填失败不该让这批任务作废 —— 任务已经在库里,后续阶段
+			// 会退回发新消息。只记日志。
+			a.log.Error("回填任务状态消息 id 失败", "taskId", tasks[i].ID, "err", err)
+		}
+	}
+
 	a.log.Info("媒体组已建任务", "gid", gid, "条数", len(tasks))
 	// 与单条路径一样:建完就得排队,否则这批图只会躺在 queued 里。
 	for _, tsk := range tasks {

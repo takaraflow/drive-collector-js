@@ -78,6 +78,9 @@ type TaskRepo interface {
 	CountByUserStatus(ctx context.Context, userID string) (map[string]int, error)
 	Transition(ctx context.Context, taskID string, ev contract.TaskEvent, errMsg *string) (store.TransitionResult, error)
 	UpdateFileMetadata(ctx context.Context, taskID, fileName string, fileSize int64) error
+	// UpdateMsgID 回填状态消息 id —— 媒体组是「先落库、再发消息」,
+	// 消息发出去才知道 id。
+	UpdateMsgID(ctx context.Context, taskID string, msgID int) error
 }
 
 // DriveRepo 是 upload() 需要的网盘仓储能力。

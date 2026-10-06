@@ -154,6 +154,12 @@ func (b *MediaGroupBuffer) Add(ctx context.Context, gid string, chatID, userID, 
 		return err
 	}
 
+	// Info 而不是 Debug:相册链路从「收到消息」到「已建任务」之间原本
+	// 一条日志都没有,而它的故障形态恰恰是「用户发了 10 张图、什么都没
+	// 发生」。没有这行,这类问题在生产日志里完全不可见。
+	b.log.Info("媒体组消息已入缓冲",
+		"gid", gid, "msgId", msgID, "已攒", count)
+
 	// 攒够一批立刻刷 —— 再等就没有意义了。
 	if count >= b.maxBatchSize {
 		b.cancelTimer(gid)
@@ -298,8 +304,14 @@ func (b *MediaGroupBuffer) flush(ctx context.Context, gid string) {
 
 	// 过期太久的组直接丢弃 —— 那些消息多半已经没意义了
 	// (用户早就放弃了这批)。
+	//
+	// Warn 而不是 Debug:这【是用户数据消失】的时刻(重启超过 60 秒就
+	// 会走到这里),记在 Debug 等于没记 —— 排「相册没反应」时看到的
+	// 只有「入缓冲」和什么都没有。
 	if b.Now().UnixMilli()-meta.CreatedAt > b.staleThreshold.Milliseconds() {
-		b.log.Debug("媒体组过期,丢弃", "gid", gid, "条数", len(meta.MsgIDs))
+		b.log.Warn("媒体组已过期,丢弃 —— 这批文件不会建任务",
+			"gid", gid, "条数", len(meta.MsgIDs),
+			"存活", b.Now().UnixMilli()-meta.CreatedAt, "上限", b.staleThreshold.Milliseconds())
 		b.drop(ctx, gid)
 		return
 	}

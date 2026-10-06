@@ -90,6 +90,12 @@ type App struct {
 	// downloader 默认可用 tg;测试注入假实现。
 	// 单独一个字段是因为 download 要用假实现测,而 tg 是具体类型。
 	downloader Downloader
+	// fetcher 是 flushMediaGroup 回源取消息的能力。
+	//
+	// 同样是因为 tg 是具体类型没法注入:媒体组缓冲只存 id,内容一律
+	// 现取 —— 这条「回源 → 建任务」链路是相册坏掉时唯一该测的地方,
+	// 而它此前在 app 层零覆盖。
+	fetcher MessageFetcher
 	// mediaGroups 聚合用户连发的多条消息。为 nil 时媒体组会退化成
 	// 逐条任务(用户发 10 张图变 10 个任务),所以 wiring 时必须给。
 	mediaGroups *task.MediaGroupBuffer
@@ -240,6 +246,7 @@ func New(cfg Config) (*App, error) {
 
 	a.tg = tg
 	a.downloader = tg
+	a.fetcher = tg
 	a.notifier = tg
 	a.notices = tg
 	a.tasks = manager
@@ -508,6 +515,10 @@ func (a *App) onUpdate(ctx context.Context, u tgclient.Update) error {
 		a.log.Info("收到消息",
 			"msgId", msg.ID, "chatId", msg.ChatID,
 			"senderId", msg.SenderID, "hasMedia", msg.HasMedia,
+			// groupedId 必须记:相册的每一条在日志里长得和单文件一模一样
+			// (都是 hasMedia=true、text 为空),不记就分不出「相册没被捕获」
+			// 和「捕获了但建任务失败」。
+			"groupedId", msg.GroupedID,
 			"text", truncate(msg.Text, 64))
 
 		// 命令优先:带媒体的消息里也可能带 / 开头的内容,
