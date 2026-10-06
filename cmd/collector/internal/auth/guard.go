@@ -157,6 +157,12 @@ func NewGuard(db *d1.Client, ownerID string, log Logger) *Guard {
 	}
 }
 
+// OwnerID 返回配置里的 owner telegram id(可能为空)。
+//
+// /users 要用它标出「所有者」—— owner 不落库,只存在于配置,
+// 所以列表查询必须把它当参数喂进去,否则管理员永远看不到自己。
+func (g *Guard) OwnerID() string { return g.ownerID }
+
 // Role 取用户角色。
 func (g *Guard) Role(ctx context.Context, userID string) (Role, error) {
 	if userID == "" {

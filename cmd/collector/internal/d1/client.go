@@ -147,6 +147,15 @@ func (c *Client) FetchOne(ctx context.Context, sql string, params ...interface{}
 	return rows[0], nil
 }
 
+// Ping 探一次连通性 —— /diagnosis 的体检项。
+//
+// 只跑 SELECT 1:不碰任何表,所以它坏掉只可能是网络或凭据问题,
+// 不会因为某张表被重建而误报「D1 挂了」。
+func (c *Client) Ping(ctx context.Context) error {
+	_, err := c.FetchAll(ctx, "SELECT 1 AS ok")
+	return err
+}
+
 // Exec 跑写语句(INSERT/UPDATE/DELETE),返回受影响行数。
 func (c *Client) Exec(ctx context.Context, sql string, params ...interface{}) (int64, error) {
 	body, err := json.Marshal(payload{SQL: sql, Params: paramsOrEmpty(params)})

@@ -1,10 +1,10 @@
 // Package dispatcher 是命令路由层。
 //
-// 范围(B 方案):只实现用户日常真正常用的命令。刻意不实现
-// /scan_dup(重复文件扫描)、/mcp*、/users 与 /task_queue 看板、/diagnosis
-// —— 它们的入口在别处有替代,砍掉省 659 行。
+// 范围(B 方案):只实现用户日常真正常用的命令。管理看板
+// (/task_queue /users /diagnosis)与开关服务模式都在 app 层 ——
+// 它们要写任务状态机与设置表,而这里的接口面只有「读权限 + 读任务」。
 //
-// 未实现的命令回「暂未支持」而不是静默忽略 —— 静默忽略会让用户
+// 仍未实现的命令回「暂未支持」而不是静默忽略 —— 静默忽略会让用户
 // 以为 bot 死了。
 package dispatcher
 
@@ -51,7 +51,10 @@ type Authorizer interface {
 // Renderer 渲染各类消息。
 type Renderer interface {
 	Welcome(userID string) string
-	Help() string
+	// Help 带 userID —— 管理员那一段命令列表只对管理员显示,
+	// 不给身份就只能要么全显示(普通用户看到一堆用不了的命令),
+	// 要么全不显示(管理员永远不知道 /task_queue 存在)。
+	Help(ctx context.Context, userID string) string
 }
 
 // Dispatcher 分发命令。
@@ -118,7 +121,7 @@ func (d *Dispatcher) HandleText(ctx context.Context, chatID int64, userID, text 
 	case "/start":
 		return true, d.send(ctx, chatID, d.deps.Renders.Welcome(userID))
 	case "/help":
-		return true, d.send(ctx, chatID, d.deps.Renders.Help())
+		return true, d.send(ctx, chatID, d.deps.Renders.Help(ctx, userID))
 	case "/status":
 		// /status 已搬到 app(见 app/status.go):取消/重试要写任务状态机,
 		// Dispatcher 的接口面只有只读权限。app 在进 Dispatcher 前拦截它,

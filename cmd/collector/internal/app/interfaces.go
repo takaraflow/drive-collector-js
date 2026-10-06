@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/youngsx/drive-collector/cmd/collector/internal/auth"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/contract"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/drive"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/rclone"
@@ -73,6 +74,30 @@ type DriveRepo interface {
 	UpdateConfigData(ctx context.Context, driveID, userID string, cfg drive.DriveConfig) error
 }
 
+// AdminRepo 是管理看板(/task_queue /users)与开关服务模式需要的仓储能力。
+//
+// 单独一个接口而不是并进 TaskRepo:这三个方法只被管理员命令用,
+// 并进去会让每个已有 mock 都得多实现三个方法 —— 而它们跟转存主链路
+// 毫无关系。
+type AdminRepo interface {
+	QueueOverview(ctx context.Context, limit int) (store.QueueOverview, error)
+	TasksByStatus(ctx context.Context, status string, page, pageSize int) (store.TasksByStatus, error)
+	ListUsersForAdmin(ctx context.Context, filter string, page, pageSize int, ownerID string) (store.AdminUsersPage, error)
+	GetSetting(ctx context.Context, key, def string) (string, error)
+	SetSetting(ctx context.Context, key, value string) error
+}
+
+// Authorizer 是 App 需要的权限判定能力。
+//
+// 与 dispatcher 里的同名接口一致 —— 两层各判各的,但语义必须一样。
+// 抽接口而不是直接用 *auth.Guard:守卫是真·安全路径,而「管理员能不能
+// 重试别人的任务」这类判定不接真 D1 就测不到。接了接口才能在测试里
+// 真的把权限关掉,而不是靠「没装配就全放行」蒙混过关。
+type Authorizer interface {
+	Can(ctx context.Context, userID string, action auth.Action) (bool, error)
+	IsBanned(ctx context.Context, userID string) (bool, error)
+}
+
 // 接口实现断言 —— 编译期保证真实实现满足它们。
 // 少一个会在调用时才炸,而调用点是 upload(),症状是「上传全失败」。
 var (
@@ -81,4 +106,6 @@ var (
 	_ Downloader     = (*tgclient.Client)(nil)
 	_ MessageFetcher = (*tgclient.Client)(nil)
 	_ Rclone         = (*rclone.Runner)(nil)
+	_ AdminRepo      = (*store.Repository)(nil)
+	_ Authorizer     = (*auth.Guard)(nil)
 )
