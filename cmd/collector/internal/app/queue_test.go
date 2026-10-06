@@ -132,8 +132,13 @@ func TestProcessTaskRunsDownloadThenUpload(t *testing.T) {
 	if dl.calls != 1 {
 		t.Errorf("下载调用 %d 次,期望 1", dl.calls)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "photo.jpg")); err != nil {
-		t.Errorf("下载的文件不在 %s: %v", dir, err)
+	// 上传成功后本地文件【应该】已被删掉。
+	//
+	// 这条断言以前反过来(要求文件留着)。留着的东西没人用,却会把容器
+	// 1GB 盘撑满,而盘满的表现是【所有】任务一起失败,排查时却会往
+	// 网盘方向找 —— 失败/取消路径残留更甚,所以现在无条件删。
+	if _, err := os.Stat(filepath.Join(dir, "photo.jpg")); err == nil {
+		t.Errorf("上传成功后本地文件仍留在 %s —— 会把容器磁盘撑爆", dir)
 	}
 
 	var sawDownload, sawUpload bool

@@ -30,6 +30,76 @@ const (
 	taskWorkers = 1
 )
 
+// ============================================================================
+// 运行中任务账本
+//
+// 为什么需要它:rclone 层早就有杀进程组的能力(runner.go 里
+// exec.CommandContext + Setpgid + cmd.Cancel),但那个进程句柄是局部变量,
+// 出了 Runner 就没人能碰到。缺的从来不是「杀」,是「谁在跑」的账 ——
+// 没有账本,取消按钮就只能改数据库状态,进程照跑到底,文件照样传上去,
+// 而 EventComplete 会被状态机拒掉:用户看到「已取消」,文件其实在网盘里。
+//
+// 这就是全部内容:一个 map。不要 registry 接口、不要工厂、不要生命周期
+// 管理器 —— 单进程串行 worker(taskWorkers=1)下,map 就是账本。
+// ============================================================================
+
+// runningTask 是账本里的一条:这个任务归谁、怎么掐死它。
+type runningTask struct {
+	userID string
+	cancel context.CancelFunc
+}
+
+// registerRunning 登记一个正在跑的任务。
+func (a *App) registerRunning(taskID, userID string, cancel context.CancelFunc) {
+	a.runningMu.Lock()
+	defer a.runningMu.Unlock()
+	if a.running == nil {
+		a.running = map[string]*runningTask{}
+	}
+	a.running[taskID] = &runningTask{userID: userID, cancel: cancel}
+}
+
+// unregisterRunning 注销。必须在 defer 里,和 cancel 一起 —— 只 cancel
+// 不注销的话,map 会一直长,封禁时会把早就结束的任务也「杀」一遍。
+func (a *App) unregisterRunning(taskID string) {
+	a.runningMu.Lock()
+	defer a.runningMu.Unlock()
+	delete(a.running, taskID)
+}
+
+// cancelRunning 掐死指定任务。返回是否命中 —— 没命中只说明它不在跑
+// (排队中,或已经结束),不是错误。
+func (a *App) cancelRunning(taskID string) bool {
+	a.runningMu.Lock()
+	t := a.running[taskID]
+	a.runningMu.Unlock()
+	if t == nil {
+		return false
+	}
+	t.cancel()
+	return true
+}
+
+// CancelUserTasks 掐死某用户的全部在跑任务,返回掐了几条。
+//
+// 封禁时必须调:人被封了任务却还在替他上传,等于封禁没生效。
+// 和 ClearUserSessions 并排放在封禁那一步 —— 都是「封了之后要收拾
+// 干净的东西」。
+func (a *App) CancelUserTasks(_ context.Context, userID string) int {
+	a.runningMu.Lock()
+	var hit []*runningTask
+	for _, t := range a.running {
+		if t.userID == userID {
+			hit = append(hit, t)
+		}
+	}
+	a.runningMu.Unlock()
+	for _, t := range hit {
+		t.cancel()
+	}
+	return len(hit)
+}
+
 // enqueue 把新建的任务排进处理队列。
 //
 // 队列满时阻塞而不是丢弃 —— 见 pendingQueueSize 的说明。
@@ -72,9 +142,29 @@ func (a *App) runTaskQueue(ctx context.Context) {
 func (a *App) processTask(ctx context.Context, taskID string) {
 	started := time.Now()
 
+	// 每个任务一条独立的可取消 ctx,并登记进账本。
+	//
+	// ctx 一取消,底下的 rclone Runner 会通过 cmd.Cancel 杀掉整个进程组
+	// —— 杀的能力本来就有,这里只是把句柄交出去,让取消按钮够得着。
+	ctx, cancel := context.WithCancel(ctx)
+	t := a.findTask(ctx, taskID)
+	// t 可能是 nil(查库失败/任务不存在),下面 notify 对 nil 是安全的,
+	// 但取 UserID 不是 —— 归属查不到就登记成空 userID,封禁时自然不会
+	// 误杀别人的任务。
+	userID := ""
+	if t != nil {
+		userID = t.UserID
+	}
+	a.registerRunning(taskID, userID, cancel)
+	// cancel 必须在 defer 里:成功路径没人调它,context 会一直挂着,
+	// 连带它引用的 timer/goroutine 一起泄漏。
+	defer func() {
+		a.unregisterRunning(taskID)
+		cancel()
+	}()
+
 	// 每一步都把状态写回用户那条消息 —— 用户唯一能看到的东西就是它。
 	// 建任务时已经发过「已捕获」,这里接着编辑成「正在下载」…
-	t := a.findTask(ctx, taskID)
 	busy := [][]tgclient.Button{{
 		{Text: noticeCancelBtn, Data: "cancel_confirm_" + taskID},
 	}}

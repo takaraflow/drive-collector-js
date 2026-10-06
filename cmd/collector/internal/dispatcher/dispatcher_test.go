@@ -90,11 +90,19 @@ type harness struct {
 type fakeSessions struct {
 	cleared []string
 	err     error
+	// killed 是 CancelUserTasks 要掐的用户,count 是它回报的条数。
+	killed []string
+	count  int
 }
 
 func (f *fakeSessions) ClearUserSessions(_ context.Context, userID string) error {
 	f.cleared = append(f.cleared, userID)
 	return f.err
+}
+
+func (f *fakeSessions) CancelUserTasks(_ context.Context, userID string) int {
+	f.killed = append(f.killed, userID)
+	return f.count
 }
 
 func newHarness() *harness {
@@ -418,10 +426,29 @@ func TestBanClearsSessions(t *testing.T) {
 	}
 }
 
+// TestBanKillsRunningTasks —— 封禁要掐掉该用户在跑的任务。
+//
+// 封了人却让他的文件继续往网盘传,等于封禁没生效。回执里也要说明
+// 掐了几条,否则被封的人会以为已经停了。
+func TestBanKillsRunningTasks(t *testing.T) {
+	h := newHarness()
+	h.sessions.count = 2
+	if _, err := h.d.HandleText(context.Background(), 1, "admin", "/ban u9 confirm"); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.sessions.killed) != 1 || h.sessions.killed[0] != "u9" {
+		t.Errorf("掐任务 = %v,应为 [u9]", h.sessions.killed)
+	}
+	if !strings.Contains(last(t, h), "2") {
+		t.Errorf("回执没提掐掉几条: %q", last(t, h))
+	}
+}
+
 // TestUnbanKeepsSessions —— 解封不清会话。
 //
 // 解封只是把角色改回 user,之前删掉的东西没理由在这里补:用户
-// 重新走一遍绑定就行,悄悄重建旧会话反而可能带进过期凭据。
+// 重新走一遍绑定就行,悄悄重建旧会话反而可能带进过期凭据。解封同理
+// 不该去「恢复」任务 —— 那些任务已经被掐了,重新排队是另一件事。
 func TestUnbanKeepsSessions(t *testing.T) {
 	h := newHarness()
 	h.auth.roles["u9"] = auth.RoleBanned
@@ -430,6 +457,9 @@ func TestUnbanKeepsSessions(t *testing.T) {
 	}
 	if len(h.sessions.cleared) != 0 {
 		t.Errorf("解封时不该清会话,却清了 %v", h.sessions.cleared)
+	}
+	if len(h.sessions.killed) != 0 {
+		t.Errorf("解封时不该掐任务,却掐了 %v", h.sessions.killed)
 	}
 }
 
