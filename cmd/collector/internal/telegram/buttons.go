@@ -55,20 +55,43 @@ func InlineKeyboard(log Logger, rows ...[]Button) tg.ReplyMarkupClass {
 	return markup.InlineKeyboard(kbRows...)
 }
 
-// sendWithMarkup 发消息并带内联键盘。
-func (c *Client) sendWithMarkup(ctx context.Context, chatID int64, text string, markup tg.ReplyMarkupClass) error {
+// sendWithMarkup 发消息并带内联键盘,返回新消息的 id。
+//
+// 走 API() 而不是 gotd 的 SendMessage 便捷方法:后者把回执扔了,
+// 拿不到 id —— 而任务状态消息必须知道自己的 id(要写进 tasks.msg_id,
+// 后面每个阶段都编辑这一条)。
+func (c *Client) sendWithMarkup(ctx context.Context, chatID int64, text string, markup tg.ReplyMarkupClass) (int, error) {
 	peer, err := c.peerFor(ctx, chatID)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	if err := c.tg.SendMessage(ctx, &tg.MessagesSendMessageRequest{
+	req := &tg.MessagesSendMessageRequest{
 		Peer:        peer,
 		Message:     text,
 		ReplyMarkup: markup,
-	}); err != nil {
-		return fmt.Errorf("telegram: 发送消息失败(chat=%d): %w", chatID, err)
 	}
-	return nil
+	if req.RandomID == 0 {
+		id, err := c.tg.RandInt64()
+		if err != nil {
+			return 0, err
+		}
+		req.RandomID = id
+	}
+	updates, err := c.tg.API().MessagesSendMessage(ctx, req)
+	if err != nil {
+		return 0, fmt.Errorf("telegram: 发送消息失败(chat=%d): %w", chatID, err)
+	}
+	return messageIDOf(updates), nil
+}
+
+func (c *Client) sendWithButtons(ctx context.Context, chatID int64, text string, buttons [][]Button) error {
+	_, err := c.sendWithMarkup(ctx, chatID, text, InlineKeyboard(c.log, buttons...))
+	return err
+}
+
+// SendWithButtonsAndID 发带按钮的消息并返回消息 id —— 任务状态消息用。
+func (c *Client) SendWithButtonsAndID(ctx context.Context, chatID int64, text string, buttons [][]Button) (int, error) {
+	return c.sendWithMarkup(ctx, chatID, text, InlineKeyboard(c.log, buttons...))
 }
 
 // EditWithMarkup 改消息并更新键盘。
@@ -80,14 +103,19 @@ func (c *Client) EditWithMarkup(ctx context.Context, chatID int64, msgID int, te
 	if err != nil {
 		return err
 	}
-	var result tg.MessagesAffectedMessages
-	err = c.tg.Invoke(ctx, &tg.MessagesEditMessageRequest{
+	// 用 gotd 生成的方法而不是 Invoke + 手写 result。
+	//
+	// messages.editMessage 返回的是 Updates 而不是 AffectedMessages,
+	// 手写 result 会让解码器拿 Updates 去填 AffectedMessages,报
+	// "unexpected id 0x74ae4240"(那是 updates 的 TL id)——
+	// 生产现场:所有编辑消息与按钮回应全挂,而 sendMessage 正常,
+	// 于是表现为「/files 一直转圈、按钮点了没反应」。
+	if _, err := c.tg.API().MessagesEditMessage(ctx, &tg.MessagesEditMessageRequest{
 		Peer:        peer,
 		ID:          msgID,
 		Message:     text,
 		ReplyMarkup: markup,
-	}, &result)
-	if err != nil {
+	}); err != nil {
 		return fmt.Errorf("telegram: 编辑消息失败(chat=%d msg=%d): %w", chatID, msgID, err)
 	}
 	return nil
@@ -95,7 +123,7 @@ func (c *Client) EditWithMarkup(ctx context.Context, chatID int64, msgID int, te
 
 // SendWithButtons 发带按钮的消息 —— 给 Dispatcher 用。
 func (c *Client) SendWithButtons(ctx context.Context, chatID int64, text string, buttons [][]Button) error {
-	return c.sendWithMarkup(ctx, chatID, text, InlineKeyboard(c.log, buttons...))
+	return c.sendWithButtons(ctx, chatID, text, buttons)
 }
 
 // EditWithButtons 改消息并更新按钮。
@@ -108,13 +136,14 @@ func (c *Client) EditWithButtons(ctx context.Context, chatID int64, msgID int, t
 // 必须在 15 秒内回应,否则客户端会显示转圈直到超时。
 // B 方案的管理命令(封禁/改角色)依赖这个做二次确认。
 func (c *Client) AnswerCallback(ctx context.Context, callbackID int64, text string, alert bool) error {
-	var result tg.MessagesBotCallbackAnswer
-	err := c.tg.Invoke(ctx, &tg.MessagesSetBotCallbackAnswerRequest{
+	// 同 EditWithMarkup:messages.setBotCallbackAnswer 返回 Bool,
+	// 不是 BotCallbackAnswer。手写 result 会报
+	// "unexpected id 0x997275b5"(boolTrue)——按钮点了永远转圈。
+	if _, err := c.tg.API().MessagesSetBotCallbackAnswer(ctx, &tg.MessagesSetBotCallbackAnswerRequest{
 		QueryID: callbackID,
 		Message: text,
 		Alert:   alert,
-	}, &result)
-	if err != nil {
+	}); err != nil {
 		return fmt.Errorf("telegram: 回应按钮失败: %w", err)
 	}
 	return nil

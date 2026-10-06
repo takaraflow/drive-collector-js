@@ -289,6 +289,9 @@ func (a *App) cancelTask(ctx context.Context, userID, taskID string) string {
 		a.log.Error("取消任务失败", "taskId", taskID, "err", err)
 		return statusTaskNotFound
 	}
+	// 取消按钮就挂在状态消息上 —— 不改那条消息,用户点了取消却看到
+	// 它还在「正在下载」,会以为按钮没生效。
+	a.notify(ctx, a.findTask(ctx, taskID), noticeCancelled, nil)
 	return statusCmdSent
 }
 

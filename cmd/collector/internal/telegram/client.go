@@ -344,22 +344,20 @@ func messageIDFromUpdates(list []tg.UpdateClass) int {
 
 // EditMessage 改掉已有消息 —— 用户体验上「进度条在同一行更新」。
 //
-// gotd 没有这个便捷方法,直接 Invoke。返回值里的 MessageClass
-// 可能是 nil(消息被删了),所以只看错误码。
+// 返回值里可能有 MessageClass 也可能没有(消息被删了),所以只看错误码。
 func (c *Client) EditMessage(ctx context.Context, chatID int64, msgID int, text string) error {
 	peer, err := c.peerFor(ctx, chatID)
 	if err != nil {
 		return err
 	}
-	// output 用具体类型:Invoke 的签名是 bin.Decoder,
-	// 而 MessagesAffectedMessagesClass 是接口,不是 bin.Decoder。
-	var result tg.MessagesAffectedMessages
-	err = c.tg.Invoke(ctx, &tg.MessagesEditMessageRequest{
+	// 走 gotd 生成的方法:它自己知道 messages.editMessage 返回 Updates。
+	// 手写 result(以前写的是 MessagesAffectedMessages)会让【每一次】
+	// 编辑都失败,而 sendMessage 正常 —— 症状是「/files 一直转圈」。
+	if _, err := c.tg.API().MessagesEditMessage(ctx, &tg.MessagesEditMessageRequest{
 		Peer:    peer,
 		ID:      msgID,
 		Message: text,
-	}, &result)
-	if err != nil {
+	}); err != nil {
 		return fmt.Errorf("telegram: 编辑消息失败(chat=%d msg=%d): %w", chatID, msgID, err)
 	}
 	return nil

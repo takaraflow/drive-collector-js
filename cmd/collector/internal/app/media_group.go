@@ -49,14 +49,20 @@ func (a *App) flushMediaGroup(ctx context.Context, gid string, meta task.GroupMe
 		if !m.HasMedia {
 			continue // 媒体组里混入的文本消息,跳过
 		}
+		taskID := newTaskID()
+		// 每条任务各发一条状态消息(而不是 JS 侧那种共享一条看板):
+		// 看板要额外一套 group monitor 状态机才画得出来,而这里串行
+		// 消费队列,一人一条最省事 —— 10 张图就是 10 条各自的结果。
+		noticeID := a.postNotice(ctx, meta.ChatID, taskID)
 		tasks = append(tasks, store.Task{
-			ID:          newTaskID(),
+			ID:          taskID,
 			UserID:      fmt.Sprintf("%d", m.SenderID),
+			ChatID:      nullableString(fmt.Sprintf("%d", m.ChatID)),
 			SourceType:  "telegram_media",
 			FileName:    nullableString(m.FileName),
 			SourceRef:   nullableString(BuildSourceRef(m.ChatID, int64(m.ID))),
-			MsgID:       nullableInt(int64(m.ID)),
-			SourceMsgID: nullableInt(m.SourceMsgID),
+			MsgID:       nullableInt(int64(noticeID)),
+			SourceMsgID: nullableInt(int64(m.ID)),
 			// GroupedID 标识这批来自同一个媒体组,批量取消按它归组。
 			// 之前 SourceMsgID 被写成 grouped_id,那是两个不同含义的
 			// 字段混用了 —— 会让「按源消息反查任务」静默失效。
