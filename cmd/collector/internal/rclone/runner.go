@@ -426,6 +426,25 @@ func (c Config) execArgs() []string {
 	return []string{"--config", "/dev/null"}
 }
 
+// Version 返回 rclone 的版本首行 —— /diagnosis 的体检项。
+//
+// 走裸 exec 而不是 Run:Run 的管道只收 --use-json-log 的日志流,
+// 而 `rclone version` 的版本号在 stdout 上,会被整条丢掉。
+func (r *Runner) Version(ctx context.Context) (string, error) {
+	cmd := exec.CommandContext(ctx, r.Binary, "--config", "/dev/null", "version")
+	cmd.Env = r.Env
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("rclone: version 失败: %w", err)
+	}
+	// 输出形如 "rclone v1.68.2\n- ..."，取第一行就是版本号。
+	first, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n")
+	if first == "" {
+		return "", fmt.Errorf("rclone: version 返回空输出")
+	}
+	return first, nil
+}
+
 // Obscure 调 rclone obscure 混淆密码。
 //
 // 与 JS 侧 CloudTool._obscureRequired 一致:出错的密码绝不能落库 ——

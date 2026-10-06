@@ -98,10 +98,17 @@ type App struct {
 	rclone      Rclone
 	repo        TaskRepo
 	drives      DriveRepo
-	dispatcher  *dispatcher.Dispatcher
+	// admin 是管理看板(/task_queue /users)与访问模式开关用的仓储。
+	// 与 repo 分开是因为接口面不同 —— 前者是转存主链路,后者只服务
+	// 管理员命令。测试时各自替换,互不牵连。
+	admin AdminRepo
+	// ownerID 是配置里的 owner telegram id;/users 用它标出所有者。
+	ownerID    string
+	dispatcher *dispatcher.Dispatcher
 	// auth 是 RBAC 判定。为 nil 时一律放行 —— 没装配 Auth 就没有
 	// 角色概念,此时拦截只会把所有人挡在门外。
-	auth *auth.Guard
+	// 「只有管理员能做」的判定走 canAdmin,它在 nil 时返回 false。
+	auth Authorizer
 	// notifier 默认是 tg;测试注入假实现 —— 没绑盘的提示是本包
 	// 唯一会给用户发消息的地方,必须能测。
 	notifier Notifier
@@ -139,6 +146,12 @@ type App struct {
 	// ponytail: 与 JS 侧一样只增不清,量级是「每用户每条消息一次」,
 	// 真成了内存问题再按时间窗清理。
 	filesRefreshAt map[string]time.Time
+
+	// modeMu/modeCached 保护访问模式的进程内缓存 —— 全局守卫每条
+	// 消息都要读一次,不缓存就是每条消息一次 D1 往返。
+	modeMu       sync.Mutex
+	modeCached   string
+	modeCachedAt time.Time
 }
 
 // filesMemEntry 是内存缓存的一条。
@@ -167,11 +180,19 @@ func New(cfg Config) (*App, error) {
 	}
 
 	runner := rclone.NewRunner()
+	// Auth 为 nil 是允许的(没装配权限层就没有角色概念),所以 ownerID
+	// 要单独取 —— 直接 cfg.Auth.OwnerID() 会在 nil 上炸,炸的还是构造期。
+	ownerID := ""
+	if cfg.Auth != nil {
+		ownerID = cfg.Auth.OwnerID()
+	}
 	a := &App{
 		locks:          drive.NewSessionLock(),
 		rclone:         runner,
 		repo:           cfg.Repo,
 		drives:         cfg.Drives,
+		admin:          cfg.Repo,
+		ownerID:        ownerID,
 		rcloneRunner:   runner,
 		cfg:            cfg,
 		log:            cfg.Log,
@@ -222,8 +243,11 @@ func New(cfg Config) (*App, error) {
 
 	// Dispatcher 在这里装配而不是在 main —— 它需要 tg / auth / tasks 三样
 	// 依赖,而 tg 是本包内部创建的。放外面就得额外导出一个构造顺序约束。
-	a.auth = cfg.Auth
+	// 只在真的装配了 Auth 时才赋给接口字段:把 nil 的 *auth.Guard 塞进
+	// 接口会得到一个「非 nil 的接口包着 nil 指针」,于是 a.auth == nil
+	// 为假,canAdmin 会走进真调用然后在 nil 接收者上炸。
 	if cfg.Auth != nil {
+		a.auth = cfg.Auth
 		a.dispatcher = dispatcher.New(dispatcher.Deps{
 			Telegram: tg,
 			Auth:     cfg.Auth,
@@ -423,6 +447,16 @@ func (a *App) HandleUploadWebhook(ctx context.Context, taskID string) (task.Resu
 // 反过来的话,用户发「/status」会先被判成「无媒体的文本消息」而丢弃 ——
 // 而带媒体的 /status 之类消息会被误建任务。
 func (a *App) onUpdate(ctx context.Context, u tgclient.Update) error {
+	// 全局守卫先行 —— 与 JS 侧 _globalGuard 同一位置、同一顺序:
+	// 黑名单最高优先级(连 owner 也不例外),维护模式次之。
+	//
+	// 必须在这里而不是 Dispatcher 里:app 自己接管的命令(/files /drive
+	// /status 管理看板)根本不经过 Dispatcher,守卫放里面就等于这些命令
+	// 对封禁用户和普通用户全部敞开。
+	if done, err := a.globalGuard(ctx, u); done || err != nil {
+		return err
+	}
+
 	switch u.Kind {
 	case tgclient.KindCallbackQuery:
 		return a.handleCallback(ctx, u)
@@ -518,6 +552,22 @@ func (a *App) routeCommand(ctx context.Context, msg messageInfo) error {
 		return a.handleFilesCommand(ctx, msg)
 	case "/status":
 		return a.handleStatusCommand(ctx, msg)
+
+	// 管理看板。放在 Dispatcher 之前的原因与 /status 相同:重试失败
+	// 任务要写状态机,而 Dispatcher 的接口面只有只读权限。
+	case "/task_queue":
+		return a.handleTaskQueueCommand(ctx, msg)
+	case "/users":
+		return a.handleAdminUsersCommand(ctx, msg)
+	case "/diagnosis":
+		return a.handleDiagnosisCommand(ctx, msg)
+
+	// 服务模式开关。/open_service ≡ /status_public、/close_service ≡
+	// /status_private —— 与 Dispatcher.adminAliases 里的映射一致。
+	case "/status_public", "/open_service":
+		return a.handleModeSwitchCommand(ctx, msg, store.AccessModePublic)
+	case "/status_private", "/close_service":
+		return a.handleModeSwitchCommand(ctx, msg, store.AccessModePrivate)
 	}
 
 	if a.dispatcher == nil {
@@ -701,13 +751,35 @@ func (a *App) handleCallback(ctx context.Context, u tgclient.Update) error {
 
 	case strings.HasPrefix(data, "cancel_confirm_"), strings.HasPrefix(data, "cancel_execute_"),
 		strings.HasPrefix(data, "retry_confirm_"), strings.HasPrefix(data, "retry_execute_"),
-		data == "task_action_back":
+		data == "task_action_back", data == "status_general":
 		return a.handleStatusCallback(ctx, cb, data)
 
 	case data == "remote_folder_menu":
 		// /status 里的「设置保存路径」入口:告诉用户当前目录 + 怎么改。
 		answer("", false)
 		return a.editRemoteFolderMenu(ctx, cb)
+
+	// 管理看板的入口按钮(挂在 /status 顶部)与看板内部按钮。
+	case data == "task_queue_open":
+		answer("", false)
+		return a.openTaskQueue(ctx, cb)
+
+	case data == "admin_users_open":
+		answer("", false)
+		return a.openAdminUsers(ctx, cb)
+
+	case data == "diagnosis_run":
+		answer("正在诊断", false)
+		return a.editDiagnosisReport(ctx, cb.ChatID, cb.MsgID)
+
+	case strings.HasPrefix(data, "tq_"), strings.HasPrefix(data, "retry_failed_page_"):
+		return a.handleTaskQueueCallback(ctx, cb, data)
+
+	case strings.HasPrefix(data, "au_"), data == "admin_users_back":
+		return a.handleAdminUsersCallback(ctx, cb, data)
+
+	case strings.HasPrefix(data, "mode_switch_"):
+		return a.handleModeSwitchCallback(ctx, cb, data)
 	}
 
 	a.log.Debug("收到未处理的按钮点击", "data", data)

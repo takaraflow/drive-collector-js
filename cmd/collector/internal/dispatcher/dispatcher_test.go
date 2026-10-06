@@ -69,8 +69,8 @@ func (a *fakeAuth) SetRole(_ context.Context, userID string, role auth.Role) err
 // fakeRenders 返回固定文案。
 type fakeRenders struct{}
 
-func (fakeRenders) Welcome(uid string) string { return "welcome:" + uid }
-func (fakeRenders) Help() string              { return "help-text" }
+func (fakeRenders) Welcome(uid string) string           { return "welcome:" + uid }
+func (fakeRenders) Help(context.Context, string) string { return "help-text" }
 
 type harness struct {
 	d    *Dispatcher

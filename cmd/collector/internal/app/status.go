@@ -120,7 +120,7 @@ func (a *App) statusView(ctx context.Context, userID, sub string) (string, [][]t
 				"📡 服务状态: ✅ 正常"
 		}
 	}
-	return text, statusButtons(ov), nil
+	return text, statusButtons(ov, isAdmin), nil
 }
 
 // renderDriveStatus 「🔑 网盘绑定: …」一行。
@@ -202,9 +202,9 @@ func statusText(s contract.TaskStatus) string {
 
 // statusButtons 操作按钮 —— 与 JS _getPersonalStatusButtons 一致。
 //
-// 管理员那三枚(用户列表 / 全局队列 / 系统诊断)不在这里:它们指向
-// 尚未迁移的管理看板。挂上只会让管理员点进死路,等看板迁完再补。
-func statusButtons(ov queueOverview) [][]tgclient.Button {
+// 管理员那三枚(用户列表 / 全局队列 / 系统诊断)挂在最后:它们指向
+// 管理看板,普通用户看不到也不需要。
+func statusButtons(ov queueOverview, isAdmin bool) [][]tgclient.Button {
 	buttons := [][]tgclient.Button{}
 	if len(ov.activeTasks) > 0 && ov.activeTasks[0].ID != "" {
 		buttons = append(buttons, []tgclient.Button{
@@ -223,6 +223,15 @@ func statusButtons(ov queueOverview) [][]tgclient.Button {
 		{Text: "📁 浏览文件", Data: "files_page_0"},
 		{Text: "⚙️ 设置保存路径", Data: "remote_folder_menu"},
 	})
+	if isAdmin {
+		buttons = append(buttons,
+			[]tgclient.Button{
+				{Text: statusBtnUserList, Data: "admin_users_open"},
+				{Text: statusBtnTaskQueue, Data: "task_queue_open"},
+			},
+			[]tgclient.Button{{Text: statusBtnDiagnosis, Data: "diagnosis_run"}},
+		)
+	}
 	return buttons
 }
 
@@ -235,7 +244,7 @@ func (a *App) handleStatusCallback(ctx context.Context, cb tgclient.CallbackCont
 	}
 
 	switch {
-	case data == "task_action_back":
+	case data == "task_action_back", data == "status_general":
 		answer(statusActionCanceled, false)
 		return a.redrawStatus(ctx, cb)
 
@@ -295,13 +304,24 @@ func (a *App) retryTask(ctx context.Context, userID, taskID string) string {
 }
 
 // ownsTask 任务是否属于该用户。
+//
+// 管理员(task:cancel:any)对任何任务都算「有权」—— 与 JS 侧
+// TaskManager.retryTask / cancelTask 的判定一致。不放行的话,
+// /task_queue 的「重试本页失败任务」会对每个任务都返回「任务已不存在
+// 或无权操作」:管理员看的是全站任务,归属校验却按「这是我的」判。
 func (a *App) ownsTask(ctx context.Context, userID, taskID string) bool {
 	t, err := a.repo.FindById(ctx, taskID)
 	if err != nil {
 		a.log.Error("查任务失败", "taskId", taskID, "err", err)
 		return false
 	}
-	return t != nil && t.UserID == userID
+	if t == nil {
+		return false
+	}
+	if t.UserID == userID {
+		return true
+	}
+	return a.canAdmin(ctx, userID, auth.ActionTaskCancelAny)
 }
 
 // redrawStatus 把消息重画回 /status 视图(取消操作后返回)。
@@ -348,6 +368,20 @@ func (a *App) can(ctx context.Context, userID string, action auth.Action) bool {
 		return false
 	}
 	return ok
+}
+
+// canAdmin 问「这个动作是不是只有管理员能做」。
+//
+// 与 can 的区别只有一处,但那处是要害:can 在没装配 Auth 时放行(降级
+// 模式下没有角色概念),而这里必须返回 false —— 没装配 Auth 就等于
+// 没有一个人是管理员,不是「所有人都是管理员」。
+// 少了这条,ownsTask 会把 can 的降级放行当成管理员授权,于是任何
+// 人都能取消和重试别人的转存任务。
+func (a *App) canAdmin(ctx context.Context, userID string, action auth.Action) bool {
+	if a.auth == nil {
+		return false
+	}
+	return a.can(ctx, userID, action)
 }
 
 // formatUptime 把时长写成 JS _getUptime 那样的「3h 5m 9s」。

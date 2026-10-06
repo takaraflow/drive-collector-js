@@ -292,6 +292,42 @@ func (c *Coordinator) ownerAlive(ctx context.Context, instanceID string) bool {
 	return age < instanceTimeout.Milliseconds()
 }
 
+// ActiveInstances 列出当前活跃的实例 —— /diagnosis 的「多实例状态」段。
+//
+// 判活跃靠 lastHeartbeat 新鲜度而不是 key 是否存在:键的 TTL 是
+// instanceTimeout 的两倍,心跳断了之后还会多活 45 秒。拿「键在」
+// 当「实例活着」会把一个已经下线的实例算进诊断报告里。
+func (c *Coordinator) ActiveInstances(ctx context.Context) ([]InstanceInfo, error) {
+	if c.redis == nil {
+		return nil, fmt.Errorf("instance: 未配置 Redis")
+	}
+	var cursor uint64
+	var out []InstanceInfo
+	for {
+		keys, next, err := c.redis.Scan(ctx, cursor, instancePrefix+"*", 100).Result()
+		if err != nil {
+			return nil, fmt.Errorf("instance: 扫描活跃实例失败: %w", err)
+		}
+		for _, key := range keys {
+			raw, err := c.redis.Get(ctx, key).Bytes()
+			if err != nil {
+				continue // 扫描与读取之间实例可能刚好下线
+			}
+			var info InstanceInfo
+			if err := json.Unmarshal(raw, &info); err != nil {
+				continue
+			}
+			if c.now().UnixMilli()-info.LastHeartbeat < instanceTimeout.Milliseconds() {
+				out = append(out, info)
+			}
+		}
+		if next == 0 {
+			return out, nil
+		}
+		cursor = next
+	}
+}
+
 // AcquireTelegramLock 尝试拿到 telegram_client 锁。
 //
 // 语义与 JS 侧 _tryAcquire 一致:
