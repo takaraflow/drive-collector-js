@@ -71,15 +71,11 @@ type fakeRenders struct{}
 
 func (fakeRenders) Welcome(uid string) string { return "welcome:" + uid }
 func (fakeRenders) Help() string              { return "help-text" }
-func (fakeRenders) Status(uid string, ts []TaskBrief) string {
-	return "status:" + uid + ":" + string(rune('0'+len(ts)))
-}
 
 type harness struct {
-	d     *Dispatcher
-	tg    *fakeTG
-	auth  *fakeAuth
-	tasks []TaskBrief
+	d    *Dispatcher
+	tg   *fakeTG
+	auth *fakeAuth
 }
 
 func newHarness() *harness {
@@ -90,17 +86,10 @@ func newHarness() *harness {
 	h.d = New(Deps{
 		Telegram: h.tg,
 		Auth:     h.auth,
-		Tasks:    taskReaderFunc(func(context.Context, string, int) ([]TaskBrief, error) { return h.tasks, nil }),
 		Renders:  fakeRenders{},
 		Log:      quiet(),
 	})
 	return h
-}
-
-type taskReaderFunc func(context.Context, string, int) ([]TaskBrief, error)
-
-func (f taskReaderFunc) UserTasks(ctx context.Context, uid string, n int) ([]TaskBrief, error) {
-	return f(ctx, uid, n)
 }
 
 func last(t *testing.T, h *harness) string {
@@ -275,22 +264,6 @@ func TestUnbanRestoresUserRole(t *testing.T) {
 	}
 	if h.auth.roles["u1"] != auth.RoleUser {
 		t.Errorf("解封后角色 = %q,期望 user", h.auth.roles["u1"])
-	}
-}
-
-// TestStatusShowsTaskCount /status 要反映真实任务数。
-func TestStatusShowsTaskCount(t *testing.T) {
-	h := newHarness()
-	h.tasks = []TaskBrief{
-		{ID: "1", FileName: "a", Status: "completed"},
-		{ID: "2", FileName: "b", Status: "queued"},
-		{ID: "3", FileName: "c", Status: "uploading"},
-	}
-	if _, err := h.d.HandleText(context.Background(), 1, "u1", "/status"); err != nil {
-		t.Fatal(err)
-	}
-	if got := last(t, h); !strings.Contains(got, "u1") {
-		t.Errorf("状态响应 = %q,应包含用户", got)
 	}
 }
 
