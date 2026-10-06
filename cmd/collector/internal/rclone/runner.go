@@ -14,6 +14,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -361,16 +362,17 @@ type FileEntry struct {
 	IsDir   bool   `json:"IsDir"`
 }
 
+// ErrDirNotFound 表示远端目录还不存在 —— 新用户没传过任何东西时的
+// 正常形态。不吞掉它:建不建目录、建完还看不到算不算错,是调用方的
+// 策略(JS 侧是顺手 mkdir 再试一次)。
+var ErrDirNotFound = errors.New("rclone: 目录不存在")
+
 // ListFiles 列远端目录,带 Name/Size/ModTime/IsDir —— /files 的数据源。
 //
 // 刻意不走 Run:lsjson 的清单是【命令输出】,写在 stdout;而 Run 把
 // stdout+stderr 合进同一条 JSON 日志流,清单行会解析不成 LogEntry
 // 而被当成「无法解析的行」丢掉。所以像 Obscure 一样直接 exec、
 // 单独收 stdout。
-//
-// 目录还不存在(新用户没传过任何东西)不算错,返回空清单 ——
-// 不像 JS 侧那样顺手 mkdir:列表是只读操作,写盘当副作用太越权,
-// 真正的 mkdir 由上传链路负责。
 func (r *Runner) ListFiles(ctx context.Context, cfg Config, remotePath string) ([]FileEntry, error) {
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = 30 * time.Second
@@ -392,7 +394,7 @@ func (r *Runner) ListFiles(ctx context.Context, cfg Config, remotePath string) (
 			detail = err.Error()
 		}
 		if isDirNotFound(detail) {
-			return nil, nil
+			return nil, ErrDirNotFound
 		}
 		return nil, fmt.Errorf("rclone: lsjson 失败: %s", detail)
 	}

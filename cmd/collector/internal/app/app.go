@@ -20,6 +20,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -124,6 +125,23 @@ type App struct {
 	// 单实例下用内存队列足够;多实例时它必须换成 Redis 队列(每个
 	// 实例只能处理自己建的任务,否则会重复下载)。
 	pending chan string
+
+	// filesMu 保护下面两个 /files 的内存层状态(与 JS 侧 localCache
+	// + filesRefreshTimes 对应)。
+	filesMu sync.Mutex
+	// filesMem 是清单的内存缓存:key 与 Redis 层同格式,过期时间按
+	// 文件新鲜度动态算(见 optimalFilesTTL)。
+	filesMem map[string]filesMemEntry
+	// filesRefreshAt 是刷新冷却的上次刷新时刻,key 是 "<user>:<msgID>"。
+	// ponytail: 与 JS 侧一样只增不清,量级是「每用户每条消息一次」,
+	// 真成了内存问题再按时间窗清理。
+	filesRefreshAt map[string]time.Time
+}
+
+// filesMemEntry 是内存缓存的一条。
+type filesMemEntry struct {
+	files   []rclone.FileEntry
+	expires time.Time
 }
 
 // New 构造 App。此时不连接 Telegram、不碰网盘。
@@ -147,14 +165,16 @@ func New(cfg Config) (*App, error) {
 
 	runner := rclone.NewRunner()
 	a := &App{
-		locks:        drive.NewSessionLock(),
-		rclone:       runner,
-		repo:         cfg.Repo,
-		drives:       cfg.Drives,
-		rcloneRunner: runner,
-		cfg:          cfg,
-		log:          cfg.Log,
-		pending:      make(chan string, pendingQueueSize),
+		locks:          drive.NewSessionLock(),
+		rclone:         runner,
+		repo:           cfg.Repo,
+		drives:         cfg.Drives,
+		rcloneRunner:   runner,
+		cfg:            cfg,
+		log:            cfg.Log,
+		pending:        make(chan string, pendingQueueSize),
+		filesMem:       map[string]filesMemEntry{},
+		filesRefreshAt: map[string]time.Time{},
 	}
 
 	// 绑定向导:Redis(会话存储)和 D1(落库)都在才装配。
@@ -670,8 +690,8 @@ func (a *App) handleCallback(ctx context.Context, u tgclient.Update) error {
 		return a.editDriveManager(ctx, cb)
 
 	case strings.HasPrefix(data, "files_page_"), strings.HasPrefix(data, "files_refresh_"):
-		// 先回应再拉清单:lsjson 要几秒,不先回应客户端会一直转圈。
-		answer("", false)
+		// 回应交给 files 流程的末尾(与 JS 一致:成功的刷新答「刷新成功」,
+		// 限流答剩余秒数)—— 这里先答会把那次回应作废。
 		return a.handleFilesCallback(ctx, cb, data)
 	}
 

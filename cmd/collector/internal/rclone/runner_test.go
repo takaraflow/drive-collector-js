@@ -2,6 +2,7 @@ package rclone
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -430,18 +431,15 @@ EOF`)
 	}
 }
 
-// TestListFilesDirNotFoundIsNotError 目录不存在 = 新用户还没传过东西,
-// 必须给空清单而不是报错 —— 否则每个新用户第一次 /files 就吃一个错误。
-func TestListFilesDirNotFoundIsNotError(t *testing.T) {
+// TestListFilesDirNotFoundIsSentinel 目录不存在必须给哨兵错误而不是
+// 吞掉 —— 建不建目录是调用方的策略,这里瞒下来调用方就没得选。
+func TestListFilesDirNotFoundIsSentinel(t *testing.T) {
 	bin := fakeRclone(t, `echo 'Error: ...: directory not found' >&2; exit 1`)
 
-	files, err := quietRunner(bin).ListFiles(context.Background(),
+	_, err := quietRunner(bin).ListFiles(context.Background(),
 		Config{Connection: "conn"}, "/folder")
-	if err != nil {
-		t.Fatalf("目录不存在不该报错: %v", err)
-	}
-	if len(files) != 0 {
-		t.Errorf("应为空清单,得到 %+v", files)
+	if !errors.Is(err, ErrDirNotFound) {
+		t.Fatalf("目录不存在应返回 ErrDirNotFound,得到 %v", err)
 	}
 }
 
