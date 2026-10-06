@@ -280,8 +280,7 @@ func (a *App) Run(ctx context.Context) error {
 	//
 	// 正常路径下 upload 的 defer 已经把文件删干净了(成功失败都删),
 	// 这里兜的是「进程被 SIGKILL/断电,defer 没来得及跑」那一类 ——
-	// 残留会随着重跑的任务越积越多,而容器磁盘(1GB)满了之后是【所有】
-	// 任务一起失败,不是单个任务。
+	// 残留会随着重跑的任务越积越多。
 	_ = os.RemoveAll(a.cfg.DownloadDir)
 	if err := os.MkdirAll(a.cfg.DownloadDir, 0o755); err != nil {
 		return fmt.Errorf("app: 创建下载目录失败: %w", err)
@@ -957,8 +956,8 @@ func (a *App) download(ctx context.Context, t store.Task) error {
 		a.log.Debug("下载中", "taskId", t.ID, "ratio", ratio)
 	}); err != nil {
 		// 半截文件必须删。任务被取消/失败时后续流程不会执行,这个残file
-		// 就留在 /tmp/downloads 里等着把 1GB 的盘撑爆 —— 而盘满的表现
-		// 是【所有】任务一起失败,排查时却会往网盘方向找。
+		// 就留在下载目录里 —— 而 recoverOnStart 会把这类任务重新排队,
+		// 重跑会重新下载,留着那份没有任何用处,只会一路堆积。
 		_ = os.Remove(dest)
 		return fmt.Errorf("下载失败: %w", err)
 	}
@@ -985,10 +984,10 @@ func (a *App) upload(ctx context.Context, t store.Task) error {
 
 	// 本地文件【无条件】删,成功失败都删。
 	//
-	// 原先只在上传成功后删,失败/被取消的就留在盘上 —— 而这些任务会被
-	// recoverOnStart 重新排队重跑,重跑会重新下载,留着那份没有任何用处。
-	// 留着的结果是容器 1GB 盘一次次被撑爆,而撑满的表现是【所有】任务
-	// 一起失败,排查时却会往网盘方向找(记忆里「网盘被撑爆」那次)。
+	// 原先只在上传成功后删,失败/被取消的就留在盘上 —— 但没有任何代码
+	// 读它(排查靠的是任务表里的 error_msg 和文件大小,不是这个文件),
+	// 而这些任务会被 recoverOnStart 重新排队重跑,重跑会重新下载。
+	// 留着那份没有任何用处,只会随着失败次数一路堆积。
 	defer func() { _ = os.Remove(local) }()
 
 	// 凭据从 D1 按用户取 —— 每个用户的网盘凭据不同,存在

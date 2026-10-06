@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -45,6 +46,9 @@ func (f *fakeDL) DownloadTo(_ context.Context, chatID, msgID int64, dest string,
 
 // fakeRepo 记录仓储调用并返回预设结果。
 type fakeRepo struct {
+	// mu 只护 trans/transByID:并发测试会让多个 goroutine 同时调
+	// Transition,append 不加锁就是 data race。其余字段只在单线程里读写。
+	mu         sync.Mutex
 	created    []store.Task
 	batch      []store.Task
 	stalled    []store.Task
@@ -100,12 +104,29 @@ func (f *fakeRepo) CountByUserStatus(context.Context, string) (map[string]int, e
 }
 
 func (f *fakeRepo) Transition(_ context.Context, id string, ev contract.TaskEvent, _ *string) (store.TransitionResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.trans = append(f.trans, ev)
 	if f.transByID == nil {
 		f.transByID = map[string][]contract.TaskEvent{}
 	}
 	f.transByID[id] = append(f.transByID[id], ev)
 	return store.TransitionResult{Changed: true}, nil
+}
+
+// events 返回记录下来的状态机事件 —— 读的时候要加锁,否则和并发
+// 写 Transition 的 goroutine 撞出 data race。
+func (f *fakeRepo) events() []contract.TaskEvent {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]contract.TaskEvent(nil), f.trans...)
+}
+
+// eventsByID 同 events,按任务 id 分组。
+func (f *fakeRepo) eventsByID(id string) []contract.TaskEvent {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]contract.TaskEvent(nil), f.transByID[id]...)
 }
 
 func (f *fakeRepo) UpdateFileMetadata(_ context.Context, _ string, name string, size int64) error {
