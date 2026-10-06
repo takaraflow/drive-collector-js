@@ -234,6 +234,7 @@ func runWorker(log *slog.Logger) error {
 		RemoteBase:  os.Getenv("REMOTE_FOLDER"),
 		Repo:        store.NewTaskRepository(db),
 		Drives:      store.NewDriveRepository(db),
+		D1:          db,
 		Redis:       rdb,
 		Log:         log,
 		Coord:       coord,

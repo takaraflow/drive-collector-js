@@ -356,3 +356,23 @@ func (r *Runner) Validate(ctx context.Context, conn string) error {
 		[]string{"lsjson", conn, "--max-depth", "1", "--timeout", "15s"}, nil)
 	return err
 }
+
+// Obscure 调 rclone obscure 混淆密码。
+//
+// 与 JS 侧 CloudTool._obscureRequired 一致:出错的密码绝不能落库 ——
+// 返回原值会让 rclone 反解出垃圾,症状是「配置对却连不上」。
+func (r *Runner) Obscure(ctx context.Context, password string) (string, error) {
+	// obscure 的结果走 stdout 而不是 --use-json-log 的日志流。
+	// 用裸 exec,不经过 Run —— 那个管道只收 JSON 日志。
+	cmd := exec.CommandContext(ctx, r.Binary, "--config", "/dev/null", "obscure", "--", password)
+	cmd.Env = r.Env
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("rclone: obscure 失败: %w", err)
+	}
+	obscured := strings.TrimSpace(string(out))
+	if obscured == "" {
+		return "", fmt.Errorf("rclone: obscure 返回了空密码")
+	}
+	return obscured, nil
+}

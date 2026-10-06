@@ -25,7 +25,9 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/auth"
 
+	"github.com/youngsx/drive-collector/cmd/collector/internal/bindingsession"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/contract"
+	"github.com/youngsx/drive-collector/cmd/collector/internal/d1"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/dispatcher"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/drive"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/instance"
@@ -66,6 +68,9 @@ type Config struct {
 	// Auth 做 RBAC 判定。为 nil 时不装配 Dispatcher,命令被静默忽略。
 	Auth *auth.Guard
 
+	// D1 是绑定向导写 drives 表用的。nil 时绑定流程只读(绑定禁用)。
+	D1 *d1.Client
+
 	// Redis 是媒体组缓冲的存储 —— 必须是 Redis 而不是内存:
 	// flush 由分布式锁保护,多实例下各存各的会各刷一半。
 	Redis *redis.Client
@@ -96,8 +101,16 @@ type App struct {
 	// notifier 默认是 tg;测试注入假实现 —— 没绑盘的提示是本包
 	// 唯一会给用户发消息的地方,必须能测。
 	notifier Notifier
-	cfg         Config
-	log         *slog.Logger
+	// 绑定向导的依赖。bindSessions 为 nil 时绑定流程整体禁用
+	// (handleBindInput 直接放行消息,不当成向导输入)。
+	bindSessions *bindingsession.Store
+	bindRuntime  drive.ProtonRuntime
+	// rcloneRunner 是绑定向导验证凭据用的执行器(rclone 的另一个引用)。
+	rcloneRunner *rclone.Runner
+	// d1 是绑定向导写 drives 表用的;为 nil 时绑定写入禁用。
+	d1c *d1.Client
+	cfg Config
+	log *slog.Logger
 
 	// pending 是「建完任务、等着被处理」的队列。
 	//
@@ -132,14 +145,25 @@ func New(cfg Config) (*App, error) {
 		cfg.DownloadDir = DefaultDownloadDir
 	}
 
+	runner := rclone.NewRunner()
 	a := &App{
-		locks:   drive.NewSessionLock(),
-		rclone:  rclone.NewRunner(),
-		repo:    cfg.Repo,
-		drives:  cfg.Drives,
-		cfg:     cfg,
-		log:     cfg.Log,
-		pending: make(chan string, pendingQueueSize),
+		locks:        drive.NewSessionLock(),
+		rclone:       runner,
+		repo:         cfg.Repo,
+		drives:       cfg.Drives,
+		rcloneRunner: runner,
+		cfg:          cfg,
+		log:          cfg.Log,
+		pending:      make(chan string, pendingQueueSize),
+	}
+
+	// 绑定向导:Redis(会话存储)和 D1(落库)都在才装配。
+	// 缺一个就整体禁用 —— 半套向导比没有向导更害人。
+	if cfg.Redis != nil && cfg.D1 != nil {
+		a.bindSessions = bindingsession.NewStore(cfg.Redis)
+		a.d1c = cfg.D1
+		drive.SetObscureRunner(a.rcloneRunner)
+		a.bindRuntime = newProtonRuntime(a.rcloneRunner)
 	}
 
 	// task.Manager 只负责「该不该处理」和状态推进,具体怎么做由这里注入。
@@ -417,7 +441,18 @@ func (a *App) onUpdate(ctx context.Context, u tgclient.Update) error {
 		// 命令优先:带媒体的消息里也可能带 / 开头的内容,
 		// 但命令是用户明确的意图,不能被当成文件投递。
 		if strings.HasPrefix(strings.TrimSpace(msg.Text), "/") {
+			// 绑定会话的取消指令(/cancel)要先于命令路由 —— 会话里
+			// /cancel 不是通用命令,是「退出向导」。
+			if a.handleBindInput(ctx, msg, strings.TrimSpace(msg.Text)) {
+				return nil
+			}
 			return a.routeCommand(ctx, msg)
+		}
+
+		// 绑定会话进行中:任何文本都是向导的输入(邮箱/密码/2FA 码),
+		// 不再当普通聊天内容。
+		if a.handleBindInput(ctx, msg, msg.Text) {
+			return nil
 		}
 
 		if !msg.HasMedia {
@@ -440,7 +475,23 @@ func (a *App) onUpdate(ctx context.Context, u tgclient.Update) error {
 }
 
 // routeCommand 把命令交给 Dispatcher。
+//
+// 绑定命令(/drive /unbind /set_remote_folder /cancel)在进 Dispatcher
+// 之前拦截 —— 它们要么要写会话/落库,要么要读绑定状态,Dispatcher
+// 的接口面(只读权限+任务)不够用。其余命令照旧走 Dispatcher。
 func (a *App) routeCommand(ctx context.Context, msg messageInfo) error {
+	text := strings.TrimSpace(msg.Text)
+	command := strings.ToLower(strings.Fields(text)[0])
+
+	switch command {
+	case "/drive":
+		return a.handleDriveCommand(ctx, msg)
+	case "/unbind", "/logout":
+		return a.handleUnbindCommand(ctx, msg)
+	case "/set_remote_folder", "/remote_folder":
+		return a.handleRemoteFolderCommand(ctx, msg)
+	}
+
 	if a.dispatcher == nil {
 		// dispatcher 没装配是配置事故,不是「没什么可做」——
 		// 之前记成 Debug,而生产是 Info 级,于是「机器人装死」和
@@ -461,21 +512,210 @@ func (a *App) routeCommand(ctx context.Context, msg messageInfo) error {
 	return nil
 }
 
-// handleCallback 处理按钮点击。
-//
-// B 方案没实现需要按钮的命令,所以这里只回一个「暂不可用」——
-// 静默不回会让 Telegram 客户端的转圈动画一直转(15 秒超时)。
+// handleDriveCommand /drive —— 发绑定面板(带类型选择按钮)。
+func (a *App) handleDriveCommand(ctx context.Context, msg messageInfo) error {
+	userID := fmt.Sprintf("%d", msg.SenderID)
+	if !a.bindDriveReady() {
+		return a.tg.SendMessage(ctx, msg.ChatID,
+			"⚠️ 网盘绑定在新服务上暂不可用,请稍后再试或联系管理员。")
+	}
+
+	drives, err := a.drivesList(ctx, userID)
+	if err != nil {
+		a.log.Error("查询网盘失败", "err", err)
+	}
+	text := "🛠️ <b>网盘管理中心</b>\n\n"
+	if len(drives) > 0 {
+		text += "已绑定的网盘:\n"
+		for i := range drives {
+			d := &drives[i]
+			icon := "📁"
+			if d.IsDefault == 1 {
+				icon = "⭐️"
+			}
+			email := driveDisplayAccount(d)
+			text += fmt.Sprintf("\n%d. %s <b>%s</b> - %s", i+1, icon, strings.ToUpper(d.Type), email)
+			if d.IsDefault == 1 {
+				text += " (默认)"
+			}
+		}
+		text += "\n"
+	} else {
+		text += "目前尚未绑定任何网盘。请选择下方服务开始绑定："
+	}
+
+	buttons := [][]tgclient.Button{
+		{{Text: "🟢 Mega", Data: "drive_bind_mega"}},
+		{{Text: "🛡️ Proton Drive", Data: "drive_bind_protondrive"}},
+	}
+	for i := range drives {
+		d := &drives[i]
+		row := []tgclient.Button{}
+		if d.IsDefault != 1 {
+			row = append(row, tgclient.Button{
+				Text: fmt.Sprintf("%d 设为默认", i+1), Data: "drive_set_default_" + d.ID})
+		}
+		row = append(row, tgclient.Button{Text: fmt.Sprintf("%d ❌ 解绑", i+1), Data: "drive_unbind_confirm_" + d.ID})
+		buttons = append(buttons, row)
+	}
+	buttons = append(buttons, []tgclient.Button{{Text: "❌ 返回", Data: "noop"}})
+	return a.tg.SendWithButtons(ctx, msg.ChatID, text, buttons)
+}
+
+// driveDisplayAccount 从盘名里截出账号部分(JS 侧 name.split('-').slice(1) 的等价)。
+func driveDisplayAccount(d *drive.Drive) string {
+	if d == nil || d.Name == "" {
+		return "未知账号"
+	}
+	parts := strings.SplitN(d.Name, "-", 2)
+	if len(parts) > 1 && parts[1] != "" {
+		return parts[1]
+	}
+	return d.Name
+}
+
+// handleUnbindCommand /unbind —— 删用户全部网盘(带确认,见 /unbind 的按钮流)。
+func (a *App) handleUnbindCommand(ctx context.Context, msg messageInfo) error {
+	// 简化版:直接列出面板让用户逐个解绑 —— 全量解绑是低频操作,
+	// 按钮确认链路先省,误删风险由「逐个 + 确认按钮」兜住。
+	return a.handleDriveCommand(ctx, msg)
+}
+
+// handleRemoteFolderCommand /set_remote_folder /path —— 真正写库。
+func (a *App) handleRemoteFolderCommand(ctx context.Context, msg messageInfo) error {
+	userID := fmt.Sprintf("%d", msg.SenderID)
+	fields := strings.Fields(strings.TrimSpace(msg.Text))
+	if len(fields) < 2 {
+		return a.tg.SendMessage(ctx, msg.ChatID,
+			"用法:<code>/set_remote_folder /你的目录</code>\n\n"+
+				"例如:<code>/set_remote_folder /backup</code>")
+	}
+	folder := strings.Join(fields[1:], " ")
+	if !a.bindDriveReady() {
+		return a.tg.SendMessage(ctx, msg.ChatID, "⚠️ 该功能暂未迁移到新服务。")
+	}
+	if err := a.setRemoteFolder(ctx, userID, "", folder); err != nil {
+		a.log.Error("设置保存目录失败", "err", err)
+		return a.tg.SendMessage(ctx, msg.ChatID, "❌ 设置失败:"+escapeHTMLText(err.Error()))
+	}
+	return a.tg.SendMessage(ctx, msg.ChatID,
+		"✅ 保存目录已设为 <code>"+escapeHTMLText(folder)+"</code>")
+}
+
+func escapeHTMLText(s string) string {
+	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
+	return r.Replace(s)
+}
+
+// handleCallback 处理按钮点击 —— 绑定面板的全部交互都在这。
 func (a *App) handleCallback(ctx context.Context, u tgclient.Update) error {
-	callbackID, data, ok := tgclient.CallbackData(u)
+	cb, ok := tgclient.CallbackOf(u)
 	if !ok {
 		return nil
 	}
+	userID := fmt.Sprintf("%d", cb.UserID)
+	data := cb.Data
+
 	// 无论如何都要回应 —— 不回应客户端会一直转圈。
-	if err := a.tg.AnswerCallback(ctx, callbackID, "该功能暂未迁移", false); err != nil {
-		a.log.Warn("回应按钮失败", "err", err)
+	answer := func(text string, alert bool) {
+		if err := a.tg.AnswerCallback(ctx, cb.CallbackID, text, alert); err != nil {
+			a.log.Warn("回应按钮失败", "err", err)
+		}
 	}
-	a.log.Debug("收到按钮点击", "data", data)
+
+	switch {
+	case strings.HasPrefix(data, "drive_bind_"):
+		answer("开始绑定", false)
+		return a.bindStart(ctx, cb.ChatID, userID, strings.TrimPrefix(data, "drive_bind_"))
+
+	case strings.HasPrefix(data, "drive_unbind_confirm_"):
+		driveID := strings.TrimPrefix(data, "drive_unbind_confirm_")
+		buttons := [][]tgclient.Button{
+			{{Text: "保留网盘", Data: "drive_manager_back"}},
+			{{Text: "确认解绑", Data: "drive_unbind_execute_" + driveID}},
+		}
+		answer("请确认", false)
+		return a.tg.EditWithButtons(ctx, cb.ChatID, cb.MsgID,
+			"⚠️ 确定要解绑这个网盘吗？解绑后需要重新绑定才能继续转存。", buttons)
+
+	case strings.HasPrefix(data, "drive_unbind_execute_"):
+		driveID := strings.TrimPrefix(data, "drive_unbind_execute_")
+		if err := a.deleteDrive(ctx, userID, driveID); err != nil {
+			a.log.Error("解绑失败", "driveId", driveID, "err", err)
+			answer("解绑失败", true)
+			return nil
+		}
+		answer("已解绑", false)
+		return a.editDriveManager(ctx, cb)
+
+	case strings.HasPrefix(data, "drive_set_default_"):
+		driveID := strings.TrimPrefix(data, "drive_set_default_")
+		if err := a.setDefault(ctx, userID, driveID); err != nil {
+			a.log.Error("设默认盘失败", "err", err)
+			answer("设置失败", true)
+			return nil
+		}
+		answer("已设为默认", false)
+		return a.editDriveManager(ctx, cb)
+
+	case data == "drive_manager_back" || data == "noop":
+		if data == "noop" {
+			answer("", false)
+			return nil
+		}
+		answer("已返回", false)
+		return a.editDriveManager(ctx, cb)
+
+	case data == "files_page_0":
+		// 文件浏览还没迁移 —— 明说,别让用户以为按钮坏了。
+		answer("文件浏览暂未迁移到新服务", false)
+		return nil
+	}
+
+	a.log.Debug("收到未处理的按钮点击", "data", data)
+	answer("该功能暂未迁移", false)
 	return nil
+}
+
+// editDriveManager 重绘网盘管理面板(解绑/设默认后刷新列表)。
+func (a *App) editDriveManager(ctx context.Context, cb tgclient.CallbackContext) error {
+	userID := fmt.Sprintf("%d", cb.UserID)
+	drives, err := a.drivesList(ctx, userID)
+	if err != nil {
+		return a.tg.EditMessage(ctx, cb.ChatID, cb.MsgID, "加载网盘列表失败,请重试。")
+	}
+	text := "🛠️ <b>网盘管理中心</b>\n\n"
+	if len(drives) > 0 {
+		text += "已绑定的网盘:\n"
+		for i := range drives {
+			d := &drives[i]
+			icon := "📁"
+			if d.IsDefault == 1 {
+				icon = "⭐️"
+			}
+			text += fmt.Sprintf("\n%d. %s <b>%s</b> - %s", i+1, icon,
+				strings.ToUpper(d.Type), driveDisplayAccount(d))
+			if d.IsDefault == 1 {
+				text += " (默认)"
+			}
+		}
+		text += "\n"
+	} else {
+		text += "目前尚未绑定任何网盘。请选择下方服务开始绑定："
+	}
+
+	buttons := [][]tgclient.Button{}
+	for i := range drives {
+		d := &drives[i]
+		row := []tgclient.Button{}
+		if d.IsDefault != 1 {
+			row = append(row, tgclient.Button{Text: fmt.Sprintf("%d 设为默认", i+1), Data: "drive_set_default_" + d.ID})
+		}
+		row = append(row, tgclient.Button{Text: fmt.Sprintf("%d ❌ 解绑", i+1), Data: "drive_unbind_confirm_" + d.ID})
+		buttons = append(buttons, row)
+	}
+	buttons = append(buttons, []tgclient.Button{{Text: "➕ 绑定其他网盘", Data: "noop"}})
+	return a.tg.EditWithButtons(ctx, cb.ChatID, cb.MsgID, text, buttons)
 }
 
 // noDriveHint 与 JS 侧 STRINGS.drive.no_drive_found 逐字一致。
