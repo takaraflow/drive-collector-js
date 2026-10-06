@@ -21,6 +21,18 @@ type Notifier interface {
 	SendMessage(ctx context.Context, chatID int64, text string) error
 }
 
+// NoticeSender 是任务状态消息需要的三个动作。
+//
+// 抽接口只有一个理由:「文件投递后到底有没有回音」是本包最该断言的
+// 事,而直接用 a.tg 的话测试里只有个空壳 Client,一调就 panic。
+// 形状与 Notifier 相同,只是多了按钮和消息 id。
+type NoticeSender interface {
+	SendMessage(ctx context.Context, chatID int64, text string) error
+	SendWithButtonsAndID(ctx context.Context, chatID int64, text string, buttons [][]tgclient.Button) (int, error)
+	EditMessage(ctx context.Context, chatID int64, msgID int, text string) error
+	EditWithButtons(ctx context.Context, chatID int64, msgID int, text string, buttons [][]tgclient.Button) error
+}
+
 // Downloader 是 download() 需要的 Telegram 下载能力。
 //
 // 抽接口而不是直接用 *telegram.Client:download 是「真正把用户文件
@@ -110,6 +122,7 @@ var (
 	_ DriveRepo      = (*store.DriveRepository)(nil)
 	_ Downloader     = (*tgclient.Client)(nil)
 	_ MessageFetcher = (*tgclient.Client)(nil)
+	_ NoticeSender   = (*tgclient.Client)(nil)
 	_ Rclone         = (*rclone.Runner)(nil)
 	_ AdminRepo      = (*store.Repository)(nil)
 	_ Authorizer     = (*auth.Guard)(nil)

@@ -112,6 +112,12 @@ type App struct {
 	// notifier 默认是 tg;测试注入假实现 —— 没绑盘的提示是本包
 	// 唯一会给用户发消息的地方,必须能测。
 	notifier Notifier
+	// notices 是任务状态消息的收发通道。默认也是 tg,但必须能换成
+	// 假实现:「发完文件有没有回音」正是本包最该断言的事,而真的
+	// tg 发消息要真实凭据、还会真的打扰用户。
+	// 为 nil 时(postNotice/notify)静默跳过 —— 只可能发生在没装配
+	// 的测试里,生产一定会设。
+	notices NoticeSender
 	// 绑定向导的依赖。bindSessions 为 nil 时绑定流程整体禁用
 	// (handleBindInput 直接放行消息,不当成向导输入)。
 	bindSessions *bindingsession.Store
@@ -229,6 +235,7 @@ func New(cfg Config) (*App, error) {
 	a.tg = tg
 	a.downloader = tg
 	a.notifier = tg
+	a.notices = tg
 	a.tasks = manager
 
 	// 媒体组缓冲:用户连发多图时聚合成一批。
@@ -889,18 +896,28 @@ func (a *App) createTaskFrom(ctx context.Context, u tgclient.Update) error {
 	}
 
 	taskID := newTaskID()
+
+	// 先发状态消息,再落库 —— 用户投递文件后必须立刻看到回音。
+	// 建完任务直接入队、一句话不发的话,用户那边就是「发了文件只有
+	// 已读」:任务在后台跑完了他也不知道成功还是失败。
+	noticeID := a.postNotice(ctx, msg.ChatID, taskID)
+
 	t := store.Task{
-		ID:         taskID,
-		UserID:     fmt.Sprintf("%d", msg.SenderID),
-		SourceType: "telegram_media",
-		FileName:   nullableString(msg.FileName),
-		SourceRef:  nullableString(BuildSourceRef(msg.ChatID, int64(msg.ID))),
-		// MsgID 是这条状态消息本身;SourceMsgID 是【被转存的那条消息】。
-		// 两者都是单条消息 id —— Node 侧 addBatchTasks 写的也是 msg.id。
-		// 曾经写成 grouped_id,会让「按源消息反查任务」全部失效,
-		// 而且不报错(取消整批时只表现为"点了没反应")。
-		MsgID:       nullableInt(int64(msg.ID)),
-		SourceMsgID: nullableInt(msg.SourceMsgID),
+		ID:          taskID,
+		UserID:      fmt.Sprintf("%d", msg.SenderID),
+		ChatID:      nullableString(fmt.Sprintf("%d", msg.ChatID)),
+		SourceType:  "telegram_media",
+		FileName:    nullableString(msg.FileName),
+		SourceRef:   nullableString(BuildSourceRef(msg.ChatID, int64(msg.ID))),
+		// MsgID 是 bot 自己那条状态消息 —— 后面每个阶段都编辑它。
+		// 以前这里写的是 msg.ID(用户发来的那条),于是所有针对任务
+		// 的编辑都会落到用户的文件消息上。
+		MsgID: nullableInt(int64(noticeID)),
+		// SourceMsgID 是【被转存的那条消息】。曾经写成 msg.SourceMsgID
+		// (那是 Telegram 的 forwarded-from 字段,私聊里恒为空),
+		// 于是「这条任务是从哪条消息来的」永远查不到 —— 不报错,
+		// 只是没人查得到。语义与 JS 侧 addTask 的 sourceMsgId 一致。
+		SourceMsgID: nullableInt(int64(msg.ID)),
 	}
 
 	if err := a.repo.Create(ctx, t); err != nil {

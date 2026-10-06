@@ -164,7 +164,11 @@ func (m *Manager) run(
 		}
 		// 处理失败回 5xx:QStash 会重试。状态已经是 failed,
 		// 重试时会被状态机挡住并回 200 —— 不会无限重试。
-		return Result{Success: false, StatusCode: 500, Message: kind + " failed"}, nil
+		//
+		// Message 带真实原因而不是 "upload failed":调用方要把它
+		// 原样显示给用户("转存失败,原因:…")。只给一个英文短语的话,
+		// 用户看到的是「失败了,但不知道为什么」。
+		return Result{Success: false, StatusCode: 500, Message: msg}, nil
 	}
 
 	if _, err := m.repo.Transition(ctx, task.ID, done, nil); err != nil {

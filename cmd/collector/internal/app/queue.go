@@ -2,8 +2,14 @@ package app
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
 	"time"
+
+	"github.com/youngsx/drive-collector/cmd/collector/internal/contract"
+	"github.com/youngsx/drive-collector/cmd/collector/internal/store"
+	tgclient "github.com/youngsx/drive-collector/cmd/collector/internal/telegram"
 )
 
 const (
@@ -66,7 +72,15 @@ func (a *App) runTaskQueue(ctx context.Context) {
 func (a *App) processTask(ctx context.Context, taskID string) {
 	started := time.Now()
 
+	// 每一步都把状态写回用户那条消息 —— 用户唯一能看到的东西就是它。
+	// 建任务时已经发过「已捕获」,这里接着编辑成「正在下载」…
+	t := a.findTask(ctx, taskID)
+	busy := [][]tgclient.Button{{
+		{Text: noticeCancelBtn, Data: "cancel_confirm_" + taskID},
+	}}
+
 	// 下载。被状态机挡住(用户已取消 / 已在处理中)不是错误,直接停手。
+	a.notify(ctx, t, noticeDownloading, busy)
 	res, err := a.tasks.HandleDownload(ctx, taskID)
 	if err != nil {
 		a.log.Error("下载处理异常", "taskId", taskID, "err", err)
@@ -74,9 +88,11 @@ func (a *App) processTask(ctx context.Context, taskID string) {
 	}
 	if !res.Success {
 		a.log.Info("下载未完成,不再进入上传", "taskId", taskID, "msg", res.Message)
+		a.notifyOutcome(ctx, taskID, false)
 		return
 	}
 
+	a.notify(ctx, a.findTask(ctx, taskID), noticeUploading, busy)
 	res, err = a.tasks.HandleUpload(ctx, taskID)
 	if err != nil {
 		a.log.Error("上传处理异常", "taskId", taskID, "err", err)
@@ -84,9 +100,55 @@ func (a *App) processTask(ctx context.Context, taskID string) {
 	}
 	if !res.Success {
 		a.log.Warn("上传未完成", "taskId", taskID, "msg", res.Message)
+		a.notifyOutcome(ctx, taskID, true)
 		return
 	}
 
 	a.log.Info("任务转存完成",
 		"taskId", taskID, "耗时", time.Since(started).Round(time.Millisecond).String())
+	a.notifyOutcome(ctx, taskID, true)
+}
+
+// findTask 取任务;查不到返回 nil 而不是让整条链路崩掉 ——
+// notify 对 nil 是安全的(没源消息就没什么可编辑的)。
+func (a *App) findTask(ctx context.Context, taskID string) *store.Task {
+	t, err := a.repo.FindById(ctx, taskID)
+	if err != nil {
+		a.log.Warn("查任务失败", "taskId", taskID, "err", err)
+		return nil
+	}
+	return t
+}
+
+// notifyOutcome 任务走到终态时把最终结果写回状态消息。
+//
+// 读库而不是看 HandleXxx 的返回值:被状态机挡下(用户已取消、已在
+// 处理中)也回 Success=false,但那不是「失败」—— 那种情况给用户弹一条
+// 转存失败是撒谎。uploadPhase 决定用哪句文案(下载失败没有重试按钮
+// 以外的说法,上传失败才值得给「重试」)。
+func (a *App) notifyOutcome(ctx context.Context, taskID string, uploadPhase bool) {
+	t := a.findTask(ctx, taskID)
+	if t == nil {
+		return
+	}
+	switch t.Status {
+	case contract.StatusCompleted:
+		a.notify(ctx, t, a.noticeSuccessText(ctx, *t), nil)
+
+	case contract.StatusCancelled:
+		a.notify(ctx, t, noticeCancelled, nil)
+
+	case contract.StatusFailed:
+		reason := escapeHTMLText(noticeReason(errors.New(t.ErrorMsg.String)))
+		text := fmt.Sprintf(noticeFail, reason)
+		buttons := [][]tgclient.Button{}
+		if uploadPhase {
+			text = fmt.Sprintf(noticeUploadFail, reason)
+			buttons = append(buttons, []tgclient.Button{
+				{Text: noticeRetryBtn, Data: "retry_confirm_" + taskID},
+			})
+		}
+		a.notify(ctx, t, text, buttons)
+	}
+	// 其余状态(queued/downloading/…):任务还在别的环节,别抢它的消息。
 }
