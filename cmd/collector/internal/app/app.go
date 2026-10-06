@@ -99,6 +99,9 @@ type App struct {
 	repo        TaskRepo
 	drives      DriveRepo
 	dispatcher  *dispatcher.Dispatcher
+	// auth 是 RBAC 判定。为 nil 时一律放行 —— 没装配 Auth 就没有
+	// 角色概念,此时拦截只会把所有人挡在门外。
+	auth *auth.Guard
 	// notifier 默认是 tg;测试注入假实现 —— 没绑盘的提示是本包
 	// 唯一会给用户发消息的地方,必须能测。
 	notifier Notifier
@@ -219,11 +222,11 @@ func New(cfg Config) (*App, error) {
 
 	// Dispatcher 在这里装配而不是在 main —— 它需要 tg / auth / tasks 三样
 	// 依赖,而 tg 是本包内部创建的。放外面就得额外导出一个构造顺序约束。
+	a.auth = cfg.Auth
 	if cfg.Auth != nil {
 		a.dispatcher = dispatcher.New(dispatcher.Deps{
 			Telegram: tg,
 			Auth:     cfg.Auth,
-			Tasks:    a,
 			Renders:  a,
 			Log:      cfg.Log,
 		})
@@ -513,6 +516,8 @@ func (a *App) routeCommand(ctx context.Context, msg messageInfo) error {
 		return a.handleRemoteFolderCommand(ctx, msg)
 	case "/files":
 		return a.handleFilesCommand(ctx, msg)
+	case "/status":
+		return a.handleStatusCommand(ctx, msg)
 	}
 
 	if a.dispatcher == nil {
@@ -693,6 +698,16 @@ func (a *App) handleCallback(ctx context.Context, u tgclient.Update) error {
 		// 回应交给 files 流程的末尾(与 JS 一致:成功的刷新答「刷新成功」,
 		// 限流答剩余秒数)—— 这里先答会把那次回应作废。
 		return a.handleFilesCallback(ctx, cb, data)
+
+	case strings.HasPrefix(data, "cancel_confirm_"), strings.HasPrefix(data, "cancel_execute_"),
+		strings.HasPrefix(data, "retry_confirm_"), strings.HasPrefix(data, "retry_execute_"),
+		data == "task_action_back":
+		return a.handleStatusCallback(ctx, cb, data)
+
+	case data == "remote_folder_menu":
+		// /status 里的「设置保存路径」入口:告诉用户当前目录 + 怎么改。
+		answer("", false)
+		return a.editRemoteFolderMenu(ctx, cb)
 	}
 
 	a.log.Debug("收到未处理的按钮点击", "data", data)

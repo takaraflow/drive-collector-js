@@ -91,6 +91,14 @@ func (f *fakeRepo) FindStalledTasks(_ context.Context, _ time.Duration) ([]store
 	return f.stalled, f.stalledErr
 }
 
+func (f *fakeRepo) FindActiveByUserId(context.Context, string, int) ([]store.Task, error) {
+	return nil, nil
+}
+
+func (f *fakeRepo) CountByUserStatus(context.Context, string) (map[string]int, error) {
+	return map[string]int{}, nil
+}
+
 func (f *fakeRepo) Transition(_ context.Context, id string, ev contract.TaskEvent, _ *string) (store.TransitionResult, error) {
 	f.trans = append(f.trans, ev)
 	if f.transByID == nil {

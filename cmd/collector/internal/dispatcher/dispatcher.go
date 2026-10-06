@@ -35,7 +35,6 @@ type Telegram interface {
 type Deps struct {
 	Telegram Telegram
 	Auth     Authorizer
-	Tasks    TaskReader
 	Renders  Renderer
 	Log      *slog.Logger
 
@@ -49,24 +48,10 @@ type Authorizer interface {
 	IsBanned(ctx context.Context, userID string) (bool, error)
 }
 
-// TaskReader 读任务(命令要用)。
-type TaskReader interface {
-	UserTasks(ctx context.Context, userID string, limit int) ([]TaskBrief, error)
-}
-
-// TaskBrief 是任务摘要。
-type TaskBrief struct {
-	ID       string
-	FileName string
-	Status   string
-	Size     int64
-}
-
 // Renderer 渲染各类消息。
 type Renderer interface {
 	Welcome(userID string) string
 	Help() string
-	Status(userID string, tasks []TaskBrief) string
 }
 
 // Dispatcher 分发命令。
@@ -135,7 +120,10 @@ func (d *Dispatcher) HandleText(ctx context.Context, chatID int64, userID, text 
 	case "/help":
 		return true, d.send(ctx, chatID, d.deps.Renders.Help())
 	case "/status":
-		return true, d.handleStatus(ctx, chatID, userID)
+		// /status 已搬到 app(见 app/status.go):取消/重试要写任务状态机,
+		// Dispatcher 的接口面只有只读权限。app 在进 Dispatcher 前拦截它,
+		// 走到这里的唯一可能是装配漏了 —— 说清楚,别装死。
+		return true, d.send(ctx, chatID, "⚠️ /status 暂时不可用,请稍后重试。")
 	case "/drive":
 		return true, d.send(ctx, chatID, "🔑 网盘绑定\n\n请用 /remote_folder 设置保存目录。")
 	case "/unbind":
@@ -148,15 +136,6 @@ func (d *Dispatcher) HandleText(ctx context.Context, chatID int64, userID, text 
 	default:
 		return true, d.send(ctx, chatID, unsupportedMsg(command))
 	}
-}
-
-// handleStatus 展示用户任务概览。
-func (d *Dispatcher) handleStatus(ctx context.Context, chatID int64, userID string) error {
-	tasks, err := d.deps.Tasks.UserTasks(ctx, userID, 10)
-	if err != nil {
-		return fmt.Errorf("查询任务失败: %w", err)
-	}
-	return d.send(ctx, chatID, d.deps.Renders.Status(userID, tasks))
 }
 
 // handleRemoteFolder 处理保存目录命令。

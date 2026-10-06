@@ -307,6 +307,36 @@ func (r *Repository) CountByStatus(ctx context.Context) (map[string]int, error) 
 	return out, nil
 }
 
+// FindActiveByUserId 查用户当前活跃(未终结)的任务 —— /status 的「活跃任务」区。
+func (r *Repository) FindActiveByUserId(ctx context.Context, userID string, limit int) ([]Task, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	rows, err := r.db.FetchAll(ctx, taskSelect+`
+		WHERE user_id = ? AND status IN ('queued','downloading','downloaded','uploading')
+		ORDER BY updated_at DESC LIMIT ?`, userID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("查询用户 %s 的活跃任务失败: %w", userID, err)
+	}
+	return rowsToTasks(rows)
+}
+
+// CountByUserStatus 统计某个用户各状态的任务数 —— /status 的队列概览用。
+func (r *Repository) CountByUserStatus(ctx context.Context, userID string) (map[string]int, error) {
+	rows, err := r.db.FetchAll(ctx,
+		"SELECT status, COUNT(*) AS n FROM tasks WHERE user_id = ? GROUP BY status", userID)
+	if err != nil {
+		return nil, fmt.Errorf("统计用户 %s 的任务状态失败: %w", userID, err)
+	}
+	out := map[string]int{}
+	for _, row := range rows {
+		s, _ := row["status"].(string)
+		n, _ := row["n"].(float64)
+		out[s] = int(n)
+	}
+	return out, nil
+}
+
 const taskSelect = `SELECT id, user_id, chat_id, msg_id, source_msg_id, source_type,
 	source_ref, file_name, file_size, status, error_msg, claimed_by,
 	created_at, updated_at FROM tasks`

@@ -58,6 +58,8 @@ type TaskRepo interface {
 	FindByUserId(ctx context.Context, userID string, limit int) ([]store.Task, error)
 	FindByMsgId(ctx context.Context, msgID int64) (*store.Task, error)
 	FindStalledTasks(ctx context.Context, timeout time.Duration) ([]store.Task, error)
+	FindActiveByUserId(ctx context.Context, userID string, limit int) ([]store.Task, error)
+	CountByUserStatus(ctx context.Context, userID string) (map[string]int, error)
 	Transition(ctx context.Context, taskID string, ev contract.TaskEvent, errMsg *string) (store.TransitionResult, error)
 	UpdateFileMetadata(ctx context.Context, taskID, fileName string, fileSize int64) error
 }
