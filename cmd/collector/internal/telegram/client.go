@@ -275,9 +275,11 @@ func (c *Client) SendMessage(ctx context.Context, chatID int64, text string) err
 	if err != nil {
 		return err
 	}
+	body, entities := styleText(text)
 	req := &tg.MessagesSendMessageRequest{
-		Peer:    peer,
-		Message: text,
+		Peer:     peer,
+		Message:  body,
+		Entities: entities,
 	}
 	if err := c.tg.SendMessage(ctx, req); err != nil {
 		return fmt.Errorf("telegram: 发送消息失败(chat=%d): %w", chatID, err)
@@ -296,7 +298,8 @@ func (c *Client) SendMessageWithID(ctx context.Context, chatID int64, text strin
 	if err != nil {
 		return 0, err
 	}
-	req := &tg.MessagesSendMessageRequest{Peer: peer, Message: text}
+	body, entities := styleText(text)
+	req := &tg.MessagesSendMessageRequest{Peer: peer, Message: body, Entities: entities}
 	if req.RandomID == 0 {
 		id, err := c.tg.RandInt64()
 		if err != nil {
@@ -353,10 +356,12 @@ func (c *Client) EditMessage(ctx context.Context, chatID int64, msgID int, text 
 	// 走 gotd 生成的方法:它自己知道 messages.editMessage 返回 Updates。
 	// 手写 result(以前写的是 MessagesAffectedMessages)会让【每一次】
 	// 编辑都失败,而 sendMessage 正常 —— 症状是「/files 一直转圈」。
+	body, entities := styleText(text)
 	if _, err := c.tg.API().MessagesEditMessage(ctx, &tg.MessagesEditMessageRequest{
-		Peer:    peer,
-		ID:      msgID,
-		Message: text,
+		Peer:     peer,
+		ID:       msgID,
+		Message:  body,
+		Entities: entities,
 	}); err != nil {
 		return fmt.Errorf("telegram: 编辑消息失败(chat=%d msg=%d): %w", chatID, msgID, err)
 	}
