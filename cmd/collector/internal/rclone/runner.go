@@ -360,6 +360,12 @@ type FileEntry struct {
 	Size    int64  `json:"Size"`
 	ModTime string `json:"ModTime"`
 	IsDir   bool   `json:"IsDir"`
+	// Path 是相对远端根的路径,只有 --recursive 的清单才会填。
+	// /files 不用它,所以这里是可选的。
+	Path string `json:"Path"`
+	// Hashes 是 {算法名: 值}。后端不支持内容哈希时为空 —— 上层必须把
+	// 「没有哈希」这件事传出去,否则会把「按大小归组」误报成「无重复」。
+	Hashes map[string]string `json:"Hashes"`
 }
 
 // ErrDirNotFound 表示远端目录还不存在 —— 新用户没传过任何东西时的
@@ -368,19 +374,35 @@ type FileEntry struct {
 var ErrDirNotFound = errors.New("rclone: 目录不存在")
 
 // ListFiles 列远端目录,带 Name/Size/ModTime/IsDir —— /files 的数据源。
+func (r *Runner) ListFiles(ctx context.Context, cfg Config, remotePath string) ([]FileEntry, error) {
+	return r.lsjson(ctx, cfg, remotePath)
+}
+
+// ScanFiles 递归列整个网盘并带上内容哈希 —— /scan_dup 的数据源。
+//
+// --files-only 让 rclone 直接不给目录项;--hash 才有判重依据。
+// 两者都缺的话,页面只能报「按大小归组」,等于没扫。
+func (r *Runner) ScanFiles(ctx context.Context, cfg Config, remotePath string) ([]FileEntry, error) {
+	return r.lsjson(ctx, cfg, remotePath, "-R", "--files-only", "--hash")
+}
+
+// lsjson 跑一次 lsjson 并收 stdout。
 //
 // 刻意不走 Run:lsjson 的清单是【命令输出】,写在 stdout;而 Run 把
 // stdout+stderr 合进同一条 JSON 日志流,清单行会解析不成 LogEntry
 // 而被当成「无法解析的行」丢掉。所以像 Obscure 一样直接 exec、
 // 单独收 stdout。
-func (r *Runner) ListFiles(ctx context.Context, cfg Config, remotePath string) ([]FileEntry, error) {
+func (r *Runner) lsjson(ctx context.Context, cfg Config, remotePath string, extra ...string) ([]FileEntry, error) {
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = 30 * time.Second
 	}
 	runCtx, cancel := context.WithTimeout(ctx, cfg.Timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(runCtx, r.Binary, append(cfg.execArgs(), "lsjson", cfg.target(remotePath))...)
+	args := append(cfg.execArgs(), "lsjson")
+	args = append(args, extra...)
+	args = append(args, cfg.target(remotePath))
+	cmd := exec.CommandContext(runCtx, r.Binary, args...)
 	cmd.Env = r.Env
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

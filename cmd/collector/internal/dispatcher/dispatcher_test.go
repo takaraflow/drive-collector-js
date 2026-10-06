@@ -88,6 +88,7 @@ func newHarness() *harness {
 		Auth:     h.auth,
 		Renders:  fakeRenders{},
 		Log:      quiet(),
+		OwnerID:  "owner",
 	})
 	return h
 }
@@ -308,5 +309,57 @@ func TestLogoutAliasForUnbind(t *testing.T) {
 		if strings.Contains(last(t, h), "暂未迁移") {
 			t.Errorf("%s 被当成未迁移命令了", cmd)
 		}
+	}
+}
+
+// TestProAdminOwnerOnly —— 升降管理员只有 owner 能做。
+//
+// CommandPermissions 里 /pro_admin 要 ActionUserManage,那是 admin 也有的;
+// 不在这之上再挡一道,任何 admin 都能给自己升官。
+func TestProAdminOwnerOnly(t *testing.T) {
+	ctx := context.Background()
+
+	h := newHarness()
+	if _, err := h.d.HandleText(ctx, 1, "admin", "/pro_admin 12345 confirm"); err != nil {
+		t.Fatal(err)
+	}
+	if h.auth.roles["12345"] != "" {
+		t.Errorf("admin 给自己升了官,当前角色 = %q", h.auth.roles["12345"])
+	}
+	if !strings.Contains(last(t, h), "权限") {
+		t.Errorf("响应 = %q,应报无权限", last(t, h))
+	}
+
+	o := newHarness()
+	if _, err := o.d.HandleText(ctx, 1, "owner", "/pro_admin 12345 confirm"); err != nil {
+		t.Fatal(err)
+	}
+	if o.auth.roles["12345"] != auth.RoleAdmin {
+		t.Errorf("owner 下令后未升为管理员,当前角色 = %q", o.auth.roles["12345"])
+	}
+}
+
+// TestDeAdminRestoresUserRole 取消管理员要落回 user —— 与 JS removeRole
+// (删记录、回落到默认角色)等价。
+func TestDeAdminRestoresUserRole(t *testing.T) {
+	h := newHarness()
+	h.auth.roles["u1"] = auth.RoleAdmin
+
+	if _, err := h.d.HandleText(context.Background(), 1, "owner", "/de_admin u1 confirm"); err != nil {
+		t.Fatal(err)
+	}
+	if h.auth.roles["u1"] != auth.RoleUser {
+		t.Errorf("取消管理员后角色 = %q,应为 user", h.auth.roles["u1"])
+	}
+}
+
+// TestProAdminRequiresConfirm —— 和 /ban 一样,防误操作的参数确认不能少。
+func TestProAdminRequiresConfirm(t *testing.T) {
+	h := newHarness()
+	if _, err := h.d.HandleText(context.Background(), 1, "owner", "/pro_admin 12345"); err != nil {
+		t.Fatal(err)
+	}
+	if h.auth.roles["12345"] != "" {
+		t.Error("没加 confirm 就授予了管理员")
 	}
 }

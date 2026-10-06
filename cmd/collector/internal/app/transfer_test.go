@@ -129,6 +129,11 @@ type fakeRclone struct {
 	listErr error
 	// listCalls 记录 ListFiles 拿到的路径 —— 断言「列的是用户目录」。
 	listCalls []string
+	// scan/scanErr 是 ScanFiles 的预设结果 —— /scan_dup 的测试用。
+	scan []rclone.FileEntry
+	// scanCalls 记录 ScanFiles 拿到的路径 —— 断言扫的是网盘根(空串)。
+	scanCalls []string
+	scanErr   error
 }
 
 func (f *fakeRclone) Mkdir(_ context.Context, _ rclone.Config, remotePath string) error {
@@ -146,10 +151,18 @@ func (f *fakeRclone) ListFiles(_ context.Context, _ rclone.Config, remotePath st
 	return f.list, f.listErr
 }
 
+// ScanFiles 是 /scan_dup 的数据源 —— 路径留空表示扫网盘根。
+func (f *fakeRclone) ScanFiles(_ context.Context, _ rclone.Config, remotePath string) ([]rclone.FileEntry, error) {
+	f.scanCalls = append(f.scanCalls, remotePath)
+	return f.scan, f.scanErr
+}
+
 // fakeDrives 代替网盘仓储。
 type fakeDrives struct {
 	drive *drive.Drive
-	err   error
+	// all 是 DrivesByUser 的结果 —— /scan_dup 的「扫描所有网盘」。
+	all []drive.Drive
+	err error
 	// saved 记录写回的 config_data —— 收割 Proton session 的断言点。
 	saved     *drive.DriveConfig
 	savedErr  error
@@ -171,6 +184,18 @@ func (f *fakeDrives) DefaultDrive(context.Context, string) (*drive.Drive, error)
 }
 func (f *fakeDrives) DriveByID(context.Context, string) (*drive.Drive, error) {
 	return f.drive, f.err
+}
+func (f *fakeDrives) DrivesByUser(context.Context, string) ([]drive.Drive, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	if f.all != nil {
+		return f.all, nil
+	}
+	if f.drive != nil {
+		return []drive.Drive{*f.drive}, nil
+	}
+	return nil, nil
 }
 
 func quietApp() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }

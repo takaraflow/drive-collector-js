@@ -134,8 +134,8 @@ func (d *Dispatcher) HandleText(ctx context.Context, chatID int64, userID, text 
 		return true, d.send(ctx, chatID, "🔓 已解绑网盘。\n\n用 /drive 可重新绑定。")
 	case "/remote_folder", "/set_remote_folder":
 		return true, d.handleRemoteFolder(ctx, chatID, text)
-	case "/ban", "/unban":
-		return true, d.handleBan(ctx, chatID, userID, command, text)
+	case "/ban", "/unban", "/pro_admin", "/de_admin":
+		return true, d.handleRoleCommand(ctx, chatID, userID, command, text)
 	default:
 		return true, d.send(ctx, chatID, unsupportedMsg(command))
 	}
@@ -156,15 +156,41 @@ func (d *Dispatcher) handleRemoteFolder(ctx context.Context, chatID int64, text 
 	return d.send(ctx, chatID, "✅ 保存目录已设为 <code>"+escapeHTML(folder)+"</code>")
 }
 
-// handleBan 处理封禁/解封。
+// roleCommandSpec 一条「改角色」命令的语义。
+type roleCommandSpec struct {
+	verb      string // 给用户看的中文动词
+	role      auth.Role
+	ownerOnly bool // 是否只有 owner 能下这条命令
+	noSelf    bool // 是否禁止对自己执行
+}
+
+// roleCommands 把四条改角色的命令归到同一个流程。
+//
+// /de_admin 对应 JS 的 removeRole —— 删掉记录、回落到默认角色 user,
+// 与显式写 user 等价,所以共用一个出口。
+var roleCommands = map[string]roleCommandSpec{
+	"/ban":       {verb: "封禁", role: auth.RoleBanned, noSelf: true},
+	"/unban":     {verb: "解封", role: auth.RoleUser},
+	"/pro_admin": {verb: "设为管理员", role: auth.RoleAdmin, ownerOnly: true},
+	"/de_admin":  {verb: "取消管理员", role: auth.RoleUser, ownerOnly: true},
+}
+
+// handleRoleCommand 处理封禁/解封/升降管理员。
 //
 // B 方案砍掉「二次确认」—— 那是为了防误操作,代价是 227 行 nonce
 // 链路。管理命令数量少、影响大,这里保留一个显式的参数确认:
-// 必须写成 `/ban <uid> confirm` 才真的执行。
-func (d *Dispatcher) handleBan(ctx context.Context, chatID int64, userID, command, text string) error {
-	verb := "封禁"
-	if command == "/unban" {
-		verb = "解封"
+// 必须写成 `/<命令> <uid> confirm` 才真的执行。
+func (d *Dispatcher) handleRoleCommand(ctx context.Context, chatID int64, userID, command, text string) error {
+	spec, ok := roleCommands[command]
+	if !ok {
+		return nil
+	}
+
+	// ownerOnly 是给 CommandPermissions 之上的第二道闸:那里把
+	// ActionUserManage 放行给 admin,而「谁是管理员」只能由 owner 定,
+	// 否则任何 admin 都能给自己升官。
+	if spec.ownerOnly && (d.deps.OwnerID == "" || userID != d.deps.OwnerID) {
+		return d.send(ctx, chatID, "❌ 您没有权限执行此操作。")
 	}
 
 	fields := strings.Fields(text)
@@ -174,31 +200,31 @@ func (d *Dispatcher) handleBan(ctx context.Context, chatID int64, userID, comman
 				"加 <code>confirm</code> 才真的执行 —— 防误操作。", command))
 	}
 	target := fields[1]
+	if spec.noSelf && target == userID {
+		return d.send(ctx, chatID, "❌ 不能对自己执行此操作。")
+	}
 	if len(fields) < 3 || fields[2] != "confirm" {
 		return d.send(ctx, chatID, fmt.Sprintf(
 			"⚠️ 即将%s 用户 <code>%s</code>。\n\n确认请再发一次并加 <code>confirm</code>。",
-			verb, escapeHTML(target)))
+			spec.verb, escapeHTML(target)))
 	}
 
-	if err := d.setRole(ctx, target, command == "/ban"); err != nil {
+	if err := d.setRole(ctx, target, spec.role); err != nil {
 		return d.send(ctx, chatID, "❌ 操作失败:"+escapeHTML(err.Error()))
 	}
-	return d.send(ctx, chatID, fmt.Sprintf("✅ 已%s 用户 <code>%s</code>", verb, escapeHTML(target)))
+	return d.send(ctx, chatID, fmt.Sprintf("✅ 已%s 用户 <code>%s</code>", spec.verb, escapeHTML(target)))
 }
 
 // setRole 写角色 —— 需要 Authorizer 支持写入。
 //
 // 用类型断言而不是改 Authorizer 接口:读权限是每个 handler 都要的,
 // 写权限只有 /ban /unbind 需要。让接口带上写方法会逼所有 mock 都实现它。
-func (d *Dispatcher) setRole(ctx context.Context, target string, ban bool) error {
+func (d *Dispatcher) setRole(ctx context.Context, target string, role auth.Role) error {
 	w, ok := d.deps.Auth.(roleWriter)
 	if !ok {
 		return fmt.Errorf("权限层不支持写角色")
 	}
-	if ban {
-		return w.SetRole(ctx, target, auth.RoleBanned)
-	}
-	return w.SetRole(ctx, target, auth.RoleUser)
+	return w.SetRole(ctx, target, role)
 }
 
 type roleWriter interface {
