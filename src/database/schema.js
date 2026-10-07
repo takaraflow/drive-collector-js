@@ -58,6 +58,7 @@ const INITIAL_SCHEMA_STATEMENTS = [
         chat_id TEXT,
         msg_id INTEGER,
         source_msg_id INTEGER,
+        grouped_id INTEGER,
         source_type TEXT DEFAULT 'telegram_media',
         source_ref TEXT,
         file_name TEXT,
@@ -78,6 +79,7 @@ const INITIAL_SCHEMA_STATEMENTS = [
     "CREATE INDEX IF NOT EXISTS idx_tasks_user_status ON tasks(user_id, status)",
     "CREATE INDEX IF NOT EXISTS idx_tasks_status_updated ON tasks(status, updated_at)",
     "CREATE INDEX IF NOT EXISTS idx_tasks_stalled_recovery ON tasks(status, updated_at, created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_tasks_grouped_id ON tasks(grouped_id)",
 
     `CREATE TABLE IF NOT EXISTS drives (
         id TEXT PRIMARY KEY,
