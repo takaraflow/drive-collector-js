@@ -686,7 +686,7 @@ type diagCheck struct {
 }
 
 // telegramCheck 探 Telegram —— 已连上就是通,没连上就是断。
-func telegramCheck(tg *tgclient.Client) diagCheck {
+func telegramCheck(tg Telegram) diagCheck {
 	if tg == nil || tg.SelfID() == 0 {
 		return diagCheck{"TG-MT", "❌", "Telegram MTProto API 连接失败", "N/A"}
 	}

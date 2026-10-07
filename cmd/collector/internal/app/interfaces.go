@@ -21,6 +21,27 @@ type Notifier interface {
 	SendMessage(ctx context.Context, chatID int64, text string) error
 }
 
+// Telegram 是 App 需要 Telegram 客户端做的全部事情 —— 一个端口,
+// 不是一组能力。
+//
+// 抽它的理由与 NoticeSender 同源,只是范围不同:tg 是具体类型
+// *tgclient.Client,注入不进去,于是【真实的按钮点击】这条路径在测试
+// 里一步都走不完 —— 而「按钮点了没反应」正是这条路径上出过的故障
+// (整组取消的面板全造好了,回调前缀却没进分发白名单)。做成接口之后,
+// handleCallback 能拿假实现端到端跑一遍。
+type Telegram interface {
+	Run(ctx context.Context) error
+	SelfID() int64
+	SendMessage(ctx context.Context, chatID int64, text string) error
+	SendMessageWithID(ctx context.Context, chatID int64, text string) (int, error)
+	SendWithButtons(ctx context.Context, chatID int64, text string, buttons [][]tgclient.Button) error
+	SendWithButtonsAndID(ctx context.Context, chatID int64, text string, buttons [][]tgclient.Button) (int, error)
+	EditMessage(ctx context.Context, chatID int64, msgID int, text string) error
+	EditWithButtons(ctx context.Context, chatID int64, msgID int, text string, buttons [][]tgclient.Button) error
+	AnswerCallback(ctx context.Context, callbackID int64, text string, alert bool) error
+	DeleteMessages(ctx context.Context, chatID int64, ids []int64) error
+}
+
 // NoticeSender 是任务状态消息需要的三个动作。
 //
 // 抽接口只有一个理由:「文件投递后到底有没有回音」是本包最该断言的
