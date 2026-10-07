@@ -146,6 +146,7 @@ type Authorizer interface {
 var (
 	_ TaskRepo       = (*store.Repository)(nil)
 	_ DriveRepo      = (*store.DriveRepository)(nil)
+	_ Telegram       = (*tgclient.Client)(nil)
 	_ Downloader     = (*tgclient.Client)(nil)
 	_ MessageFetcher = (*tgclient.Client)(nil)
 	_ NoticeSender   = (*tgclient.Client)(nil)
