@@ -6,7 +6,7 @@ import {
 } from "../domain/drive-credentials.js";
 import { classifyInfrastructureError } from "../domain/infrastructure-error.js";
 
-export const LATEST_SCHEMA_VERSION = 10;
+export const LATEST_SCHEMA_VERSION = 11;
 
 const MIGRATION_LOCK_ID = "database-schema";
 const SCHEMA_READY_RETRY_DEFAULTS = Object.freeze({
@@ -215,7 +215,7 @@ const SCHEMA_MIGRATION_LOCK_SQL = `CREATE TABLE IF NOT EXISTS schema_migration_l
 
 const REQUIRED_TABLE_COLUMNS = {
     schema_migrations: ["version", "name", "checksum", "applied_at"],
-    tasks: ["id", "user_id", "chat_id", "msg_id", "source_msg_id", "source_type", "source_ref", "file_name", "file_size", "status", "error_msg", "claimed_by", "claim_lease_id", "created_at", "updated_at"],
+    tasks: ["id", "user_id", "chat_id", "msg_id", "source_msg_id", "grouped_id", "source_type", "source_ref", "file_name", "file_size", "status", "error_msg", "claimed_by", "claim_lease_id", "created_at", "updated_at"],
     drives: ["id", "user_id", "name", "type", "config_data", "remote_folder", "status", "is_default", "created_at", "updated_at"],
     settings: ["key", "value", "created_at", "updated_at"],
     sessions: ["id", "user_id", "data", "created_at", "expires_at"],
@@ -227,6 +227,7 @@ const REQUIRED_INDEXES = [
     "idx_tasks_status_updated",
     "idx_tasks_stalled_recovery",
     "idx_tasks_claim_lease",
+    "idx_tasks_grouped_id",
     "idx_drives_user_default",
     "idx_drives_one_default_per_user",
     "idx_drives_one_active_type_per_user",
@@ -674,6 +675,19 @@ async function applyTaskClaimLeaseFencing({ d1 }) {
     await runStatements(d1, TASK_INDEX_STATEMENTS);
 }
 
+async function applyTaskGroupedID({ d1 }) {
+    if (!(await tableExists(d1, "tasks"))) {
+        await ensureTaskBaseSchema(d1);
+    }
+    await addMissingColumns(d1, "tasks", {
+        grouped_id: "INTEGER"
+    });
+    // 索引就地建,不进 TASK_INDEX_STATEMENTS:那份清单会被 v6/v7 的
+    // apply 复用,而那些路径可能跑在还没有 grouped_id 的库上 ——
+    // 一条 CREATE INDEX 引用不存在的列会直接炸掉整次迁移。
+    await d1.run("CREATE INDEX IF NOT EXISTS idx_tasks_grouped_id ON tasks(grouped_id)");
+}
+
 async function applyTaskSourceMetadata({ d1 }) {
     await ensureTaskBaseSchema(d1);
     const columns = await getTableColumns(d1, "tasks");
@@ -1039,6 +1053,16 @@ function getMigrations() {
             sql: "backfill one default drive for users with active drives but no active default",
             shouldRun: async ({ d1 }) => await hasUsersMissingActiveDriveDefault(d1),
             apply: applyActiveDriveDefaultBackfill
+        },
+        {
+            version: 11,
+            name: "task_grouped_id",
+            sql: "add tasks.grouped_id and index so media-group (album) tasks can be batched-cancelled",
+            shouldRun: async ({ d1 }) => {
+                return !(await columnExists(d1, "tasks", "grouped_id")) ||
+                    !(await indexExists(d1, "idx_tasks_grouped_id"));
+            },
+            apply: applyTaskGroupedID
         }
     ];
 }

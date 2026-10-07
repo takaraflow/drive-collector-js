@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     chat_id TEXT,
     msg_id INTEGER,
     source_msg_id INTEGER,
+    grouped_id INTEGER,
     source_type TEXT DEFAULT 'telegram_media',
     source_ref TEXT,
     file_name TEXT,
@@ -43,6 +44,7 @@ CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_msg_id ON tasks(msg_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_created_at ON tasks(created_at);
 CREATE INDEX IF NOT EXISTS idx_tasks_claimed_by ON tasks(claimed_by);
+CREATE INDEX IF NOT EXISTS idx_tasks_grouped_id ON tasks(grouped_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_claim_lease ON tasks(claimed_by, claim_lease_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_user_status ON tasks(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_tasks_status_updated ON tasks(status, updated_at);

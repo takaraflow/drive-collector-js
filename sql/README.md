@@ -12,6 +12,7 @@
 - **`tasks.sql`** - 任务表（用于存储文件传输任务）
 - **`migrate-tasks-status-ssot.sql`** - 既有 tasks 表状态约束收口迁移（已纳入 `db:migrate`）
 - **`migrate-drives-default-ssot.sql`** - 既有 drives 表默认盘 SSOT 迁移（已纳入 `db:migrate`）
+- **`migrate-tasks-grouped-id.sql`** - tasks 表 `grouped_id` 列与索引（已纳入 `db:migrate`，版本 11）
 - **`drives.sql`** - 网盘配置表（用于存储用户绑定的网盘信息）
 - **`settings.sql`** - 系统设置表（仅作为备份或特殊场景使用）
 - **`sessions.sql`** - 会话表（仅作为备份或特殊场景使用）

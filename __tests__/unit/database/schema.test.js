@@ -304,11 +304,12 @@ describe("database schema migrations", () => {
 
         expect(result.status.isCurrent).toBe(true);
         expect(result.status.currentVersion).toBe(LATEST_SCHEMA_VERSION);
-        expect(result.results.map(item => item.action)).toEqual(["applied", "applied", "applied", "recorded", "recorded", "recorded", "recorded", "recorded", "recorded", "recorded"]);
+        expect(result.results.map(item => item.action)).toEqual(["applied", "applied", "applied", "recorded", "recorded", "recorded", "recorded", "recorded", "recorded", "recorded", "applied"]);
 
         const taskColumns = db.prepare("PRAGMA table_info(tasks)").all().map(column => column.name);
         expect(taskColumns).toContain("source_type");
         expect(taskColumns).toContain("source_ref");
+        expect(taskColumns).toContain("grouped_id");
 
         const driveColumns = db.prepare("PRAGMA table_info(drives)").all().map(column => column.name);
         expect(driveColumns).toContain("is_default");
@@ -321,7 +322,7 @@ describe("database schema migrations", () => {
         expect(indexes).toContain("idx_user_roles_role");
 
         const migrations = db.prepare("SELECT version FROM schema_migrations ORDER BY version").all();
-        expect(migrations.map(row => row.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+        expect(migrations.map(row => row.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
     });
 
     test("should create current schema with user_roles and active-only drive type uniqueness", async () => {
@@ -448,7 +449,8 @@ describe("database schema migrations", () => {
             { version: 7, name: "task_source_metadata" },
             { version: 8, name: "drive_password_format_ssot" },
             { version: 9, name: "task_stalled_recovery_index" },
-            { version: 10, name: "active_drive_default_backfill" }
+            { version: 10, name: "active_drive_default_backfill" },
+            { version: 11, name: "task_grouped_id" }
         ]);
 
         const result = await migrateDatabaseSchema({
@@ -481,16 +483,26 @@ describe("database schema migrations", () => {
             action: "recorded",
             executionTimeMs: expect.any(Number)
         });
+        expect(result.results).toContainEqual({
+            version: 11,
+            name: "task_grouped_id",
+            action: "applied",
+            executionTimeMs: expect.any(Number)
+        });
         expect(result.status.isCurrent).toBe(true);
 
         const taskColumns = db.prepare("PRAGMA table_info(tasks)").all().map(column => column.name);
         expect(taskColumns).toContain("claim_lease_id");
         expect(taskColumns).toContain("source_type");
         expect(taskColumns).toContain("source_ref");
+        // 相册批量取消靠它反查整组 —— 列不在,Go 侧那条 15 列的 INSERT
+        // 会整条失败,表现是「所有任务都建不出来」。
+        expect(taskColumns).toContain("grouped_id");
 
         const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all().map(row => row.name);
         expect(indexes).toContain("idx_tasks_claim_lease");
         expect(indexes).toContain("idx_tasks_stalled_recovery");
+        expect(indexes).toContain("idx_tasks_grouped_id");
 
         const migrationOne = db.prepare("SELECT checksum FROM schema_migrations WHERE version = 1").get();
         expect(migrationOne.checksum).toBe("1c71fee80eb09f16419d0143c236c9e7e1d2261f80e8dde4b1c591e5539e5ce9");
@@ -736,6 +748,6 @@ describe("database schema migrations", () => {
         expect(indexes).toContain("idx_drives_one_default_per_user");
 
         const migrations = db.prepare("SELECT version FROM schema_migrations ORDER BY version").all();
-        expect(migrations.map(row => row.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+        expect(migrations.map(row => row.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
     });
 });
