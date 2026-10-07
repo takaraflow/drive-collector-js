@@ -6,6 +6,7 @@ import (
 
 	"github.com/youngsx/drive-collector/cmd/collector/internal/store"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/task"
+	tgclient "github.com/youngsx/drive-collector/cmd/collector/internal/telegram"
 )
 
 // flushMediaGroup 把一个媒体组刷成任务。
@@ -92,6 +93,19 @@ func (a *App) flushMediaGroup(ctx context.Context, gid string, meta task.GroupMe
 	}
 
 	a.log.Info("媒体组已建任务", "gid", gid, "条数", len(tasks))
+
+	// 组级汇总消息:带「取消整个相册」按钮 —— grouped_id 现在落库了,
+	// 按 gid 一次就能反查并取消整批。发不出去只记日志:任务本身是好的。
+	if a.notices != nil {
+		if _, err := a.notices.SendWithButtonsAndID(ctx, meta.ChatID,
+			fmt.Sprintf("📸 <b>已捕获相册</b>\n%d 个文件正在排队处理...", len(tasks)),
+			[][]tgclient.Button{{
+				{Text: groupCancelBtn, Data: "cancel_group_confirm_" + gid},
+			}}); err != nil {
+			a.log.Error("发相册汇总消息失败", "gid", gid, "err", err)
+		}
+	}
+
 	// 与单条路径一样:建完就得排队,否则这批图只会躺在 queued 里。
 	for _, tsk := range tasks {
 		a.enqueue(ctx, tsk.ID)

@@ -364,3 +364,44 @@ func TestNormalizeGID(t *testing.T) {
 		t.Errorf("NormalizeGID = %q", NormalizeGID(987654))
 	}
 }
+
+// TestFlushRetriesWhenLockHeld 锁被占时不能丢组 —— 那可能是另一实例
+// 正在刷(它刷完会 drop),也可能是持锁者崩溃留下的残锁。两种情况
+// 下本实例都无权删数据:组必须原样留在 Redis 里等重试。
+//
+// 这里只断言「抢锁失败不 drop」:数据保住了,残锁最坏也是延迟重试
+// 自愈(2s 一次,TTL 30s 到期后必成功),不需要额外机制。
+func TestFlushRetriesWhenLockHeld(t *testing.T) {
+	b, mr, col := newTestBuffer(t)
+	ctx := context.Background()
+	const gid = "grp-locked"
+
+	// 预占锁,让 flush 的 SetNX 必失败。
+	if err := mr.Set(b.lockKey(gid), "1"); err != nil {
+		t.Fatal(err)
+	}
+
+	_ = b.Add(ctx, gid, 555, 555, 1)
+	// 必须等过定时器窗口(bufferTimeout=50ms),保证 flush 已经
+	// 【在锁被占的状态下】跑过一次 —— 立刻断言 col==0 是恒真的,
+	// 会赶在 timer 触发之前就放行,整条测试就测了个寂寞。
+	time.Sleep(300 * time.Millisecond)
+	if col.count() != 0 {
+		t.Error("锁被占时不应执行 FlushGroup")
+	}
+
+	// 组必须还在 —— 抢锁失败就删数据,等于把「别人正在处理」
+	// 误当成「处理完了」。
+	if !mr.Exists(b.bufferKey(gid)) {
+		t.Error("抢锁失败后组被误删")
+	}
+
+	// 释放残锁,重试必须能把组刷出去 —— 自愈路径真的通。
+	_ = mr.Del(b.lockKey(gid))
+	if !waitFor(t, 5*time.Second, func() bool { return col.total() == 1 }) {
+		t.Error("残锁释放后重试未把组刷出")
+	}
+	if mr.Exists(b.bufferKey(gid)) {
+		t.Error("重试刷出后组未清掉")
+	}
+}

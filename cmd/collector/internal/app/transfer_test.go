@@ -93,6 +93,18 @@ func (f *fakeRepo) FindByMsgId(context.Context, int64) (*store.Task, error) {
 	return nil, nil
 }
 
+func (f *fakeRepo) FindByGroupID(_ context.Context, groupedID int64) ([]store.Task, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []store.Task
+	for _, t := range f.batch {
+		if t.GroupedID.Valid && t.GroupedID.Int64 == groupedID {
+			out = append(out, t)
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeRepo) FindStalledTasks(_ context.Context, _ time.Duration) ([]store.Task, error) {
 	return f.stalled, f.stalledErr
 }

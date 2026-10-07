@@ -6,6 +6,7 @@ package app
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -206,5 +207,90 @@ func TestStatusIconMatchesJS(t *testing.T) {
 func TestFormatUptime(t *testing.T) {
 	if got := formatUptime(3*3600e9 + 5*60e9 + 9*1e9); got != "3h 5m 9s" {
 		t.Errorf("formatUptime = %q,期望 3h 5m 9s", got)
+	}
+}
+
+// groupTasksOf 往 fakeRepo 里塞一组任务 —— FindByGroupID 按它反查。
+func groupTasksOf(repo *fakeRepo, gid int64, owner string, n int) {
+	for i := 0; i < n; i++ {
+		repo.batch = append(repo.batch, store.Task{
+			ID:        fmt.Sprintf("g%d", i),
+			UserID:    owner,
+			Status:    contract.StatusQueued,
+			GroupedID: sql.NullInt64{Int64: gid, Valid: true},
+		})
+	}
+}
+
+// TestCancelGroupCancelsEveryTask 点「取消整个相册」必须把组里每条
+// 都打进状态机 —— 漏一条,那条文件照样传上网盘。
+func TestCancelGroupCancelsEveryTask(t *testing.T) {
+	repo := &statusRepo{fakeRepo: &fakeRepo{}}
+	groupTasksOf(repo.fakeRepo, 999888, "42", 3)
+	a := newStatusApp(repo)
+
+	if got := a.cancelGroup(context.Background(), "42", "999888"); got != statusCmdSent {
+		t.Fatalf("取消自己的组返回 %q", got)
+	}
+	if len(repo.trans) != 3 {
+		t.Errorf("打了 %d 次状态机,期望 3 —— 有任务没被取消", len(repo.trans))
+	}
+	for _, ev := range repo.trans {
+		if ev != contract.EventCancel {
+			t.Errorf("事件 = %v,期望 cancel", ev)
+		}
+	}
+}
+
+// TestCancelGroupRefusesForeignGroup 组里混着别人的任务时整组拒。
+// gid 在按钮回调数据里是明文,谁都能伪造一个别人的 gid。
+func TestCancelGroupRefusesForeignGroup(t *testing.T) {
+	repo := &statusRepo{fakeRepo: &fakeRepo{}}
+	groupTasksOf(repo.fakeRepo, 999888, "99", 2) // 别人的组
+	a := newStatusApp(repo)
+
+	if got := a.cancelGroup(context.Background(), "42", "999888"); got != statusTaskNotFound {
+		t.Errorf("取消他人的组返回 %q,期望 %q", got, statusTaskNotFound)
+	}
+	if len(repo.trans) != 0 {
+		t.Errorf("不该动状态机,却记了 %v", repo.trans)
+	}
+}
+
+// TestCancelGroupUnknownGid 编不出来的 gid 必须安静地拒绝。
+func TestCancelGroupUnknownGid(t *testing.T) {
+	repo := &statusRepo{fakeRepo: &fakeRepo{}}
+	a := newStatusApp(repo)
+
+	for _, gid := range []string{"0", "abc", ""} {
+		if got := a.cancelGroup(context.Background(), "42", gid); got != statusTaskNotFound {
+			t.Errorf("gid=%q 返回 %q,期望 %q", gid, got, statusTaskNotFound)
+		}
+	}
+	if len(repo.trans) != 0 {
+		t.Errorf("不该动状态机,却记了 %v", repo.trans)
+	}
+}
+
+// TestStatusCallbackRouting 按钮数据与分发规则必须对上。
+//
+// 「取消整个相册」的两个回调曾在 handleStatusCallback 里实现好了、
+// 单元测试全绿,但前缀没进 app.handleCallback 的白名单 —— 用户点下去
+// 只得到「该功能暂未迁移」,整组取消等于没做。
+func TestStatusCallbackRouting(t *testing.T) {
+	for _, data := range []string{
+		"cancel_confirm_t1", "cancel_execute_t1",
+		"retry_confirm_t1", "retry_execute_t1",
+		"cancel_group_confirm_999888", "cancel_group_execute_999888",
+		"task_action_back", "status_general",
+	} {
+		if !isStatusCallback(data) {
+			t.Errorf("%q 没被分发到 handleStatusCallback —— 按钮点了没反应", data)
+		}
+	}
+	for _, data := range []string{"", "noop", "drive_bind_x", "cancel_group_", "cancel_"} {
+		if isStatusCallback(data) {
+			t.Errorf("%q 不该被当成状态回调", data)
+		}
 	}
 }

@@ -147,17 +147,14 @@ func FileNameOf(m tg.MessageMediaClass) string { return fileNameOf(m) }
 
 // fileNameOf 从媒体里取文件名。
 //
-// 照片是唯一必须自己编名的地方:它【没有 fileName 属性】,而空文件名
+// 照片和无名文档都必须自己编名:它们【没有 fileName 属性】,而空文件名
 // 会让 sanitize() 变成 "unnamed" —— 于是【整个相册的每一张都塌成同一
 // 个文件名】,串行 worker 逐个覆盖,用户发 10 张图网盘上只剩 1 张,
 // 且全程不报错、不告警。
 //
 // 编名用【Telegram 侧的稳定标识】(dcId + id)而不是时间戳/UUID:随机名
 // 每次都不同,同一张图重发就会反复新传一份,去重永远命中不了。
-// 与 JS 侧 getMediaInfo 的编名规则逐字对齐。
-//
-// 无名文档(头像、视频等)仍返回空 —— 那是 app 层 app_test 明确锁定的
-// 行为,不在本次修复范围内。
+// 与 JS 侧 getMediaInfo 的编名规则逐字对齐(video→.mp4,其余→.bin)。
 func fileNameOf(m tg.MessageMediaClass) string {
 	switch v := m.(type) {
 	case *tg.MessageMediaDocument:
@@ -170,7 +167,14 @@ func fileNameOf(m tg.MessageMediaClass) string {
 				return name.FileName
 			}
 		}
-		return ""
+		ext := ".bin"
+		for _, attr := range doc.Attributes {
+			if _, isVideo := attr.(*tg.DocumentAttributeVideo); isVideo {
+				ext = ".mp4"
+				break
+			}
+		}
+		return fmt.Sprintf("transfer_%d_%d%s", doc.GetDCID(), doc.GetID(), ext)
 
 	case *tg.MessageMediaPhoto:
 		photo, ok := v.Photo.(*tg.Photo)

@@ -73,6 +73,8 @@ type TaskRepo interface {
 	FindById(ctx context.Context, taskID string) (*store.Task, error)
 	FindByUserId(ctx context.Context, userID string, limit int) ([]store.Task, error)
 	FindByMsgId(ctx context.Context, msgID int64) (*store.Task, error)
+	// FindByGroupID 反查一个媒体组的全部任务 —— 「取消整组」靠它。
+	FindByGroupID(ctx context.Context, groupedID int64) ([]store.Task, error)
 	FindStalledTasks(ctx context.Context, timeout time.Duration) ([]store.Task, error)
 	FindActiveByUserId(ctx context.Context, userID string, limit int) ([]store.Task, error)
 	CountByUserStatus(ctx context.Context, userID string) (map[string]int, error)
