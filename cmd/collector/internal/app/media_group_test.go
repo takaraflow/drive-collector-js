@@ -114,8 +114,29 @@ func TestFlushMediaGroupCreatesTasksForEveryPhoto(t *testing.T) {
 	}
 
 	// 用户必须收到回音,否则就是「已读不回」。
-	if len(nf.sent) != n {
-		t.Errorf("发了 %d 条状态消息,期望 %d —— 用户看不到任何回音", len(nf.sent), n)
+	// n 条任务状态消息 + 1 条组汇总消息(带「取消整个相册」按钮)。
+	if len(nf.sent) != n+1 {
+		t.Errorf("发了 %d 条状态消息,期望 %d —— 用户看不到任何回音", len(nf.sent), n+1)
+	}
+
+	// 最后一条必须是组汇总,且取消按钮必须指回这个组 ——
+	// data 里的 gid 就是落库的 grouped_id,点了它才能一次取消整批。
+	last := len(nf.sendBtns) - 1
+	if last < 0 {
+		t.Fatal("没有任何带按钮的消息")
+	}
+	btns := nf.sendBtns[last]
+	want := "cancel_group_confirm_999888"
+	found := false
+	for _, row := range btns {
+		for _, b := range row {
+			if b.Data == want {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Errorf("组汇总消息缺「取消整个相册」按钮 %q,按钮 = %+v", want, btns)
 	}
 }
 

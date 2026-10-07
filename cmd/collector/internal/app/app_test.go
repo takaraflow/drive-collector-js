@@ -119,12 +119,13 @@ func TestFileNameOfDocument(t *testing.T) {
 	}
 }
 
-// TestFileNameOfDocumentWithoutName 没文件名属性时返回空串。
+// TestFileNameOfDocumentWithoutName 没文件名属性时编一个稳定名 ——
+// 空名会让整个相册塌成同一个 unnamed 文件。
 func TestFileNameOfDocumentWithoutName(t *testing.T) {
 	doc := &tg.Document{ID: 1, Size: 100}
 	doc.Attributes = nil
-	if got := fileNameOf(&tg.MessageMediaDocument{Document: doc}); got != "" {
-		t.Errorf("无文件名属性时应返回空串,得到 %q", got)
+	if got := fileNameOf(&tg.MessageMediaDocument{Document: doc}); got != "transfer_0_1.bin" {
+		t.Errorf("无文件名属性时应编稳定名,得到 %q", got)
 	}
 }
 

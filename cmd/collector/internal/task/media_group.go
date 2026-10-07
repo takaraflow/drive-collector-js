@@ -289,7 +289,16 @@ func (b *MediaGroupBuffer) flush(ctx context.Context, gid string) {
 		return
 	}
 	if !ok {
-		return // 别人在刷
+		// 锁被人占着。正常情况是另一个实例正在刷,它刷完会把组 drop
+		// 掉 —— 但也可能是持锁者崩溃留下的残锁(TTL 30s),那样这批
+		// 消息会白等到过期。延迟再试一次自愈:组已被正常 drop 就到此
+		// 为止(load 到 nil 直接返回),残锁则最坏每 2s 试一次、TTL
+		// 到期后必成功。inflight 标记防并发重试叠加。
+		b.log.Info("媒体组锁被占,2 秒后重试", "gid", gid)
+		time.AfterFunc(2*time.Second, func() {
+			b.flush(context.Background(), gid)
+		})
+		return
 	}
 	defer b.redis.Del(context.WithoutCancel(ctx), lockKey)
 

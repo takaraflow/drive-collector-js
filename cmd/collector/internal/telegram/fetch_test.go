@@ -120,6 +120,22 @@ func TestMessageInfoKeepsDocumentFilename(t *testing.T) {
 	}
 }
 
+// TestFileNameOfUnnamedDocument 无名文档也必须编稳定名 —— 无名视频
+// 相册与照片同病:空名塌成同一个 unnamed,整组只剩一个文件。
+// 扩展名与 JS getMediaInfo 对齐:video 属性 → .mp4,其余 → .bin。
+func TestFileNameOfUnnamedDocument(t *testing.T) {
+	bare := &tg.Document{ID: 5, DCID: 2}
+	if got := fileNameOf(&tg.MessageMediaDocument{Document: bare}); got != "transfer_2_5.bin" {
+		t.Errorf("无名文档名 = %q,期望 transfer_2_5.bin", got)
+	}
+
+	video := &tg.Document{ID: 6, DCID: 2}
+	video.Attributes = []tg.DocumentAttributeClass{&tg.DocumentAttributeVideo{}}
+	if got := fileNameOf(&tg.MessageMediaDocument{Document: video}); got != "transfer_2_6.mp4" {
+		t.Errorf("无名视频名 = %q,期望 transfer_2_6.mp4", got)
+	}
+}
+
 // TestMessageInfoPicksGroupedID grouped_id 必须透传 —— 媒体组靠它归组,
 // 与「具体哪条消息」的 SourceMsgID 是两回事。
 func TestMessageInfoPicksGroupedID(t *testing.T) {

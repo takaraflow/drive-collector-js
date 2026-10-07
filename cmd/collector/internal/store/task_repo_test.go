@@ -176,18 +176,22 @@ func TestCreateSendsFullRow(t *testing.T) {
 		t.Errorf("SQL = %q", req.SQL)
 	}
 	// id / user_id 是 NOT NULL,必须出现在 params 里
-	if len(req.Params) != 14 {
-		t.Errorf("参数个数 = %d,期望 14\nSQL: %s", len(req.Params), req.SQL)
+	if len(req.Params) != 15 {
+		t.Errorf("参数个数 = %d,期望 15\nSQL: %s", len(req.Params), req.SQL)
 	}
 	if req.Params[0] != "t1" || req.Params[1] != "u1" {
 		t.Errorf("前两个参数 = %v, %v", req.Params[0], req.Params[1])
 	}
-	// 默认值要和 schema 对齐
-	if req.Params[5] != "telegram_media" {
-		t.Errorf("source_type 默认值 = %v,期望 telegram_media", req.Params[5])
+	// grouped_id 排在 source_msg_id 之后,无组时必须是 NULL
+	if req.Params[5] != nil {
+		t.Errorf("grouped_id 默认 = %v,期望 nil", req.Params[5])
 	}
-	if req.Params[9] != string(contract.StatusQueued) {
-		t.Errorf("status 默认值 = %v,期望 queued", req.Params[9])
+	// 默认值要和 schema 对齐
+	if req.Params[6] != "telegram_media" {
+		t.Errorf("source_type 默认值 = %v,期望 telegram_media", req.Params[6])
+	}
+	if req.Params[10] != string(contract.StatusQueued) {
+		t.Errorf("status 默认值 = %v,期望 queued", req.Params[10])
 	}
 }
 
@@ -329,11 +333,11 @@ func TestCreateBatchUsesMultiValueInsert(t *testing.T) {
 	}
 
 	req := f.last()
-	if got := strings.Count(req.SQL, "(?,?,?,?,?,?,?,?,?,?,?,?,?,?)"); got != 3 {
+	if got := strings.Count(req.SQL, "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"); got != 3 {
 		t.Errorf("多值组数 = %d,期望 3\nSQL: %s", got, req.SQL)
 	}
-	if len(req.Params) != 42 {
-		t.Errorf("参数个数 = %d,期望 42", len(req.Params))
+	if len(req.Params) != 45 {
+		t.Errorf("参数个数 = %d,期望 45", len(req.Params))
 	}
 }
 
@@ -404,5 +408,33 @@ func TestNullFieldsRoundTrip(t *testing.T) {
 	}
 	if task.FileName.Valid {
 		t.Errorf("file_name=\"\" 应解析为无效(空串当无值),得到 %+v", task.FileName)
+	}
+}
+
+// TestFindByGroupIDQueriesByGid 「取消整组」靠它反查任务 —— 查询必须
+// 走 grouped_id(而不是 source_msg_id:那是「具体哪条消息」,一个相册
+// 10 条各不相同),参数是 int64 的 gid 而不是字符串。
+func TestFindByGroupIDQueriesByGid(t *testing.T) {
+	var got capturedReq
+	f := &fakeD1{responder: func(req capturedReq) string {
+		got = req
+		return oneRow
+	}}
+	r := newTestRepo(t, f)
+
+	tasks, err := r.FindByGroupID(context.Background(), 999888)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got.SQL, "WHERE grouped_id = ?") {
+		t.Errorf("SQL 缺 grouped_id 条件: %s", got.SQL)
+	}
+	// fakeD1 从 JSON 反序列化参数,数字一律是 float64 —— 这里只断言值,
+	// 真实的类型由 d1 客户端发给生产 API。
+	if got.Params[0] != float64(999888) {
+		t.Errorf("参数 = %v,期望 999888", got.Params[0])
+	}
+	if len(tasks) != 1 || tasks[0].ID != "t1" {
+		t.Errorf("返回任务 = %+v", tasks)
 	}
 }

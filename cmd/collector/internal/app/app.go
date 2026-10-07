@@ -777,9 +777,7 @@ func (a *App) handleCallback(ctx context.Context, u tgclient.Update) error {
 		// 限流答剩余秒数)—— 这里先答会把那次回应作废。
 		return a.handleFilesCallback(ctx, cb, data)
 
-	case strings.HasPrefix(data, "cancel_confirm_"), strings.HasPrefix(data, "cancel_execute_"),
-		strings.HasPrefix(data, "retry_confirm_"), strings.HasPrefix(data, "retry_execute_"),
-		data == "task_action_back", data == "status_general":
+	case isStatusCallback(data):
 		return a.handleStatusCallback(ctx, cb, data)
 
 	case data == "remote_folder_menu":

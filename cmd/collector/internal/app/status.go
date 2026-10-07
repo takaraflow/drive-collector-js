@@ -16,6 +16,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -41,6 +42,9 @@ const (
 
 	statusCancelConfirm = "⚠️ <b>确认取消这个任务？</b>\n\n取消后需要重新发送文件或链接才能再次转存。"
 	statusRetryConfirm  = "⚠️ <b>确认重试这个任务？</b>\n\n我会重新排队处理该任务。"
+
+	statusCancelGroupConfirm = "⚠️ <b>确认取消整个相册？</b>\n\n这会取消该相册下全部 %d 个任务的转存。"
+	groupCancelBtn           = "🚫 取消整个相册"
 
 	statusCmdSent        = "指令已下达"
 	statusTaskNotFound   = "任务已不存在或无权操作"
@@ -235,6 +239,22 @@ func statusButtons(ov queueOverview, isAdmin bool) [][]tgclient.Button {
 	return buttons
 }
 
+// isStatusCallback 判断哪些 callback 数据交给 handleStatusCallback。
+//
+// 抽成函数只为能被测到:按钮数据在别处拼、分发在 app.handleCallback,
+// 两处一旦对不上,按钮就成了「点了只弹该功能暂未迁移」的摆设 ——
+// 而 handleStatusCallback 内部的分支测试全绿,一点都看不出来。
+func isStatusCallback(data string) bool {
+	switch {
+	case strings.HasPrefix(data, "cancel_confirm_"), strings.HasPrefix(data, "cancel_execute_"),
+		strings.HasPrefix(data, "cancel_group_confirm_"), strings.HasPrefix(data, "cancel_group_execute_"),
+		strings.HasPrefix(data, "retry_confirm_"), strings.HasPrefix(data, "retry_execute_"),
+		data == "task_action_back", data == "status_general":
+		return true
+	}
+	return false
+}
+
 // handleStatusCallback 取消/重试/返回 —— 与 JS 那组同名回调一致。
 func (a *App) handleStatusCallback(ctx context.Context, cb tgclient.CallbackContext, data string) error {
 	answer := func(text string, alert bool) {
@@ -260,6 +280,24 @@ func (a *App) handleStatusCallback(ctx context.Context, cb tgclient.CallbackCont
 	case strings.HasPrefix(data, "cancel_execute_"):
 		taskID := strings.TrimPrefix(data, "cancel_execute_")
 		answer(a.cancelTask(ctx, fmt.Sprintf("%d", cb.UserID), taskID), false)
+		return nil
+
+	case strings.HasPrefix(data, "cancel_group_confirm_"):
+		gid := strings.TrimPrefix(data, "cancel_group_confirm_")
+		text, buttons := a.groupCancelConfirm(ctx, fmt.Sprintf("%d", cb.UserID), gid)
+		if buttons == nil {
+			// 查不到组(或无权)—— 编辑面板只会暴露一个无效按钮,
+			// 直接弹提示更诚实。注意不能先 answer 空:同一个
+			// callback 只能 answer 一次,弹窗必须是那次。
+			answer(text, true)
+			return nil
+		}
+		answer("", false)
+		return a.tg.EditWithButtons(ctx, cb.ChatID, cb.MsgID, text, buttons)
+
+	case strings.HasPrefix(data, "cancel_group_execute_"):
+		gid := strings.TrimPrefix(data, "cancel_group_execute_")
+		answer(a.cancelGroup(ctx, fmt.Sprintf("%d", cb.UserID), gid), false)
 		return nil
 
 	case strings.HasPrefix(data, "retry_confirm_"):
@@ -299,6 +337,79 @@ func (a *App) cancelTask(ctx context.Context, userID, taskID string) string {
 	// 取消按钮就挂在状态消息上 —— 不改那条消息,用户点了取消却看到
 	// 它还在「正在下载」,会以为按钮没生效。
 	a.notify(ctx, a.findTask(ctx, taskID), noticeCancelled, nil)
+	return statusCmdSent
+}
+
+// groupTasks 归属校验后返回组内任务 —— gid 是回调数据里的明文,
+// 谁都能伪造,与 ownsTask 同理不能免检。
+//
+// 校验「整组都归点按钮的人」而不是抽查一条:同组任务本应同 user
+// (缓冲按 gid 聚合时带的是同一份 meta),但防线不该建立在对写入方
+// 的信任上 —— 库里只要有一条不是自己的,整组就是别人的数据。
+func (a *App) groupTasks(ctx context.Context, userID, gid string) ([]store.Task, bool) {
+	id, err := strconv.ParseInt(gid, 10, 64)
+	if err != nil {
+		return nil, false
+	}
+	tasks, err := a.repo.FindByGroupID(ctx, id)
+	if err != nil {
+		a.log.Error("按组查任务失败", "gid", gid, "err", err)
+		return nil, false
+	}
+	if len(tasks) == 0 {
+		return nil, false
+	}
+	if a.canAdmin(ctx, userID, auth.ActionTaskCancelAny) {
+		return tasks, true
+	}
+	for _, t := range tasks {
+		if t.UserID != userID {
+			return nil, false
+		}
+	}
+	return tasks, true
+}
+
+// groupCancelConfirm 出「确认取消整组」面板 —— 顺带做归属校验,
+// 查不到组或无权就不画按钮,免得用户点了个必然落空的确认。
+func (a *App) groupCancelConfirm(ctx context.Context, userID, gid string) (string, [][]tgclient.Button) {
+	tasks, ok := a.groupTasks(ctx, userID, gid)
+	if !ok {
+		return statusTaskNotFound, nil
+	}
+	text := fmt.Sprintf(statusCancelGroupConfirm, len(tasks))
+	return text, [][]tgclient.Button{
+		{{Text: "保留任务", Data: "task_action_back"}},
+		{{Text: "确认取消整组", Data: "cancel_group_execute_" + gid}},
+	}
+}
+
+// cancelGroup 取消一个媒体组的全部任务 —— 每条独立走状态机,
+// 已是终态(已完成/已取消)的会被挡住,不会重复计。
+//
+// 与单任务 cancelTask 同款收尾:真杀运行中的进程,并把每条任务的
+// 状态消息都改掉 —— 只改库里状态的话,用户的消息还停在「正在下载」。
+func (a *App) cancelGroup(ctx context.Context, userID, gid string) string {
+	tasks, ok := a.groupTasks(ctx, userID, gid)
+	if !ok {
+		return statusTaskNotFound
+	}
+	cancelled := 0
+	for _, t := range tasks {
+		if _, err := a.tasks.CancelTask(ctx, t.ID); err != nil {
+			a.log.Error("组内取消任务失败", "taskId", t.ID, "err", err)
+			continue
+		}
+		if a.cancelRunning(t.ID) {
+			a.log.Info("已终止运行中的任务", "taskId", t.ID)
+		}
+		a.notify(ctx, &t, noticeCancelled, nil)
+		cancelled++
+	}
+	if cancelled == 0 {
+		return statusTaskNotFound
+	}
+	a.log.Info("已取消整个相册", "gid", gid, "条数", cancelled)
 	return statusCmdSent
 }
 

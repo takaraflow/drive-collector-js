@@ -68,12 +68,12 @@ func (r *Repository) Create(ctx context.Context, t Task) error {
 
 	_, err := r.db.Exec(ctx, `
 		INSERT INTO tasks (
-			id, user_id, chat_id, msg_id, source_msg_id, source_type,
+			id, user_id, chat_id, msg_id, source_msg_id, grouped_id, source_type,
 			source_ref, file_name, file_size, status, error_msg,
 			claimed_by, created_at, updated_at
-		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		t.ID, t.UserID, nullString(t.ChatID), nullInt(t.MsgID), nullInt(t.SourceMsgID),
-		t.SourceType, nullString(t.SourceRef), nullString(t.FileName), t.FileSize,
+		nullInt(t.GroupedID), t.SourceType, nullString(t.SourceRef), nullString(t.FileName), t.FileSize,
 		string(t.Status), nullString(t.ErrorMsg), nullString(t.ClaimedBy),
 		t.CreatedAt, t.UpdatedAt,
 	)
@@ -83,8 +83,8 @@ func (r *Repository) Create(ctx context.Context, t Task) error {
 	return nil
 }
 
-// taskInsertColumns 是 tasks 表的插入列清单,14 列。
-const taskInsertColumns = 14
+// taskInsertColumns 是 tasks 表的插入列清单,15 列。
+const taskInsertColumns = 15
 
 // d1MaxParams 是 D1 单条语句的绑定参数上限。
 //
@@ -143,7 +143,7 @@ func (r *Repository) CreateBatch(ctx context.Context, tasks []Task) error {
 func (r *Repository) insertChunk(ctx context.Context, tasks []Task) error {
 	var b strings.Builder
 	b.WriteString(`INSERT INTO tasks (
-		id, user_id, chat_id, msg_id, source_msg_id, source_type,
+		id, user_id, chat_id, msg_id, source_msg_id, grouped_id, source_type,
 		source_ref, file_name, file_size, status, error_msg,
 		claimed_by, created_at, updated_at) VALUES `)
 	args := make([]interface{}, 0, len(tasks)*taskInsertColumns)
@@ -152,9 +152,9 @@ func (r *Repository) insertChunk(ctx context.Context, tasks []Task) error {
 		if i > 0 {
 			b.WriteByte(',')
 		}
-		b.WriteString("(?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+		b.WriteString("(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
 		args = append(args, t.ID, t.UserID, nullString(t.ChatID), nullInt(t.MsgID),
-			nullInt(t.SourceMsgID), t.SourceType, nullString(t.SourceRef),
+			nullInt(t.SourceMsgID), nullInt(t.GroupedID), t.SourceType, nullString(t.SourceRef),
 			nullString(t.FileName), t.FileSize, string(t.Status),
 			nullString(t.ErrorMsg), nullString(t.ClaimedBy), t.CreatedAt, t.UpdatedAt)
 	}
@@ -184,6 +184,16 @@ func (r *Repository) FindByUserId(ctx context.Context, userID string, limit int)
 		taskSelect+` WHERE user_id = ? ORDER BY created_at DESC LIMIT ?`, userID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("查询用户 %s 的任务失败: %w", userID, err)
+	}
+	return rowsToTasks(rows)
+}
+
+// FindByGroupID 按媒体组 ID 查整批任务 —— 「取消整组」靠它反查。
+func (r *Repository) FindByGroupID(ctx context.Context, groupedID int64) ([]Task, error) {
+	rows, err := r.db.FetchAll(ctx,
+		taskSelect+` WHERE grouped_id = ? ORDER BY source_msg_id`, groupedID)
+	if err != nil {
+		return nil, fmt.Errorf("按 grouped_id %d 查询失败: %w", groupedID, err)
 	}
 	return rowsToTasks(rows)
 }
@@ -387,7 +397,7 @@ func (r *Repository) CountByUserStatus(ctx context.Context, userID string) (map[
 	return out, nil
 }
 
-const taskSelect = `SELECT id, user_id, chat_id, msg_id, source_msg_id, source_type,
+const taskSelect = `SELECT id, user_id, chat_id, msg_id, source_msg_id, grouped_id, source_type,
 	source_ref, file_name, file_size, status, error_msg, claimed_by,
 	created_at, updated_at FROM tasks`
 
@@ -408,6 +418,7 @@ func rowToTask(row map[string]interface{}) (*Task, error) {
 	t.ChatID = nullOf(str(row["chat_id"]))
 	t.MsgID = nullIntOf(row["msg_id"])
 	t.SourceMsgID = nullIntOf(row["source_msg_id"])
+	t.GroupedID = nullIntOf(row["grouped_id"])
 	t.SourceType = str(row["source_type"])
 	t.SourceRef = nullOf(str(row["source_ref"]))
 	t.FileName = nullOf(str(row["file_name"]))
