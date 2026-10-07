@@ -138,6 +138,20 @@ func TestFlushMediaGroupCreatesTasksForEveryPhoto(t *testing.T) {
 	if !found {
 		t.Errorf("组汇总消息缺「取消整个相册」按钮 %q,按钮 = %+v", want, btns)
 	}
+
+	// 造出来的按钮必须点得动 —— 用真按钮喂分发判定,而不是在别处
+	// 再抄一遍字符串。「取消整个相册」第一次就是这样死的:面板和
+	// 按钮全造好了,前缀却不在 app.handleCallback 的白名单里,
+	// 用户点下去只弹「该功能暂未迁移」。
+	for _, btns := range nf.sendBtns {
+		for _, row := range btns {
+			for _, b := range row {
+				if !isStatusCallback(b.Data) {
+					t.Errorf("按钮 %q 没被分发 —— 点了没反应", b.Data)
+				}
+			}
+		}
+	}
 }
 
 // TestFlushMediaGroupNoticesOnlyAfterTasksExist 状态消息不能在任务
