@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gotd/td/tg"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/auth"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/contract"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/store"
@@ -411,5 +412,126 @@ func TestCancelGroupAllFailedReportsNotFound(t *testing.T) {
 
 	if got := a.cancelGroup(context.Background(), "42", "999888"); got != statusTaskNotFound {
 		t.Errorf("全军覆没返回 %q,期望 %q", got, statusTaskNotFound)
+	}
+}
+
+// fakeTG 实现 App 需要的整套 Telegram 能力。内嵌 fakeNotices 拿它的
+// 四个收发方法,这里只补剩下的 —— 断言点在 answered(按钮回应)。
+type fakeTG struct {
+	*fakeNotices
+	answered []string
+	alerts   []bool
+	selfID   int64
+}
+
+func (f *fakeTG) Run(context.Context) error { return nil }
+func (f *fakeTG) SelfID() int64             { return f.selfID }
+
+func (f *fakeTG) SendMessageWithID(_ context.Context, _ int64, text string) (int, error) {
+	f.sent = append(f.sent, text)
+	return 9001, nil
+}
+
+func (f *fakeTG) SendWithButtons(_ context.Context, _ int64, text string, buttons [][]tgclient.Button) error {
+	f.sent = append(f.sent, text)
+	f.sendBtns = append(f.sendBtns, buttons)
+	return nil
+}
+
+func (f *fakeTG) AnswerCallback(_ context.Context, _ int64, text string, alert bool) error {
+	f.answered = append(f.answered, text)
+	f.alerts = append(f.alerts, alert)
+	return nil
+}
+
+func (f *fakeTG) DeleteMessages(context.Context, int64, []int64) error { return nil }
+
+// withFakeTG 给 App 装上假的 Telegram —— 状态消息通道一并指过去,
+// 否则 notify 会因为 notices==nil 直接返回,「消息有没有被改」测不到。
+func withFakeTG(a *App) *fakeTG {
+	f := &fakeTG{fakeNotices: &fakeNotices{}}
+	a.tg = f
+	a.notices = f.fakeNotices
+	return f
+}
+
+// callbackUpdate 造一个「用户点了按钮」的 update。
+//
+// 刻意保持与真实链路同一形状:交给 handleCallback 从解析开始走,
+// 而不是直接调 handleStatusCallback —— 「按钮点了没反应」这类故障
+// 正好落在两者之间,跳过解析就等于跳过故障点。
+func callbackUpdate(userID int64, data string) tgclient.Update {
+	return tgclient.Update{
+		Kind: tgclient.KindCallbackQuery,
+		Raw: &tg.UpdateBotCallbackQuery{
+			QueryID: 77,
+			UserID:  userID,
+			Peer:    &tg.PeerUser{UserID: userID},
+			MsgID:   55,
+			Data:    []byte(data),
+		},
+	}
+}
+
+// TestClickGroupCancelConfirmReachesPanel 点「取消整个相册」必须走到
+// 确认面板。端到端:update → 分发 → 面板。
+//
+// 这条路径此前一步都测不到(tg 是具体类型,注入不进去),而它出过的
+// 故障恰恰是「面板和按钮全造好了,点下去只弹『该功能暂未迁移』」。
+func TestClickGroupCancelConfirmReachesPanel(t *testing.T) {
+	repo := &statusRepo{fakeRepo: &fakeRepo{}}
+	groupTasksOf(repo.fakeRepo, 999888, "42", 3)
+	a := newStatusApp(repo)
+	f := withFakeTG(a)
+
+	if err := a.handleCallback(context.Background(), callbackUpdate(42, "cancel_group_confirm_999888")); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.edits) != 1 || !contains(f.edits[0], "确认取消整个相册") {
+		t.Fatalf("没走到确认面板,编辑了 %v", f.edits)
+	}
+	if !hasButton(f.editBtns[0], "cancel_group_execute_999888") {
+		t.Errorf("面板没挂执行按钮: %+v", f.editBtns[0])
+	}
+	// 空回应 = 正常答「请确认」;「该功能暂未迁移」会出现在这里。
+	if len(f.answered) != 1 || f.answered[0] != "" {
+		t.Errorf("按钮回应 = %v,期望一次空回应", f.answered)
+	}
+}
+
+// TestClickGroupCancelExecuteCancelsAlbum 点「确认取消整组」必须真的
+// 把整组打进状态机 —— 端到端走完 update → 分发 → 状态机。
+func TestClickGroupCancelExecuteCancelsAlbum(t *testing.T) {
+	repo := &statusRepo{fakeRepo: &fakeRepo{}}
+	groupTasksOf(repo.fakeRepo, 999888, "42", 3)
+	a := newStatusApp(repo)
+	f := withFakeTG(a)
+
+	if err := a.handleCallback(context.Background(), callbackUpdate(42, "cancel_group_execute_999888")); err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.trans) != 3 {
+		t.Errorf("打了 %d 次状态机,期望 3 —— 相册没被取消", len(repo.trans))
+	}
+	if len(f.answered) != 1 || f.answered[0] != statusCmdSent {
+		t.Errorf("按钮回应 = %v,期望 %q", f.answered, statusCmdSent)
+	}
+}
+
+// TestClickSingleTaskCancelStillReachesPanel 单任务取消走同一条分发 ——
+// 抽分发判定时不能把原有的按钮碰坏。
+func TestClickSingleTaskCancelStillReachesPanel(t *testing.T) {
+	repo := &statusRepo{fakeRepo: &fakeRepo{}}
+	a := newStatusApp(repo)
+	f := withFakeTG(a)
+
+	if err := a.handleCallback(context.Background(), callbackUpdate(42, "cancel_confirm_t1")); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.edits) != 1 || !contains(f.edits[0], "确认取消这个任务") {
+		t.Fatalf("没走到单任务确认面板,编辑了 %v", f.edits)
+	}
+	if !hasButton(f.editBtns[0], "cancel_execute_t1") {
+		t.Errorf("面板没挂执行按钮: %+v", f.editBtns[0])
 	}
 }

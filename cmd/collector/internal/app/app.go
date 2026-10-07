@@ -86,7 +86,7 @@ type Config struct {
 
 // App 是编排后的应用。
 type App struct {
-	tg *tgclient.Client
+	tg Telegram
 	// downloader 默认可用 tg;测试注入假实现。
 	// 单独一个字段是因为 download 要用假实现测,而 tg 是具体类型。
 	downloader Downloader
@@ -443,9 +443,6 @@ func (a *App) recoverOnStart(ctx context.Context) {
 // 与 Node 侧一致(约 5 分钟):短了会把正在下载的大文件误判为僵尸,
 // 长了用户要多等。
 const StalledThreshold = 5 * time.Minute
-
-// TG 暴露 Telegram 客户端,供发消息等场景使用。
-func (a *App) TG() *tgclient.Client { return a.tg }
 
 // Tasks 暴露任务管理器。
 func (a *App) Tasks() *task.Manager { return a.tasks }
