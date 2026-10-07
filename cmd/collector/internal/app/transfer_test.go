@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -59,7 +60,9 @@ type fakeRepo struct {
 	fileName  string
 	srcRef    string
 	// msgIDs 记回填的状态消息 id —— 媒体组「先落库再发消息」要靠它断言。
-	msgIDs     []int
+	msgIDs []int
+	// failIDs 让指定任务的状态机报错 —— 整组取消要能扛住其中一条坏掉。
+	failIDs    map[string]bool
 	createErr  error
 	batchErr   error
 	stalledErr error
@@ -118,6 +121,9 @@ func (f *fakeRepo) CountByUserStatus(context.Context, string) (map[string]int, e
 }
 
 func (f *fakeRepo) Transition(_ context.Context, id string, ev contract.TaskEvent, _ *string) (store.TransitionResult, error) {
+	if f.failIDs[id] {
+		return store.TransitionResult{}, fmt.Errorf("状态机拒绝 %s", id)
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.trans = append(f.trans, ev)

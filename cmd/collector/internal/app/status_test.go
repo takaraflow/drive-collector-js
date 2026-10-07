@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/youngsx/drive-collector/cmd/collector/internal/auth"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/contract"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/store"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/task"
@@ -211,11 +212,15 @@ func TestFormatUptime(t *testing.T) {
 }
 
 // groupTasksOf 往 fakeRepo 里塞一组任务 —— FindByGroupID 按它反查。
+// 带上 SourceRef/MsgID:状态消息回写要靠它定位那条消息。
 func groupTasksOf(repo *fakeRepo, gid int64, owner string, n int) {
 	for i := 0; i < n; i++ {
 		repo.batch = append(repo.batch, store.Task{
 			ID:        fmt.Sprintf("g%d", i),
 			UserID:    owner,
+			ChatID:    nullableString("999"),
+			SourceRef: nullableString(BuildSourceRef(999, 42)),
+			MsgID:     nullableInt(int64(9001 + i)),
 			Status:    contract.StatusQueued,
 			GroupedID: sql.NullInt64{Int64: gid, Valid: true},
 		})
@@ -292,5 +297,119 @@ func TestStatusCallbackRouting(t *testing.T) {
 		if isStatusCallback(data) {
 			t.Errorf("%q 不该被当成状态回调", data)
 		}
+	}
+}
+
+// TestGroupCancelPanelButtonsRoute 确认面板造出来的按钮必须点得动。
+//
+// 这正是「取消整个相册」第一次的死法:面板在 handleStatusCallback 里
+// 实现好了、单测全绿,前缀却没进 app.handleCallback 的白名单 —— 用户
+// 点下去只弹「该功能暂未迁移」。
+//
+// 所以这里喂的是【生产者真造出来的按钮】,而不是再抄一遍字符串:
+// 字符串抄两遍,分叉一次就再死一次。
+func TestGroupCancelPanelButtonsRoute(t *testing.T) {
+	repo := &statusRepo{fakeRepo: &fakeRepo{}}
+	groupTasksOf(repo.fakeRepo, 999888, "42", 3)
+	a := newStatusApp(repo)
+
+	text, buttons := a.groupCancelConfirm(context.Background(), "42", "999888")
+	if buttons == nil {
+		t.Fatal("组存在却没画出确认面板")
+	}
+	if !contains(text, "3") {
+		t.Errorf("确认文案没带上组内任务数: %q", text)
+	}
+	if !hasButton(buttons, "cancel_group_execute_999888") {
+		t.Errorf("面板没挂执行按钮: %+v", buttons)
+	}
+	for _, row := range buttons {
+		for _, b := range row {
+			if !isStatusCallback(b.Data) {
+				t.Errorf("面板按钮 %q 没被分发 —— 点了没反应", b.Data)
+			}
+		}
+	}
+}
+
+// TestGroupCancelPanelHidesButtonsForForeignGroup 别人的组连确认面板
+// 都不该画 —— 画出来就是一排必然落空的按钮。
+func TestGroupCancelPanelHidesButtonsForForeignGroup(t *testing.T) {
+	repo := &statusRepo{fakeRepo: &fakeRepo{}}
+	groupTasksOf(repo.fakeRepo, 999888, "99", 2)
+	a := newStatusApp(repo)
+
+	if _, buttons := a.groupCancelConfirm(context.Background(), "42", "999888"); buttons != nil {
+		t.Errorf("别人的组不该画出确认按钮: %+v", buttons)
+	}
+}
+
+// TestAdminMayCancelOthersAlbum 管理员看的是全站任务,归属校验不能按
+// 「这是我的」判;而普通用户必须打不动别人的相册 —— gid 在按钮回调
+// 数据里是明文,谁都能伪造一个。
+func TestAdminMayCancelOthersAlbum(t *testing.T) {
+	newApp := func(adminPower bool) *App {
+		repo := &statusRepo{fakeRepo: &fakeRepo{}}
+		groupTasksOf(repo.fakeRepo, 999888, "99", 2)
+		a := newStatusApp(repo)
+		a.auth = &fakeAuth{allow: map[auth.Action]bool{
+			auth.ActionTaskCancelAny: adminPower,
+		}}
+		return a
+	}
+
+	if got := newApp(true).cancelGroup(context.Background(), "42", "999888"); got != statusCmdSent {
+		t.Errorf("管理员取消他人相册返回 %q,期望 %q", got, statusCmdSent)
+	}
+	if got := newApp(false).cancelGroup(context.Background(), "42", "999888"); got != statusTaskNotFound {
+		t.Errorf("普通用户取消他人相册返回 %q,期望 %q", got, statusTaskNotFound)
+	}
+}
+
+// TestCancelGroupUpdatesEveryStatusMessage 取消只改库的话,用户的消息
+// 还停在「正在下载」—— 他会以为按钮没生效,而文件其实已经在网盘上。
+func TestCancelGroupUpdatesEveryStatusMessage(t *testing.T) {
+	repo := &statusRepo{fakeRepo: &fakeRepo{}}
+	groupTasksOf(repo.fakeRepo, 999888, "42", 3)
+	a := newStatusApp(repo)
+	nf := &fakeNotices{}
+	a.notices = nf
+
+	if got := a.cancelGroup(context.Background(), "42", "999888"); got != statusCmdSent {
+		t.Fatalf("取消自己的组返回 %q", got)
+	}
+	if len(nf.edits) != 3 {
+		t.Errorf("改了 %d 条状态消息,期望 3 —— 消息会停在「正在下载」", len(nf.edits))
+	}
+}
+
+// TestCancelGroupSurvivesOneBadTask 组里一条打不动状态机,不能拖累
+// 其余 —— 停在中途的话,后面的文件照样传上网盘,而用户已经看到
+// 「已取消」。这条分支存在的理由就是它。
+func TestCancelGroupSurvivesOneBadTask(t *testing.T) {
+	repo := &statusRepo{fakeRepo: &fakeRepo{failIDs: map[string]bool{"g1": true}}}
+	groupTasksOf(repo.fakeRepo, 999888, "42", 3)
+	a := newStatusApp(repo)
+
+	if got := a.cancelGroup(context.Background(), "42", "999888"); got != statusCmdSent {
+		t.Errorf("一条失败就整组放弃,返回 %q,期望 %q", got, statusCmdSent)
+	}
+	if len(repo.trans) != 2 {
+		t.Errorf("成功取消 %d 条,期望 2 —— 坏的那条拖累了别人", len(repo.trans))
+	}
+}
+
+// TestCancelGroupAllFailedReportsNotFound 一条都没取消掉时必须报
+// 「任务已不存在」而不是「指令已下达」—— 后者让用户以为取消了,
+// 而文件还在往网盘上跑。
+func TestCancelGroupAllFailedReportsNotFound(t *testing.T) {
+	repo := &statusRepo{fakeRepo: &fakeRepo{failIDs: map[string]bool{
+		"g0": true, "g1": true, "g2": true,
+	}}}
+	groupTasksOf(repo.fakeRepo, 999888, "42", 3)
+	a := newStatusApp(repo)
+
+	if got := a.cancelGroup(context.Background(), "42", "999888"); got != statusTaskNotFound {
+		t.Errorf("全军覆没返回 %q,期望 %q", got, statusTaskNotFound)
 	}
 }
