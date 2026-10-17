@@ -17,6 +17,7 @@ import (
 	"github.com/youngsx/drive-collector/cmd/collector/internal/drive"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/rclone"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/store"
+	"github.com/youngsx/drive-collector/cmd/collector/internal/task"
 	tgclient "github.com/youngsx/drive-collector/cmd/collector/internal/telegram"
 )
 
@@ -62,6 +63,7 @@ type fakeRepo struct {
 	// msgIDs 记回填的状态消息 id —— 媒体组「先落库再发消息」要靠它断言。
 	msgIDs []int
 	// failIDs 让指定任务的状态机报错 —— 整组取消要能扛住其中一条坏掉。
+	touched    []string
 	failIDs    map[string]bool
 	createErr  error
 	batchErr   error
@@ -166,6 +168,13 @@ func (f *fakeRepo) UpdateMsgID(_ context.Context, _ string, msgID int) error {
 	return nil
 }
 
+func (f *fakeRepo) Touch(_ context.Context, taskID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.touched = append(f.touched, taskID)
+	return nil
+}
+
 // fakeRclone 代替真实的 rclone 子进程。
 type fakeRclone struct {
 	mkdirErr    error
@@ -255,6 +264,7 @@ func newTestApp(t *testing.T, dl *fakeDL, repo *fakeRepo, drives *fakeDrives) (*
 	a := &App{
 		downloader: dl,
 		repo:       repo,
+		tasks:      task.NewManager(repo, quietApp()),
 		drives:     drives,
 		rclone:     &fakeRclone{},
 		// locks 必须给:upload 会走 locks.WithSession,nil 会 panic。

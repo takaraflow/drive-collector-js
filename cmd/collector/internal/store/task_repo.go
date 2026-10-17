@@ -227,6 +227,17 @@ func (r *Repository) FindStalledTasks(ctx context.Context, timeout time.Duration
 }
 
 // TransitionResult 是一次状态转移的结果。
+// Touch 刷新任务的 updated_at，维持活性租约。
+// 只对非终态任务生效，防止终态任务被意外更新。
+func (r *Repository) Touch(ctx context.Context, taskID string) error {
+	now := time.Now().UnixMilli()
+	_, err := r.db.Exec(ctx, `UPDATE tasks SET updated_at = ? WHERE id = ? AND status NOT IN ('completed','failed','cancelled')`, now, taskID)
+	if err != nil {
+		return fmt.Errorf("touch task %s 失败: %w", taskID, err)
+	}
+	return nil
+}
+
 type TransitionResult struct {
 	Changed    bool
 	Blocked    bool

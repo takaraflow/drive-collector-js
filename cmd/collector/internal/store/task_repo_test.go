@@ -438,3 +438,20 @@ func TestFindByGroupIDQueriesByGid(t *testing.T) {
 		t.Errorf("返回任务 = %+v", tasks)
 	}
 }
+
+func TestTouchTaskUpdatesTimestamp(t *testing.T) {
+	f := &fakeD1{responder: func(capturedReq) string { return oneWritten }}
+	r := newTestRepo(t, f)
+
+	if err := r.Touch(context.Background(), "task-123"); err != nil {
+		t.Fatalf("Touch 报错: %v", err)
+	}
+
+	req := f.last()
+	if !strings.Contains(req.SQL, "UPDATE tasks SET updated_at = ? WHERE id = ?") {
+		t.Errorf("Touch SQL 不符合预期: %s", req.SQL)
+	}
+	if len(req.Params) != 2 || req.Params[1] != "task-123" {
+		t.Errorf("Touch 参数不符合预期: %v", req.Params)
+	}
+}

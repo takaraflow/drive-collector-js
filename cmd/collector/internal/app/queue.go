@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -80,6 +82,21 @@ func (a *App) cancelRunning(taskID string) bool {
 	return true
 }
 
+// isRunning 检查指定任务是否当前正由本地 Worker 执行中。
+func (a *App) isRunning(taskID string) bool {
+	a.runningMu.Lock()
+	defer a.runningMu.Unlock()
+	return a.running != nil && a.running[taskID] != nil
+}
+
+// touchTask 刷新任务在存储中的活跃时间戳。
+func (a *App) touchTask(ctx context.Context, taskID string) error {
+	if a.repo == nil {
+		return nil
+	}
+	return a.repo.Touch(ctx, taskID)
+}
+
 // CancelUserTasks 掐死某用户的全部在跑任务,返回掐了几条。
 //
 // 封禁时必须调:人被封了任务却还在替他上传,等于封禁没生效。
@@ -118,6 +135,9 @@ func (a *App) CancelUserTasks(ctx context.Context, userID string) int {
 //
 // 队列满时阻塞而不是丢弃 —— 见 pendingQueueSize 的说明。
 func (a *App) enqueue(ctx context.Context, taskID string) {
+	if a.pending == nil {
+		return
+	}
 	select {
 	case a.pending <- taskID:
 	case <-ctx.Done():
@@ -172,9 +192,36 @@ func (a *App) processTask(ctx context.Context, taskID string) {
 	a.registerRunning(taskID, userID, cancel)
 	// cancel 必须在 defer 里:成功路径没人调它,context 会一直挂着,
 	// 连带它引用的 timer/goroutine 一起泄漏。
+	// 启动任务心跳守护：传输（下载与上传）期间每 20 秒刷新一次 updated_at，维持活性租约。
+	heartbeatCtx, stopHeartbeat := context.WithCancel(ctx)
+	defer stopHeartbeat()
+	go func() {
+		ticker := time.NewTicker(20 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-heartbeatCtx.Done():
+				return
+			case <-ticker.C:
+				touchCtx, cancelTouch := context.WithTimeout(heartbeatCtx, 5*time.Second)
+				if err := a.touchTask(touchCtx, taskID); err != nil {
+					a.log.Debug("任务心跳刷新失败", "taskId", taskID, "err", err)
+				}
+				cancelTouch()
+			}
+		}
+	}()
+
 	defer func() {
 		a.unregisterRunning(taskID)
 		cancel()
+		// 清理可能遗留在 DownloadDir 的本地落盘文件（若任务中断或失败）
+		findCtx, cancelFind := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancelFind()
+		if finalTask := a.findTask(findCtx, taskID); finalTask != nil && finalTask.FileName.Valid {
+			localFile := filepath.Join(a.cfg.DownloadDir, sanitize(finalTask.FileName.String))
+			_ = os.Remove(localFile)
+		}
 	}()
 
 	// 每一步都把状态写回用户那条消息 —— 用户唯一能看到的东西就是它。

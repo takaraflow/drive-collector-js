@@ -5,9 +5,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/gotd/td/tg"
 )
+
+// DownloadIdleTimeout 是下载数据传输的最大空闲无响应时间。
+// 超过该时间仍无任何数据块到达，视为网络半开或挂死，主动取消中断。
+const DownloadIdleTimeout = 60 * time.Second
 
 // ProgressFunc 接收下载进度(0..1)。
 type ProgressFunc func(ratio float64)
@@ -53,12 +58,30 @@ func (c *Client) DownloadTo(ctx context.Context, chatID, msgID int64, destPath s
 		_ = os.Remove(tmpPath)
 	}()
 
-	writer := &progressWriter{w: tmp, total: loc.TotalSize, progress: progress}
-	// 第一个参数是 RPC client,不是「可选参数」—— 传 nil 会在
-	// master.Chunk 里解引用 nil 接口,直接 SIGSEGV(生产实测:
-	// 每次下载都 panic,容器反复重启)。
+	// 传输空闲看门狗：如果超过 DownloadIdleTimeout 无任何数据写入，主动取消，防止连接半开挂起。
+	idleCtx, cancelIdle := context.WithCancel(ctx)
+	defer cancelIdle()
+
+	idleTimer := time.AfterFunc(DownloadIdleTimeout, func() {
+		cancelIdle()
+	})
+	defer idleTimer.Stop()
+
+	resetIdle := func() {
+		idleTimer.Reset(DownloadIdleTimeout)
+	}
+
+	writer := &progressWriter{
+		w:          tmp,
+		total:      loc.TotalSize,
+		progress:   progress,
+		onActivity: resetIdle,
+	}
 	builder := c.tg.Downloader().Download(c.tg.API(), loc.Location)
-	if _, err := builder.Stream(ctx, writer); err != nil {
+	if _, err := builder.Stream(idleCtx, writer); err != nil {
+		if idleCtx.Err() != nil && ctx.Err() == nil {
+			return fmt.Errorf("telegram: 下载空闲超时(超过 %v 无数据传输)", DownloadIdleTimeout)
+		}
 		return fmt.Errorf("telegram: 下载失败: %w", err)
 	}
 	if err := writer.Close(); err != nil {
@@ -165,14 +188,18 @@ func locationOf(m tg.MessageMediaClass) (file, error) {
 // 刻意用 bufio 包一层再写 —— 直接 Write 会让每个分片都触发一次
 // 系统调用,大文件下 syscall 数量会成为瓶颈。
 type progressWriter struct {
-	w        *os.File
-	total    int64
-	written  int64
-	progress ProgressFunc
-	buf      []byte
+	w          *os.File
+	total      int64
+	written    int64
+	progress   ProgressFunc
+	onActivity func()
+	buf        []byte
 }
 
 func (p *progressWriter) Write(b []byte) (int, error) {
+	if p.onActivity != nil && len(b) > 0 {
+		p.onActivity()
+	}
 	if len(p.buf)+len(b) > 32*1024 {
 		if err := p.flush(); err != nil {
 			return 0, err

@@ -104,6 +104,7 @@ type TaskRepo interface {
 	// UpdateMsgID 回填状态消息 id —— 媒体组是「先落库、再发消息」,
 	// 消息发出去才知道 id。
 	UpdateMsgID(ctx context.Context, taskID string, msgID int) error
+	Touch(ctx context.Context, taskID string) error
 }
 
 // DriveRepo 是 upload() 需要的网盘仓储能力。

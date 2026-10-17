@@ -60,7 +60,7 @@ func protonFakeRclone(t *testing.T, confCapture string, session map[string]strin
 	// obscure 回【真 rclone 造的值】，不是带明文的假串 —— 理由见 protonObscuredSample。
 	b.WriteString("if [ \"$3\" = \"obscure\" ]; then\n  echo '" + protonObscuredSample + "'\n  exit 0\nfi\n")
 	b.WriteString("conf=\n")
-	b.WriteString("for a in \"$@\"; do\n  case \"$a\" in\n    /tmp/rclone-rt-*/rclone.conf) cp \"$a\" " + confCapture + "; conf=\"$a\" ;;\n  esac\ndone\n")
+	b.WriteString("for a in \"$@\"; do\n  case \"$a\" in\n    */rclone-rt-*/rclone.conf) cp \"$a\" " + confCapture + "; conf=\"$a\" ;;\n  esac\ndone\n")
 	// 追加到 rclone 被给到的【那个】 conf —— 模拟它把旋转后的 token 回写进去。
 	// 写到副本上没用:收割读的是真实临时 conf。
 	for k, v := range session {
