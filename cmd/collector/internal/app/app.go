@@ -391,8 +391,12 @@ func (a *App) recoverLoop(ctx context.Context) {
 //   - 媒体组:定时器全在内存里,进程一死组就卡在缓冲里不刷
 //   - 僵尸任务:停在 downloading/uploading,用户永远等不到结果
 // sweepOrphanedDownloads 清理下载目录中的历史残留临时文件（如进程异常重启遗留的 .dl-* 或超过 1 小时的孤儿文件）。
+//
+// 守卫规则：
+// 1. 如果当前有任何任务在活跃执行（a.hasRunningTasks() == true），绝对跳过清理，防止误删正在长耗时写入中的 .dl-* 临时分片。
+// 2. 只有在无任务运行的闲时（包括进程启动初始化时），才安全清理过期临时文件。
 func (a *App) sweepOrphanedDownloads() {
-	if a.cfg.DownloadDir == "" {
+	if a.cfg.DownloadDir == "" || a.hasRunningTasks() {
 		return
 	}
 	entries, err := os.ReadDir(a.cfg.DownloadDir)

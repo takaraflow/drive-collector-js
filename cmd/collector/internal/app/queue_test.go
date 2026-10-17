@@ -367,6 +367,15 @@ func TestSweepOrphanedDownloads(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// 5. 验证并发保护：若有活跃任务正在跑，sweepOrphanedDownloads 必须安全放弃，严禁删除任何文件！
+	a.registerRunning("task-active", "u1", func() {})
+	a.sweepOrphanedDownloads()
+	if _, err := os.Stat(staleDlFile); err != nil {
+		t.Fatalf("有任务在运行时，sweepOrphanedDownloads 不应执行清理: %v", err)
+	}
+	a.unregisterRunning("task-active")
+
+	// 6. 无任务运行时，执行安全清理
 	a.sweepOrphanedDownloads()
 
 	if _, err := os.Stat(staleDlFile); !os.IsNotExist(err) {

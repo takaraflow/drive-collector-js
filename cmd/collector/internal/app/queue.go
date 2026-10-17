@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -87,6 +85,13 @@ func (a *App) isRunning(taskID string) bool {
 	a.runningMu.Lock()
 	defer a.runningMu.Unlock()
 	return a.running != nil && a.running[taskID] != nil
+}
+
+// hasRunningTasks 检查当前是否有本地 Worker 正在执行任务。
+func (a *App) hasRunningTasks() bool {
+	a.runningMu.Lock()
+	defer a.runningMu.Unlock()
+	return len(a.running) > 0
 }
 
 // touchTask 刷新任务在存储中的活跃时间戳。
@@ -215,13 +220,6 @@ func (a *App) processTask(ctx context.Context, taskID string) {
 	defer func() {
 		a.unregisterRunning(taskID)
 		cancel()
-		// 清理可能遗留在 DownloadDir 的本地落盘文件（若任务中断或失败）
-		findCtx, cancelFind := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancelFind()
-		if finalTask := a.findTask(findCtx, taskID); finalTask != nil && finalTask.FileName.Valid {
-			localFile := filepath.Join(a.cfg.DownloadDir, sanitize(finalTask.FileName.String))
-			_ = os.Remove(localFile)
-		}
 	}()
 
 	// 每一步都把状态写回用户那条消息 —— 用户唯一能看到的东西就是它。
@@ -260,7 +258,7 @@ func (a *App) processTask(ctx context.Context, taskID string) {
 	a.notifyOutcome(ctx, taskID, true)
 }
 
-// findTask 取任务;查不到返回 nil 而不是让整条链路崩掉 ——
+// findTask 取任务;查不到返回 nil 而不是让整条链路崩溃 ——
 // notify 对 nil 是安全的(没源消息就没什么可编辑的)。
 func (a *App) findTask(ctx context.Context, taskID string) *store.Task {
 	t, err := a.repo.FindById(ctx, taskID)
