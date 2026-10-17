@@ -421,6 +421,8 @@ func (a *App) retryTask(ctx context.Context, userID, taskID string) string {
 		a.log.Error("重试任务失败", "taskId", taskID, "err", err)
 		return statusTaskNotFound
 	}
+	// 手动重试后立即入队，非阻塞投递触发调度
+	a.enqueue(ctx, taskID)
 	return statusCmdSent
 }
 

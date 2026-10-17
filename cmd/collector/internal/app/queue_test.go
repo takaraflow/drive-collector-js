@@ -259,3 +259,135 @@ func TestEnqueueUnblocksOnShutdown(t *testing.T) {
 		t.Fatal("关闭时 enqueue 死等 —— 容器只能被强杀")
 	}
 }
+
+
+// TestRecoverSkipsCurrentlyRunningTasks 正在被本地 Worker 活跃处理的任务绝不能被 recoverOnStart 误杀。
+//
+// 生产实测事故：617MB 大文件下载耗时超过 5 分钟，recoverOnStart 误判为僵尸强行重置为 queued，
+// 导致好不容易下载完的文件被状态机拒绝，进而进入无限死循环下载 6 天。
+func TestRecoverSkipsCurrentlyRunningTasks(t *testing.T) {
+	repo := &fakeRepo{stalled: []store.Task{
+		{ID: "running-task", Status: contract.StatusDownloading},
+		{ID: "dead-task", Status: contract.StatusDownloading},
+	}}
+	a, _ := newTestApp(t, &fakeDL{}, repo, &fakeDrives{})
+
+	// 模拟 running-task 正在本地被 Worker 活跃处理
+	runningCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_ = runningCtx
+	a.registerRunning("running-task", "u1", cancel)
+
+	a.recoverOnStart(context.Background())
+
+	// dead-task 应该被重置并进入 a.pending
+	select {
+	case id := <-a.pending:
+		if id != "dead-task" {
+			t.Errorf("入队的任务 = %q, 期望 dead-task", id)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("超时未捞回 dead-task")
+	}
+
+	// a.pending 里不应该有 running-task
+	select {
+	case id := <-a.pending:
+		t.Fatalf("running-task 不应该被重新入队, got %q", id)
+	default:
+	}
+
+	// running-task 绝对不能触发 EventResetStalled
+	for _, ev := range repo.eventsByID("running-task") {
+		if ev == contract.EventResetStalled {
+			t.Errorf("running-task 被发了 reset_stalled 事件，状态机可能被破坏！")
+		}
+	}
+}
+
+// TestRetryTaskEnqueuesToPending 验证用户重试失败任务后，任务必须被立即推入 a.pending 队列触发执行。
+func TestRetryTaskEnqueuesToPending(t *testing.T) {
+	repo := &fakeRepo{
+		byID: &store.Task{ID: "fail-1", UserID: "u123", Status: contract.StatusFailed},
+	}
+	a, _ := newTestApp(t, &fakeDL{}, repo, &fakeDrives{})
+
+	res := a.retryTask(context.Background(), "u123", "fail-1")
+	if res != statusCmdSent {
+		t.Fatalf("retryTask 结果 = %q, 期望 %q", res, statusCmdSent)
+	}
+
+	select {
+	case id := <-a.pending:
+		if id != "fail-1" {
+			t.Errorf("入队任务 = %q, 期望 fail-1", id)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("retryTask 没有将任务立即推入 a.pending 队列！")
+	}
+}
+
+// TestSweepOrphanedDownloads 验证启动扫描和定期扫描能够彻底清理残留的 .dl-* 临时文件和超期孤儿文件。
+func TestSweepOrphanedDownloads(t *testing.T) {
+	dir := t.TempDir()
+	a := &App{
+		cfg: Config{DownloadDir: dir},
+		log: quietApp(),
+	}
+
+	// 1. 创建一个超过 30 分钟的 .dl- 临时残留文件（应当被清理）
+	staleDlFile := filepath.Join(dir, ".dl-stale")
+	if err := os.WriteFile(staleDlFile, []byte("stale partial"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	staleDlTime := time.Now().Add(-45 * time.Minute)
+	if err := os.Chtimes(staleDlFile, staleDlTime, staleDlTime); err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. 创建一个活跃中的 .dl- 临时文件（创建于 2 分钟前，绝对不能误杀！）
+	activeDlFile := filepath.Join(dir, ".dl-active")
+	if err := os.WriteFile(activeDlFile, []byte("active partial"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. 创建一个超过 1 小时的孤儿文件（应当被清理）
+	oldFile := filepath.Join(dir, "old_orphan.mp4")
+	if err := os.WriteFile(oldFile, []byte("stale data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldTime := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(oldFile, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+
+	// 4. 创建一个刚刚新建的正常文件（不应被清理）
+	freshFile := filepath.Join(dir, "fresh.mp4")
+	if err := os.WriteFile(freshFile, []byte("fresh"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 5. 验证并发保护：若有活跃任务正在跑，sweepOrphanedDownloads 必须安全放弃，严禁删除任何文件！
+	a.registerRunning("task-active", "u1", func() {})
+	a.sweepOrphanedDownloads()
+	if _, err := os.Stat(staleDlFile); err != nil {
+		t.Fatalf("有任务在运行时，sweepOrphanedDownloads 不应执行清理: %v", err)
+	}
+	a.unregisterRunning("task-active")
+
+	// 6. 无任务运行时，执行安全清理
+	a.sweepOrphanedDownloads()
+
+	if _, err := os.Stat(staleDlFile); !os.IsNotExist(err) {
+		t.Errorf("超期 .dl- 临时残留文件未被清理: %v", err)
+	}
+	if _, err := os.Stat(activeDlFile); err != nil {
+		t.Errorf("正在活跃下载中的 .dl- 文件被误杀了！%v", err)
+	}
+	if _, err := os.Stat(oldFile); !os.IsNotExist(err) {
+		t.Errorf("超期孤儿文件未被清理: %v", err)
+	}
+	if _, err := os.Stat(freshFile); err != nil {
+		t.Errorf("新建的正常文件不应被删除: %v", err)
+	}
+}

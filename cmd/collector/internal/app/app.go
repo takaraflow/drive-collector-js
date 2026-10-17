@@ -390,7 +390,41 @@ func (a *App) recoverLoop(ctx context.Context) {
 // 两个都是「重启后会静默消失」的东西:
 //   - 媒体组:定时器全在内存里,进程一死组就卡在缓冲里不刷
 //   - 僵尸任务:停在 downloading/uploading,用户永远等不到结果
+// sweepOrphanedDownloads 清理下载目录中的历史残留临时文件（如进程异常重启遗留的 .dl-* 或超过 1 小时的孤儿文件）。
+//
+// 守卫规则：
+// 1. 如果当前有任何任务在活跃执行（a.hasRunningTasks() == true），绝对跳过清理，防止误删正在长耗时写入中的 .dl-* 临时分片。
+// 2. 只有在无任务运行的闲时（包括进程启动初始化时），才安全清理过期临时文件。
+func (a *App) sweepOrphanedDownloads() {
+	if a.cfg.DownloadDir == "" || a.hasRunningTasks() {
+		return
+	}
+	entries, err := os.ReadDir(a.cfg.DownloadDir)
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-1 * time.Hour)
+	dlCutoff := time.Now().Add(-30 * time.Minute)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		isOldOrphan := info.ModTime().Before(cutoff)
+		isStaleDl := strings.HasPrefix(entry.Name(), ".dl-") && info.ModTime().Before(dlCutoff)
+		if isOldOrphan || isStaleDl {
+			_ = os.Remove(filepath.Join(a.cfg.DownloadDir, entry.Name()))
+		}
+	}
+}
+
 func (a *App) recoverOnStart(ctx context.Context) {
+	// 清理磁盘孤儿残留文件
+	a.sweepOrphanedDownloads()
+
 	// 媒体组
 	//
 	// nil 守卫不是多余的:本函数跑在后台 goroutine 里,panic 会直接
@@ -422,6 +456,12 @@ func (a *App) recoverOnStart(ctx context.Context) {
 
 	reset, requeued := 0, 0
 	for _, tsk := range stalled {
+		// 防误杀守卫：如果任务正在由本地 Worker 活跃执行中，严禁当作僵尸重置！
+		if a.isRunning(tsk.ID) {
+			a.log.Info("任务正由本地协程活跃执行中，跳过超时重置", "taskId", tsk.ID, "status", tsk.Status)
+			continue
+		}
+
 		if tsk.Status != contract.StatusQueued {
 			if _, terr := a.repo.Transition(ctx, tsk.ID, contract.EventResetStalled, nil); terr != nil {
 				a.log.Warn("重置僵尸任务失败", "taskId", tsk.ID, "status", tsk.Status, "err", terr)
@@ -440,9 +480,8 @@ func (a *App) recoverOnStart(ctx context.Context) {
 
 // StalledThreshold 是判定「任务卡住」的时间。
 //
-// 与 Node 侧一致(约 5 分钟):短了会把正在下载的大文件误判为僵尸,
-// 长了用户要多等。
-const StalledThreshold = 5 * time.Minute
+// 放宽至 30 分钟以容纳大文件传输；正在执行的任务另外由本地 isRunning 守卫保护。
+const StalledThreshold = 30 * time.Minute
 
 // Tasks 暴露任务管理器。
 func (a *App) Tasks() *task.Manager { return a.tasks }

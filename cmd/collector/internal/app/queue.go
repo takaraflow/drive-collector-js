@@ -80,6 +80,28 @@ func (a *App) cancelRunning(taskID string) bool {
 	return true
 }
 
+// isRunning 检查指定任务是否当前正由本地 Worker 执行中。
+func (a *App) isRunning(taskID string) bool {
+	a.runningMu.Lock()
+	defer a.runningMu.Unlock()
+	return a.running != nil && a.running[taskID] != nil
+}
+
+// hasRunningTasks 检查当前是否有本地 Worker 正在执行任务。
+func (a *App) hasRunningTasks() bool {
+	a.runningMu.Lock()
+	defer a.runningMu.Unlock()
+	return len(a.running) > 0
+}
+
+// touchTask 刷新任务在存储中的活跃时间戳。
+func (a *App) touchTask(ctx context.Context, taskID string) error {
+	if a.repo == nil {
+		return nil
+	}
+	return a.repo.Touch(ctx, taskID)
+}
+
 // CancelUserTasks 掐死某用户的全部在跑任务,返回掐了几条。
 //
 // 封禁时必须调:人被封了任务却还在替他上传,等于封禁没生效。
@@ -118,6 +140,9 @@ func (a *App) CancelUserTasks(ctx context.Context, userID string) int {
 //
 // 队列满时阻塞而不是丢弃 —— 见 pendingQueueSize 的说明。
 func (a *App) enqueue(ctx context.Context, taskID string) {
+	if a.pending == nil {
+		return
+	}
 	select {
 	case a.pending <- taskID:
 	case <-ctx.Done():
@@ -172,6 +197,26 @@ func (a *App) processTask(ctx context.Context, taskID string) {
 	a.registerRunning(taskID, userID, cancel)
 	// cancel 必须在 defer 里:成功路径没人调它,context 会一直挂着,
 	// 连带它引用的 timer/goroutine 一起泄漏。
+	// 启动任务心跳守护：传输（下载与上传）期间每 20 秒刷新一次 updated_at，维持活性租约。
+	heartbeatCtx, stopHeartbeat := context.WithCancel(ctx)
+	defer stopHeartbeat()
+	go func() {
+		ticker := time.NewTicker(20 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-heartbeatCtx.Done():
+				return
+			case <-ticker.C:
+				touchCtx, cancelTouch := context.WithTimeout(heartbeatCtx, 5*time.Second)
+				if err := a.touchTask(touchCtx, taskID); err != nil {
+					a.log.Debug("任务心跳刷新失败", "taskId", taskID, "err", err)
+				}
+				cancelTouch()
+			}
+		}
+	}()
+
 	defer func() {
 		a.unregisterRunning(taskID)
 		cancel()
@@ -213,7 +258,7 @@ func (a *App) processTask(ctx context.Context, taskID string) {
 	a.notifyOutcome(ctx, taskID, true)
 }
 
-// findTask 取任务;查不到返回 nil 而不是让整条链路崩掉 ——
+// findTask 取任务;查不到返回 nil 而不是让整条链路崩溃 ——
 // notify 对 nil 是安全的(没源消息就没什么可编辑的)。
 func (a *App) findTask(ctx context.Context, taskID string) *store.Task {
 	t, err := a.repo.FindById(ctx, taskID)
