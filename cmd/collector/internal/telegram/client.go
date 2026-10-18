@@ -165,15 +165,17 @@ func (c *Client) dispatch(h MessageHandler) telegram.UpdateHandlerFunc {
 			c.emit(ctx, h, v.Update, int(v.Date))
 			return nil
 		case *tg.Updates:
-			// 容器里带着 Users —— 顺手记下 AccessHash,后面发消息要用。
+			// 容器里带着 Users 和 Chats —— 顺手记下 AccessHash,后面发消息要用。
 			// 这条路径是免费的:消息本来就带过来,不额外花 RPC。
 			c.peers.store(v.Users)
+			c.peers.storeChannels(v.Chats)
 			for _, uu := range v.Updates {
 				c.emit(ctx, h, uu, int(v.Date))
 			}
 			return nil
 		case *tg.UpdatesCombined:
 			c.peers.store(v.Users)
+			c.peers.storeChannels(v.Chats)
 			for _, uu := range v.Updates {
 				c.emit(ctx, h, uu, int(v.Date))
 			}

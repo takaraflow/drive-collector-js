@@ -55,6 +55,24 @@ func TestSourceRefRoundTrip(t *testing.T) {
 	}
 }
 
+// TestSourceRefWithHashRoundTrip 带 accessHash 的往返。
+func TestSourceRefWithHashRoundTrip(t *testing.T) {
+	raw := BuildSourceRefWithHash(-1001234567890, 1234, 9876543210)
+	cid, mid, hash, err := ParseSourceRefFull(raw)
+	if err != nil {
+		t.Fatalf("ParseSourceRefFull 失败: %v", err)
+	}
+	if cid != -1001234567890 || mid != 1234 || hash != 9876543210 {
+		t.Fatalf("ParseSourceRefFull 得到 (%d, %d, %d)", cid, mid, hash)
+	}
+
+	// 兼容普通 ParseSourceRef
+	cid2, mid2, err2 := ParseSourceRef(raw)
+	if err2 != nil || cid2 != -1001234567890 || mid2 != 1234 {
+		t.Fatalf("ParseSourceRef 得到 (%d, %d, %v)", cid2, mid2, err2)
+	}
+}
+
 // TestParseSourceRefToleratesLegacySlash 兼容 Go 早期写的 "chatId/msgId"。
 //
 // 线上残留过一条这种格式的记录(已修)。容错是过渡措施,不是长期契约 ——
@@ -73,7 +91,7 @@ func TestParseSourceRefToleratesLegacySlash(t *testing.T) {
 // TestParseSourceRefRejectsGarbage 解析不了必须报错,不能返回 (0,0)。
 //
 // 返回 (0,0) 的话下载会去拉 chat 0 的 0 号消息 —— 报一个和「数据坏了」
-// 毫无关系的错。
+// 毫无关系的值。
 func TestParseSourceRefRejectsGarbage(t *testing.T) {
 	for _, raw := range []string{"", "   ", "not-a-path", "{}", `{"chatId":"1"}`, "abc/def"} {
 		if _, _, err := ParseSourceRef(raw); err == nil {

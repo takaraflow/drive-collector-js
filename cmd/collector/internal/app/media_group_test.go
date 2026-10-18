@@ -29,6 +29,14 @@ func (f *fakeFetcher) FetchMessages(_ context.Context, _ int64, ids []int64) ([]
 	return f.msgs, nil
 }
 
+func (f *fakeFetcher) FetchChannelMessages(_ context.Context, _ string, _ int64, ids []int64) ([]tgclient.MessageInfo, error) {
+	f.asked = append(f.asked, ids...)
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.msgs, nil
+}
+
 // newAlbumApp 造一个只够测 flushMediaGroup 的 App。
 func newAlbumApp(repo *fakeRepo, f *fakeFetcher, nf *fakeNotices) *App {
 	return &App{
