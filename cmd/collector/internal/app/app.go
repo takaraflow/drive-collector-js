@@ -575,6 +575,9 @@ func (a *App) onUpdate(ctx context.Context, u tgclient.Update) error {
 		}
 
 		if !msg.HasMedia {
+			if a.handleLinkMessage(ctx, msg) {
+				return nil
+			}
 			return nil // 普通聊天内容,不做任何事
 		}
 
@@ -991,9 +994,16 @@ func (a *App) download(ctx context.Context, t store.Task) error {
 	if !t.SourceRef.Valid || t.SourceRef.String == "" {
 		return fmt.Errorf("任务 %s 没有源引用", t.ID)
 	}
-	chatID, msgID, err := ParseSourceRef(t.SourceRef.String)
+	chatID, msgID, accessHash, err := ParseSourceRefFull(t.SourceRef.String)
 	if err != nil {
 		return fmt.Errorf("任务 %s 的 sourceRef 无法解析: %w", t.ID, err)
+	}
+	if accessHash != 0 {
+		if chID, isChannel := tgclient.ParseChannelID(chatID); isChannel {
+			if peerHolder, ok := a.downloader.(interface{ StoreChannelPeer(int64, int64) }); ok {
+				peerHolder.StoreChannelPeer(chID, accessHash)
+			}
+		}
 	}
 
 	dest := filepath.Join(a.cfg.DownloadDir, sanitize(t.FileName.String))

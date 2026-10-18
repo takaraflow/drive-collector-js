@@ -79,6 +79,7 @@ type Rclone interface {
 // MessageFetcher 是媒体组刷盘时重新取回消息的能力。
 type MessageFetcher interface {
 	FetchMessages(ctx context.Context, chatID int64, ids []int64) ([]tgclient.MessageInfo, error)
+	FetchChannelMessages(ctx context.Context, username string, channelID int64, ids []int64) ([]tgclient.MessageInfo, error)
 }
 
 // TaskRepo 是 App 需要的任务仓储能力。

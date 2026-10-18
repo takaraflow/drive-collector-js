@@ -98,27 +98,60 @@ func (c *Client) DownloadTo(ctx context.Context, chatID, msgID int64, destPath s
 
 // fetchMessage 取回指定消息。
 func (c *Client) fetchMessage(ctx context.Context, chatID, msgID int64) (*tg.Message, error) {
+	// 如果是频道 ID，必须通过 ChannelsGetMessages 获取，严禁走 MessagesGetMessages 混淆私聊
+	if chID, isChannel := ParseChannelID(chatID); isChannel {
+		hash, ok := c.peers.getChannel(chID)
+		if !ok && c.tg != nil {
+			dialogs, err := c.tg.API().MessagesGetDialogs(ctx, &tg.MessagesGetDialogsRequest{Limit: 100})
+			if err == nil && dialogs != nil {
+				if mod, isMod := dialogs.AsModified(); isMod {
+					c.peers.storeChannels(mod.GetChats())
+					hash, ok = c.peers.getChannel(chID)
+				}
+			}
+		}
+		if !ok {
+			return nil, fmt.Errorf("telegram: 缺少频道 %d 的 accessHash，无法下载消息 %d", chID, msgID)
+		}
+		messages, err := c.tg.API().ChannelsGetMessages(ctx, &tg.ChannelsGetMessagesRequest{
+			Channel: &tg.InputChannel{ChannelID: chID, AccessHash: hash},
+			ID:      []tg.InputMessageClass{&tg.InputMessageID{ID: int(msgID)}},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("telegram: 取频道 %d 消息 %d 失败: %w", chID, msgID, err)
+		}
+		raw, known := extractMessages(messages)
+		if !known {
+			return nil, fmt.Errorf("telegram: 频道消息 %d 的容器类型暂不支持(%T)", msgID, messages)
+		}
+		if len(raw) == 0 {
+			return nil, fmt.Errorf("telegram: 频道消息 %d 不存在或已被删除", msgID)
+		}
+		msg, ok := raw[0].(*tg.Message)
+		if !ok {
+			return nil, fmt.Errorf("telegram: 频道消息 %d 内容为空", msgID)
+		}
+		return msg, nil
+	}
+
 	messages, err := c.tg.API().MessagesGetMessages(ctx,
 		[]tg.InputMessageClass{&tg.InputMessageID{ID: int(msgID)}})
 	if err != nil {
 		return nil, fmt.Errorf("telegram: 取消息 %d 失败: %w", msgID, err)
 	}
 
-	// 返回的是 MessagesClass,可能是 Messages / MessagesCombined / 空
-	switch v := messages.(type) {
-	case *tg.MessagesMessages:
-		if len(v.Messages) == 0 {
-			return nil, fmt.Errorf("telegram: 消息 %d 不存在或已被删除", msgID)
-		}
-		msg, ok := v.Messages[0].(*tg.Message)
-		if !ok {
-			return nil, fmt.Errorf("telegram: 消息 %d 内容为空", msgID)
-		}
-		return msg, nil
-	default:
-		// 其余变体(频道消息被折叠等)不支持 —— 明确报错优于静默失败。
+	raw, known := extractMessages(messages)
+	if !known {
 		return nil, fmt.Errorf("telegram: 消息 %d 的容器类型暂不支持(%s)", msgID, messages.TypeName())
 	}
+	if len(raw) == 0 {
+		return nil, fmt.Errorf("telegram: 消息 %d 不存在或已被删除", msgID)
+	}
+	msg, ok := raw[0].(*tg.Message)
+	if !ok {
+		return nil, fmt.Errorf("telegram: 消息 %d 内容为空", msgID)
+	}
+	return msg, nil
 }
 
 // file 是 gotd 的下载元数据。
@@ -200,28 +233,14 @@ func (p *progressWriter) Write(b []byte) (int, error) {
 	if p.onActivity != nil && len(b) > 0 {
 		p.onActivity()
 	}
-	if len(p.buf)+len(b) > 32*1024 {
-		if err := p.flush(); err != nil {
-			return 0, err
-		}
-	}
-	p.buf = append(p.buf, b...)
-	return len(b), nil
-}
-
-func (p *progressWriter) flush() error {
-	if len(p.buf) == 0 {
-		return nil
-	}
-	n, err := p.w.Write(p.buf)
+	n, err := p.w.Write(b)
 	p.written += int64(n)
-	p.buf = p.buf[:0]
 	if p.progress != nil && p.total > 0 {
 		p.progress(float64(p.written) / float64(p.total))
 	}
-	return err
+	return n, err
 }
 
-// Close 必须 flush 缓冲 —— 否则最后不满一块的数据会丢,
-// 表现为「文件比预期小」,而那正是 PR#458 踩过的坑的变体。
-func (p *progressWriter) Close() error { return p.flush() }
+func (p *progressWriter) Close() error {
+	return nil
+}

@@ -67,22 +67,46 @@ func TestPeerForUsesInputPeerUserForNumbers(t *testing.T) {
 
 // TestPeerForUsesInputPeerChatForNegatives 负数 id 是群/频道。
 //
-// Telegram 的约定:用户 id 是正的,群和频道是负的。
-// 这条守着「不要把所有 id 都当用户」—— 反过来的错误同样会让消息发不出去。
+// Telegram 的约定:用户 id 是正的,普通基础群聊是负数(不带 100 前缀)。
 func TestPeerForUsesInputPeerChatForNegatives(t *testing.T) {
 	c := &Client{log: quiet(), peers: newPeerCache()}
 
-	peer, err := c.peerFor(context.Background(), -1001234567890)
+	peer, err := c.peerFor(context.Background(), -123456789)
 	if err != nil {
 		t.Fatal(err)
 	}
 	chat, ok := peer.(*tg.InputPeerChat)
 	if !ok {
-		t.Fatalf("peer 类型 = %T,负数 id 应按群聊处理", peer)
+		t.Fatalf("peer 类型 = %T,普通负数 id 应按普通群聊处理", peer)
 	}
 	// 群聊的 ChatID 是正的 —— 这是 Telegram 的存储约定
-	if chat.ChatID != 1001234567890 {
+	if chat.ChatID != 123456789 {
 		t.Errorf("ChatID = %d,应为正数", chat.ChatID)
+	}
+}
+
+// TestPeerForUsesInputPeerChannelForChannels -100 开头的负数是频道/超级群。
+func TestPeerForUsesInputPeerChannelForChannels(t *testing.T) {
+	c := &Client{log: quiet(), peers: newPeerCache()}
+	c.StoreChannelPeer(1234567890, 888999)
+
+	peer, err := c.peerFor(context.Background(), -1001234567890)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ch, ok := peer.(*tg.InputPeerChannel)
+	if !ok {
+		t.Fatalf("peer 类型 = %T,频道 id 应按 InputPeerChannel 处理", peer)
+	}
+	if ch.ChannelID != 1234567890 || ch.AccessHash != 888999 {
+		t.Errorf("channelID = %d accessHash = %d", ch.ChannelID, ch.AccessHash)
+	}
+
+	// 缓存未命中时明确报错，不伪造 InputPeerChat
+	cNoHash := &Client{log: quiet(), peers: newPeerCache()}
+	_, err = cNoHash.peerFor(context.Background(), -1001234567890)
+	if err == nil {
+		t.Error("缺少频道 accessHash 时应返回错误")
 	}
 }
 
