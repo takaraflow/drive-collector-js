@@ -147,7 +147,7 @@ func renderQueueSummary(ov queueOverview) string {
 	processing := ov.counts["downloading"] + ov.counts["downloaded"] + ov.counts["uploading"]
 
 	out := statusQueueTitle + "\n"
-	out += fmt.Sprintf("🕒 排队中: %d\n", queued)
+	out += fmt.Sprintf("🕙 排队中: %d\n", queued)
 	out += fmt.Sprintf("🔄 处理中: %d\n", processing)
 
 	if len(ov.activeTasks) == 0 {
@@ -248,6 +248,7 @@ func isStatusCallback(data string) bool {
 	switch {
 	case strings.HasPrefix(data, "cancel_confirm_"), strings.HasPrefix(data, "cancel_execute_"),
 		strings.HasPrefix(data, "cancel_group_confirm_"), strings.HasPrefix(data, "cancel_group_execute_"),
+		strings.HasPrefix(data, "cancel_group_back_"),
 		strings.HasPrefix(data, "retry_confirm_"), strings.HasPrefix(data, "retry_execute_"),
 		data == "task_action_back", data == "status_general":
 		return true
@@ -267,6 +268,15 @@ func (a *App) handleStatusCallback(ctx context.Context, cb tgclient.CallbackCont
 	case data == "task_action_back", data == "status_general":
 		answer(statusActionCanceled, false)
 		return a.redrawStatus(ctx, cb)
+
+	case strings.HasPrefix(data, "cancel_group_back_"):
+		gid := strings.TrimPrefix(data, "cancel_group_back_")
+		answer(statusActionCanceled, false)
+		tasks, ok := a.groupTasks(ctx, fmt.Sprintf("%d", cb.UserID), gid)
+		if ok && len(tasks) > 0 {
+			a.refreshGroupMonitor(ctx, &tasks[0], "", nil)
+		}
+		return nil
 
 	case strings.HasPrefix(data, "cancel_confirm_"):
 		taskID := strings.TrimPrefix(data, "cancel_confirm_")
@@ -328,15 +338,19 @@ func (a *App) cancelTask(ctx context.Context, userID, taskID string) string {
 		return statusTaskNotFound
 	}
 	// 改完库必须【真杀】。只改状态的话进程照跑到底:文件照样传上网盘,
-	// 而随后那个 EventComplete 会被状态机拒掉(已 cancelled 是终态)——
+	// 而随后那个 EventComplete 会被状态机拒绝(已 cancelled 是终态)——
 	// 用户看到「已取消」,文件其实已经在网盘里,还白占了 quota。
 	// 没命中账本不是错误:任务在排队里,或者已经结束了。
 	if a.cancelRunning(taskID) {
 		a.log.Info("已终止运行中的任务", "taskId", taskID)
 	}
-	// 取消按钮就挂在状态消息上 —— 不改那条消息,用户点了取消却看到
-	// 它还在「正在下载」,会以为按钮没生效。
-	a.notify(ctx, a.findTask(ctx, taskID), noticeCancelled, nil)
+	// 取消按钮就挂在状态消息上 —— 归属于媒体组的任务刷新聚合看板，单任务改其状态消息
+	t := a.findTask(ctx, taskID)
+	if t != nil && t.GroupedID.Valid && t.GroupedID.Int64 > 0 {
+		a.refreshGroupMonitor(ctx, t, string(contract.StatusCancelled), nil)
+	} else {
+		a.notify(ctx, t, noticeCancelled, nil)
+	}
 	return statusCmdSent
 }
 
@@ -379,7 +393,7 @@ func (a *App) groupCancelConfirm(ctx context.Context, userID, gid string) (strin
 	}
 	text := fmt.Sprintf(statusCancelGroupConfirm, len(tasks))
 	return text, [][]tgclient.Button{
-		{{Text: "保留任务", Data: "task_action_back"}},
+		{{Text: "保留任务", Data: "cancel_group_back_" + gid}},
 		{{Text: "确认取消整组", Data: "cancel_group_execute_" + gid}},
 	}
 }
@@ -387,8 +401,7 @@ func (a *App) groupCancelConfirm(ctx context.Context, userID, gid string) (strin
 // cancelGroup 取消一个媒体组的全部任务 —— 每条独立走状态机,
 // 已是终态(已完成/已取消)的会被挡住,不会重复计。
 //
-// 与单任务 cancelTask 同款收尾:真杀运行中的进程,并把每条任务的
-// 状态消息都改掉 —— 只改库里状态的话,用户的消息还停在「正在下载」。
+// 与单任务 cancelTask 同款收尾:真杀运行中的进程,并把整组聚合转存看板更新。
 func (a *App) cancelGroup(ctx context.Context, userID, gid string) string {
 	tasks, ok := a.groupTasks(ctx, userID, gid)
 	if !ok {
@@ -403,13 +416,15 @@ func (a *App) cancelGroup(ctx context.Context, userID, gid string) string {
 		if a.cancelRunning(t.ID) {
 			a.log.Info("已终止运行中的任务", "taskId", t.ID)
 		}
-		a.notify(ctx, &t, noticeCancelled, nil)
 		cancelled++
 	}
 	if cancelled == 0 {
 		return statusTaskNotFound
 	}
 	a.log.Info("已取消整个相册", "gid", gid, "条数", cancelled)
+	if len(tasks) > 0 {
+		a.refreshGroupMonitor(ctx, &tasks[0], string(contract.StatusCancelled), nil)
+	}
 	return statusCmdSent
 }
 
@@ -421,7 +436,7 @@ func (a *App) retryTask(ctx context.Context, userID, taskID string) string {
 		a.log.Error("重试任务失败", "taskId", taskID, "err", err)
 		return statusTaskNotFound
 	}
-	// 手动重试后立即入队，非阻塞投递触发调度
+	// 手动重试后立即入队，非阻塞传递触发调度
 	a.enqueue(ctx, taskID)
 	return statusCmdSent
 }

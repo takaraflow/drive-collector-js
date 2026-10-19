@@ -6,14 +6,13 @@ import (
 
 	"github.com/youngsx/drive-collector/cmd/collector/internal/store"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/task"
-	tgclient "github.com/youngsx/drive-collector/cmd/collector/internal/telegram"
 )
 
 // flushMediaGroup 把一个媒体组刷成任务。
 //
 // 【必须真的建任务】不接这个回调的话,组会被清掉但任务不建 ——
 // 用户的 10 张图凭空消失,而且没有任何错误。这是「静默丢数据」里
-// 最糟的一种:用户只看到「我明明发了文件」。
+// 最糟糕的一种:用户只看到「我明明发了文件」。
 //
 // chatID 从组数据里取(Add 时已存入),不靠任何全局状态回溯 ——
 // 媒体组刷盘发生在 1 秒缓冲窗口之后,那时 update 上下文已经不在。
@@ -59,8 +58,6 @@ func (a *App) flushMediaGroup(ctx context.Context, gid string, meta task.GroupMe
 			SourceRef:   nullableString(BuildSourceRef(m.ChatID, int64(m.ID))),
 			SourceMsgID: nullableInt(int64(m.ID)),
 			// GroupedID 标识这批来自同一个媒体组,批量取消按它归组。
-			// 之前 SourceMsgID 被写成 grouped_id,那是两个不同含义的
-			// 字段混用了 —— 会让「按源消息反查任务」静默失效。
 			GroupedID: nullableInt(m.GroupedID),
 		})
 	}
@@ -70,39 +67,37 @@ func (a *App) flushMediaGroup(ctx context.Context, gid string, meta task.GroupMe
 
 	// 【必须先落库,再发状态消息】
 	//
-	// 顺序反了的话,建任务失败时用户已经收到 N 条「已捕获」,而每条的
-	// 取消按钮都指向一个【不存在的任务】—— 点下去只会得到 "task not
-	// found",消息也永远停在「已捕获」不动。相册批量插入本来就可能整批
-	// 失败(D1 参数上限),所以这不是假想场景。
+	// 顺序反了的话,建任务失败时用户已经收到消息,而取消按钮指向一个【不存在的任务】。
 	if err := a.repo.CreateBatch(ctx, tasks); err != nil {
 		return fmt.Errorf("批量建任务失败(gid=%s, %d 条): %w", gid, len(tasks), err)
 	}
 
-	// 每条任务各发一条状态消息(而不是 JS 侧那种共享一条看板):
-	// 看板要额外一套 group monitor 状态机才画得出来,而这里串行
-	// 消费队列,一人一条最省事 —— 10 张图就是 10 条各自的结果。
-	// msg_id 是 bot 自己那条状态消息,后续每个阶段都编辑它 ——
-	// 消息发出去才知道 id,所以要回填。
-	for i := range tasks {
-		if err := a.repo.UpdateMsgID(ctx, tasks[i].ID,
-			a.postNotice(ctx, meta.ChatID, tasks[i].ID)); err != nil {
-			// 回填失败不该让这批任务作废 —— 任务已经在库里,后续阶段
-			// 会退回发新消息。只记日志。
-			a.log.Error("回填任务状态消息 id 失败", "taskId", tasks[i].ID, "err", err)
+	a.log.Info("媒体组已建任务", "gid", gid, "条数", len(tasks))
+
+	// 媒体组聚合看板：对齐 JS 版体验，整组共享一条状态卡片，避免多图刷屏。
+	var noticeID int
+	if a.notices != nil {
+		folder := "/"
+		if a.drives != nil {
+			if d, err := a.drives.DefaultDrive(ctx, fmt.Sprintf("%d", meta.UserID)); err == nil && d != nil {
+				folder = d.RemotePath(a.cfg.RemoteBase)
+			}
+		}
+		initialText, initialButtons := renderGroupMonitor(tasks, nil, "", folder, nil)
+		id, err := a.notices.SendWithButtonsAndID(ctx, meta.ChatID, initialText, initialButtons)
+		if err != nil {
+			a.log.Error("发相册看板消息失败", "gid", gid, "err", err)
+		} else {
+			noticeID = id
 		}
 	}
 
-	a.log.Info("媒体组已建任务", "gid", gid, "条数", len(tasks))
-
-	// 组级汇总消息:带「取消整个相册」按钮 —— grouped_id 现在落库了,
-	// 按 gid 一次就能反查并取消整批。发不出去只记日志:任务本身是好的。
-	if a.notices != nil {
-		if _, err := a.notices.SendWithButtonsAndID(ctx, meta.ChatID,
-			fmt.Sprintf("📸 <b>已捕获相册</b>\n%d 个文件正在排队处理...", len(tasks)),
-			[][]tgclient.Button{{
-				{Text: groupCancelBtn, Data: "cancel_group_confirm_" + gid},
-			}}); err != nil {
-			a.log.Error("发相册汇总消息失败", "gid", gid, "err", err)
+	// 回填 msg_id：整组所有任务共享这一条看板消息
+	if noticeID != 0 {
+		for i := range tasks {
+			if err := a.repo.UpdateMsgID(ctx, tasks[i].ID, noticeID); err != nil {
+				a.log.Error("回填相册看板消息 id 失败", "taskId", tasks[i].ID, "err", err)
+			}
 		}
 	}
 

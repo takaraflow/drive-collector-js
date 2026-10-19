@@ -150,7 +150,6 @@ func (a *App) createLinkTask(ctx context.Context, orig messageInfo, m tgclient.M
 
 func (a *App) createLinkAlbumTasks(ctx context.Context, orig messageInfo, msgs []tgclient.MessageInfo) error {
 	tasks := make([]store.Task, 0, len(msgs))
-	gid := msgs[0].GroupedID
 
 	for _, m := range msgs {
 		tasks = append(tasks, store.Task{
@@ -173,25 +172,28 @@ func (a *App) createLinkAlbumTasks(ctx context.Context, orig messageInfo, msgs [
 		return fmt.Errorf("媒体组批量入库失败: %w", err)
 	}
 
+	var noticeID int
 	if a.notices != nil {
-		_, err := a.notices.SendWithButtonsAndID(ctx, orig.ChatID,
-			fmt.Sprintf("📦 <b>收到媒体组</b> (共 %d 个文件)\n正在排队处理...", len(tasks)),
-			[][]tgclient.Button{{{
-				Text: "❌ 取消整组",
-				Data: fmt.Sprintf("cancel_group_confirm_%d", gid),
-			}}},
-		)
+		folder := "/"
+		if a.drives != nil {
+			if d, err := a.drives.DefaultDrive(ctx, tasks[0].UserID); err == nil && d != nil {
+				folder = d.RemotePath(a.cfg.RemoteBase)
+			}
+		}
+		initialText, initialButtons := renderGroupMonitor(tasks, nil, "", folder, nil)
+		id, err := a.notices.SendWithButtonsAndID(ctx, orig.ChatID, initialText, initialButtons)
 		if err != nil {
-			a.log.Warn("发送媒体组状态消息失败", "groupedId", gid, "err", err)
+			a.log.Warn("发送媒体组看板消息失败", "groupedId", tasks[0].GroupedID.Int64, "err", err)
+		} else {
+			noticeID = id
 		}
 	}
 
-	// 回填各任务状态消息卡片 ID，防止后续通知流程持续发出新消息
-	for i := range tasks {
-		noticeID := a.postNotice(ctx, orig.ChatID, tasks[i].ID)
-		if noticeID != 0 {
+	// 媒体组任务共享一条看板卡片，回填看板消息 msg_id
+	if noticeID != 0 {
+		for i := range tasks {
 			if err := a.repo.UpdateMsgID(ctx, tasks[i].ID, noticeID); err != nil {
-				a.log.Error("回填链接媒体组任务状态消息 id 失败", "taskId", tasks[i].ID, "err", err)
+				a.log.Error("回填链接媒体组任务看板消息 id 失败", "taskId", tasks[i].ID, "err", err)
 			}
 		}
 	}
