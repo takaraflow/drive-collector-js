@@ -304,7 +304,7 @@ func TestHandleLinkMessage_AlbumMedia(t *testing.T) {
 	notices := &linkMockNotices{}
 
 	var msgs []tgclient.MessageInfo
-	for i := 102; i >= 98; i-- { // 故意倒序给入，测试排序能力
+	for i := 102; i >= 98; i-- { // 故意倒序给出，测试排序能力
 		msgs = append(msgs, tgclient.MessageInfo{
 			ID:         i,
 			ChatID:     -1001234567890,
@@ -348,20 +348,20 @@ func TestHandleLinkMessage_AlbumMedia(t *testing.T) {
 		}
 	}
 
-	// 确认发了相册汇总通知 (第 1 条是相册总览卡片，后续 5 条是各任务独立卡片)
-	if len(notices.notices) != 6 {
-		t.Fatalf("相册总览卡片 + 5 个任务卡片共需 6 条，实际: %d", len(notices.notices))
+	// 确认发了相册看板通知 (整组共享 1 条聚合看板卡片)
+	if len(notices.notices) != 1 {
+		t.Fatalf("相册总览聚合看板共需 1 条，实际: %d", len(notices.notices))
 	}
-	if !strings.Contains(notices.notices[0], "收到媒体组") || !strings.Contains(notices.notices[0], "共 5 个文件") {
-		t.Errorf("第 1 条应为相册总览，收到: %v", notices.notices[0])
+	if !strings.Contains(notices.notices[0], "媒体组") || !strings.Contains(notices.notices[0], "5") {
+		t.Errorf("第 1 条应为相册总览看板，收到: %v", notices.notices[0])
 	}
 	if len(notices.buttons) == 0 || !strings.HasPrefix(notices.buttons[0][0][0].Data, "cancel_group_confirm_777888999") {
 		t.Errorf("相册通知应带取消整组按钮，收到: %v", notices.buttons)
 	}
 
-	// 确认回填了 5 个任务卡片 ID
+	// 确认回填了 5 个任务共享卡片 ID
 	if len(repo.msgIDs) != 5 {
-		t.Errorf("应回填 5 个任务卡片 msg_id，实填: %d", len(repo.msgIDs))
+		t.Errorf("应回填 5 个任务共享看板 msg_id，实填: %d", len(repo.msgIDs))
 	}
 
 	// 确认 5 个任务均入队
@@ -447,7 +447,7 @@ func TestHandleLinkMessage_MediaLimit10(t *testing.T) {
 		t.Fatalf("创建的任务数应被截断为 10，实建: %d", len(repo.batch))
 	}
 	if len(app.pending) != 10 {
-		t.Fatalf("入队数应为 10，实际: %d", len(app.pending))
+		t.Fatalf("入队数量应为 10，实际: %d", len(app.pending))
 	}
 }
 

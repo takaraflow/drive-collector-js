@@ -149,7 +149,7 @@ func TestStatusNoTasksGivesGuidance(t *testing.T) {
 
 // TestCancelRefusesOtherUsersTask —— 归属校验不能省。
 //
-// taskId 就在按钮的回调数据里,谁都能伪造。不校验就是任何人能取消
+// taskId 就在按钮的回调数据里,谁都能伪造一个。不校验就是任何人能取消
 // 别人的转存任务。
 func TestCancelRefusesOtherUsersTask(t *testing.T) {
 	other := testTask("t1", "99", contract.StatusDownloading)
@@ -288,6 +288,7 @@ func TestStatusCallbackRouting(t *testing.T) {
 		"cancel_confirm_t1", "cancel_execute_t1",
 		"retry_confirm_t1", "retry_execute_t1",
 		"cancel_group_confirm_999888", "cancel_group_execute_999888",
+		"cancel_group_back_999888",
 		"task_action_back", "status_general",
 	} {
 		if !isStatusCallback(data) {
@@ -367,9 +368,10 @@ func TestAdminMayCancelOthersAlbum(t *testing.T) {
 	}
 }
 
-// TestCancelGroupUpdatesEveryStatusMessage 取消只改库的话,用户的消息
+// TestCancelGroupUpdatesStatusMessage 取消只改库的话,用户的消息
 // 还停在「正在下载」—— 他会以为按钮没生效,而文件其实已经在网盘上。
-func TestCancelGroupUpdatesEveryStatusMessage(t *testing.T) {
+// 方案 A 下媒体组聚合为一个看板卡片，取消整组时刷新该聚合看板为取消状态。
+func TestCancelGroupUpdatesStatusMessage(t *testing.T) {
 	repo := &statusRepo{fakeRepo: &fakeRepo{}}
 	groupTasksOf(repo.fakeRepo, 999888, "42", 3)
 	a := newStatusApp(repo)
@@ -379,8 +381,8 @@ func TestCancelGroupUpdatesEveryStatusMessage(t *testing.T) {
 	if got := a.cancelGroup(context.Background(), "42", "999888"); got != statusCmdSent {
 		t.Fatalf("取消自己的组返回 %q", got)
 	}
-	if len(nf.edits) != 3 {
-		t.Errorf("改了 %d 条状态消息,期望 3 —— 消息会停在「正在下载」", len(nf.edits))
+	if len(nf.edits) != 1 {
+		t.Errorf("改了 %d 条状态消息,期望 1 —— 聚合看板应被更新", len(nf.edits))
 	}
 }
 
@@ -457,7 +459,7 @@ func withFakeTG(a *App) *fakeTG {
 
 // callbackUpdate 造一个「用户点了按钮」的 update。
 //
-// 刻意保持与真实链路同一形状:交给 handleCallback 从解析开始走,
+// 刻意保持与真实路径同一形状:交给 handleCallback 从解析开始走,
 // 而不是直接调 handleStatusCallback —— 「按钮点了没反应」这类故障
 // 正好落在两者之间,跳过解析就等于跳过故障点。
 func callbackUpdate(userID int64, data string) tgclient.Update {

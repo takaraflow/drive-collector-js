@@ -68,6 +68,7 @@ type fakeRepo struct {
 	createErr  error
 	batchErr   error
 	stalledErr error
+	groupErr   error
 }
 
 func (f *fakeRepo) Create(_ context.Context, t store.Task) error {
@@ -101,6 +102,9 @@ func (f *fakeRepo) FindByMsgId(context.Context, int64) (*store.Task, error) {
 func (f *fakeRepo) FindByGroupID(_ context.Context, groupedID int64) ([]store.Task, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.groupErr != nil {
+		return nil, f.groupErr
+	}
 	var out []store.Task
 	for _, t := range f.batch {
 		if t.GroupedID.Valid && t.GroupedID.Int64 == groupedID {
@@ -161,10 +165,15 @@ func (f *fakeRepo) UpdateSourceRef(_ context.Context, _ string, ref string) erro
 	return nil
 }
 
-func (f *fakeRepo) UpdateMsgID(_ context.Context, _ string, msgID int) error {
+func (f *fakeRepo) UpdateMsgID(_ context.Context, taskID string, msgID int) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.msgIDs = append(f.msgIDs, msgID)
+	for i := range f.batch {
+		if f.batch[i].ID == taskID {
+			f.batch[i].MsgID = nullableInt(int64(msgID))
+		}
+	}
 	return nil
 }
 
@@ -283,8 +292,8 @@ func newTestApp(t *testing.T, dl *fakeDL, repo *fakeRepo, drives *fakeDrives) (*
 
 // TestDownloadStoresRealFileSize 是 PR#458 的回归测试。
 //
-// 关键:存进库的 size 必须来自文件系统,不是 Telegram 的估算值。
-// 拿估算值当 --size 判据会让 rclone 报 "sizes differ",任务被
+// 关键:存进库的 size 必须来自文件系统,不是 Telegram 的估计值。
+// 拿估计值当 --size 判据会让 rclone 报 "sizes differ",任务被
 // retryable:false 一次判死 —— 那次真实故障是 7 天 132 次用户失败。
 func TestDownloadStoresRealFileSize(t *testing.T) {
 	content := "1234567890" // 10 字节
@@ -301,7 +310,7 @@ func TestDownloadStoresRealFileSize(t *testing.T) {
 		t.Fatal(err)
 	}
 	if repo.fileSize != int64(len(content)) {
-		t.Errorf("存的 size = %d,期望 %d(必须来自文件系统,不是 Telegram 估算)",
+		t.Errorf("存的 size = %d,期望 %d(必须来自文件系统,不是 Telegram 估计)",
 			repo.fileSize, len(content))
 	}
 	if repo.fileName != "photo.jpg" {

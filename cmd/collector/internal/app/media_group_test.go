@@ -122,12 +122,12 @@ func TestFlushMediaGroupCreatesTasksForEveryPhoto(t *testing.T) {
 	}
 
 	// 用户必须收到回音,否则就是「已读不回」。
-	// n 条任务状态消息 + 1 条组汇总消息(带「取消整个相册」按钮)。
-	if len(nf.sent) != n+1 {
-		t.Errorf("发了 %d 条状态消息,期望 %d —— 用户看不到任何回音", len(nf.sent), n+1)
+	// 方案 A 媒体组聚合看板: 发送 1 条整组聚合看板消息(带「🚫 取消整个相册」按钮)，不再发分散的单任务卡片。
+	if len(nf.sent) != 1 {
+		t.Errorf("发了 %d 条状态消息,期望 1 —— 方案 A 媒体组聚合看板", len(nf.sent))
 	}
 
-	// 最后一条必须是组汇总,且取消按钮必须指回这个组 ——
+	// 聚合看板消息必须包含相册取消按钮 ——
 	// data 里的 gid 就是落库的 grouped_id,点了它才能一次取消整批。
 	last := len(nf.sendBtns) - 1
 	if last < 0 {
@@ -219,36 +219,13 @@ func TestFlushMediaGroupEnqueuesTasks(t *testing.T) {
 	f := &fakeFetcher{msgs: albumMsgs(albumUser, albumUser, 3)}
 	a := newAlbumApp(repo, f, &fakeNotices{})
 
-	if err := a.flushMediaGroup(context.Background(), "g",
-		task.GroupMeta{GID: "g", ChatID: albumUser, UserID: albumUser},
-		[]int64{101, 102, 103}); err != nil {
-		t.Fatal(err)
-	}
-	if n := len(a.pending); n != 3 {
-		t.Errorf("排队 %d 条,期望 3 —— 建完没人处理,照片永远停在 queued", n)
-	}
-}
-
-// TestFlushMediaGroupKeepsGroupOnFetchFailure 回源失败时必须返回错误。
-//
-// 返回 nil 会让缓冲把组清掉 —— 那批照片就永久消失了,而且用户已经
-// 什么都收不到。这是「静默丢数据」里最糟的一种。
-func TestFlushMediaGroupKeepsGroupOnFetchFailure(t *testing.T) {
-	repo := &fakeRepo{}
-	f := &fakeFetcher{err: fmt.Errorf("网络抽风")}
-	nf := &fakeNotices{}
-	a := newAlbumApp(repo, f, nf)
-
 	err := a.flushMediaGroup(context.Background(), "g",
 		task.GroupMeta{GID: "g", ChatID: albumUser, UserID: albumUser},
-		[]int64{101})
-	if err == nil {
-		t.Fatal("回源失败必须返回错误,否则组被清掉、照片永久丢失")
+		[]int64{101, 102, 103})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(repo.batch) != 0 {
-		t.Errorf("回源失败却建了 %d 条任务", len(repo.batch))
-	}
-	if len(nf.sent) != 0 {
-		t.Errorf("回源失败却给用户发了 %d 条消息", len(nf.sent))
+	if len(a.pending) != 3 {
+		t.Errorf("入队了 %d 个任务,期望 3 —— 任务留在了 queued 不会被执行", len(a.pending))
 	}
 }

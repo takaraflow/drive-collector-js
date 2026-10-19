@@ -33,11 +33,11 @@ const (
 // ============================================================================
 // 运行中任务账本
 //
-// 为什么需要它:rclone 层早就有杀进程组的能力(runner.go 里
+// 为什么需要它:rclone 层早就杀进程组的能力(runner.go 里
 // exec.CommandContext + Setpgid + cmd.Cancel),但那个进程句柄是局部变量,
 // 出了 Runner 就没人能碰到。缺的从来不是「杀」,是「谁在跑」的账 ——
 // 没有账本,取消按钮就只能改数据库状态,进程照跑到底,文件照样传上去,
-// 而 EventComplete 会被状态机拒掉:用户看到「已取消」,文件其实在网盘里。
+// 而 EventComplete 会被状态机拒绝:用户看到「已取消」,文件其实在网盘里。
 //
 // 这就是全部内容:一个 map。不要 registry 接口、不要工厂、不要生命周期
 // 管理器 —— 单进程串行 worker(taskWorkers=1)下,map 就是账本。
@@ -49,14 +49,20 @@ type runningTask struct {
 	cancel context.CancelFunc
 }
 
-// registerRunning 登记一个正在跑的任务。
+// registerRunning 登记一条正在跑的任务。
+//
+// 必须在 HandleDownload 之前调,否则下载启动到登记之间的微小窗口里,
+// 用户点取消会「查无此在跑任务」,进程继续跑。
 func (a *App) registerRunning(taskID, userID string, cancel context.CancelFunc) {
 	a.runningMu.Lock()
 	defer a.runningMu.Unlock()
 	if a.running == nil {
-		a.running = map[string]*runningTask{}
+		a.running = make(map[string]*runningTask)
 	}
-	a.running[taskID] = &runningTask{userID: userID, cancel: cancel}
+	a.running[taskID] = &runningTask{
+		userID: userID,
+		cancel: cancel,
+	}
 }
 
 // unregisterRunning 注销。必须在 defer 里,和 cancel 一起 —— 只 cancel
@@ -105,7 +111,7 @@ func (a *App) touchTask(ctx context.Context, taskID string) error {
 // CancelUserTasks 掐死某用户的全部在跑任务,返回掐了几条。
 //
 // 封禁时必须调:人被封了任务却还在替他上传,等于封禁没生效。
-// 和 ClearUserSessions 并排放在封禁那一步 —— 都是「封了之后要收拾
+// 和 ClearUserSessions 并排放置在封禁那一步 —— 都是「封了之后要收拾
 // 干净的东西」。
 //
 // 【顺序不能反】先落终态,再 cancel。只 cancel 不改库的话,任务卡在
@@ -126,14 +132,65 @@ func (a *App) CancelUserTasks(ctx context.Context, userID string) int {
 	}
 	a.runningMu.Unlock()
 
-	for i, id := range ids {
+	for _, id := range ids {
 		if _, err := a.tasks.CancelTask(ctx, id); err != nil {
-			// 落终态失败也要继续杀 —— 进程得停,状态下次再补。
-			a.log.Error("封禁时标记任务失败", "taskId", id, "err", err)
+			a.log.Error("封禁改任务状态失败", "taskId", id, "err", err)
 		}
-		cancels[i]()
+	}
+	for _, c := range cancels {
+		c()
 	}
 	return len(ids)
+}
+
+// ============================================================================
+// Worker 循环
+// ============================================================================
+
+// runTaskQueue 启动消费循环,阻塞到 ctx 结束。
+//
+// 这就是 worker 模式里「建完任务之后该干什么」的答案:直接执行,而不是
+// 发一条永远不会被回调的队列消息(Go 没有 QStash 发布器)。
+func (a *App) runTaskQueue(ctx context.Context) {
+	var wg sync.WaitGroup
+	for i := 0; i < taskWorkers; i++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+			a.workerLoop(ctx, workerID)
+		}(i)
+	}
+	wg.Wait()
+}
+
+// workerLoop 单个 worker:只要 pending 有任务就拉出来跑。
+//
+// 崩溃保护:单个任务 panic 不能带崩整个 collector,记录日志后继续拉下一个。
+func (a *App) workerLoop(ctx context.Context, id int) {
+	a.log.Info("任务 worker 启动", "workerId", id)
+	defer a.log.Info("任务 worker 退出", "workerId", id)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case taskID, ok := <-a.pending:
+			if !ok {
+				return
+			}
+			a.safeProcess(ctx, taskID)
+		}
+	}
+}
+
+// safeProcess 包一层 recover,单个任务坏了不拖垮 worker。
+func (a *App) safeProcess(ctx context.Context, taskID string) {
+	defer func() {
+		if r := recover(); r != nil {
+			a.log.Error("任务处理 panic", "taskId", taskID, "panic", r)
+		}
+	}()
+	a.processTask(ctx, taskID)
 }
 
 // enqueue 把新建的任务排进处理队列。
@@ -149,29 +206,6 @@ func (a *App) enqueue(ctx context.Context, taskID string) {
 		// 进程正在关闭。任务留在 queued,下次启动 recoverOnStart 会捞回来。
 		a.log.Info("关闭中,任务留待下次恢复", "taskId", taskID)
 	}
-}
-
-// runTaskQueue 启动消费循环,阻塞到 ctx 结束。
-//
-// 这就是 worker 模式里「建完任务之后该干什么」的答案:直接执行,而不是
-// 发一条永远不会被回调的队列消息(Go 没有 QStash 发布器)。
-func (a *App) runTaskQueue(ctx context.Context) {
-	var wg sync.WaitGroup
-	for i := 0; i < taskWorkers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case taskID := <-a.pending:
-					a.processTask(ctx, taskID)
-				}
-			}
-		}()
-	}
-	wg.Wait()
 }
 
 // processTask 把一个任务从 queued 推到终态:下载 → 上传。
@@ -228,11 +262,20 @@ func (a *App) processTask(ctx context.Context, taskID string) {
 		{Text: noticeCancelBtn, Data: "cancel_confirm_" + taskID},
 	}}
 
+	isGroup := t != nil && t.GroupedID.Valid && t.GroupedID.Int64 > 0
+
 	// 下载。被状态机挡住(用户已取消 / 已在处理中)不是错误,直接停手。
-	a.notify(ctx, t, noticeDownloading, busy)
+	if isGroup {
+		a.refreshGroupMonitor(ctx, t, string(contract.StatusDownloading), nil)
+	} else {
+		a.notify(ctx, t, noticeDownloading, busy)
+	}
 	res, err := a.tasks.HandleDownload(ctx, taskID)
 	if err != nil {
 		a.log.Error("下载处理异常", "taskId", taskID, "err", err)
+		if isGroup {
+			a.refreshGroupMonitor(ctx, t, string(contract.StatusFailed), err)
+		}
 		return
 	}
 	if !res.Success {
@@ -241,10 +284,18 @@ func (a *App) processTask(ctx context.Context, taskID string) {
 		return
 	}
 
-	a.notify(ctx, a.findTask(ctx, taskID), noticeUploading, busy)
+	uploadTask := a.findTask(ctx, taskID)
+	if isGroup {
+		a.refreshGroupMonitor(ctx, uploadTask, string(contract.StatusUploading), nil)
+	} else {
+		a.notify(ctx, uploadTask, noticeUploading, busy)
+	}
 	res, err = a.tasks.HandleUpload(ctx, taskID)
 	if err != nil {
 		a.log.Error("上传处理异常", "taskId", taskID, "err", err)
+		if isGroup {
+			a.refreshGroupMonitor(ctx, uploadTask, string(contract.StatusFailed), err)
+		}
 		return
 	}
 	if !res.Success {
@@ -258,7 +309,7 @@ func (a *App) processTask(ctx context.Context, taskID string) {
 	a.notifyOutcome(ctx, taskID, true)
 }
 
-// findTask 取任务;查不到返回 nil 而不是让整条链路崩溃 ——
+// findTask 取任务;查不到返回 nil 而不是让整条路径崩溃 ——
 // notify 对 nil 是安全的(没源消息就没什么可编辑的)。
 func (a *App) findTask(ctx context.Context, taskID string) *store.Task {
 	t, err := a.repo.FindById(ctx, taskID)
@@ -278,6 +329,14 @@ func (a *App) findTask(ctx context.Context, taskID string) *store.Task {
 func (a *App) notifyOutcome(ctx context.Context, taskID string, uploadPhase bool) {
 	t := a.findTask(ctx, taskID)
 	if t == nil {
+		return
+	}
+	if t.GroupedID.Valid && t.GroupedID.Int64 > 0 {
+		var focusErr error
+		if t.Status == contract.StatusFailed && t.ErrorMsg.Valid {
+			focusErr = errors.New(t.ErrorMsg.String)
+		}
+		a.refreshGroupMonitor(ctx, t, string(t.Status), focusErr)
 		return
 	}
 	switch t.Status {
