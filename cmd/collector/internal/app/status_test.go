@@ -289,6 +289,7 @@ func TestStatusCallbackRouting(t *testing.T) {
 		"retry_confirm_t1", "retry_execute_t1",
 		"cancel_group_confirm_999888", "cancel_group_execute_999888",
 		"cancel_group_back_999888",
+		"retry_group_failed_999888",
 		"task_action_back", "status_general",
 	} {
 		if !isStatusCallback(data) {
