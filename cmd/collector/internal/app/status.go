@@ -250,6 +250,7 @@ func isStatusCallback(data string) bool {
 		strings.HasPrefix(data, "cancel_group_confirm_"), strings.HasPrefix(data, "cancel_group_execute_"),
 		strings.HasPrefix(data, "cancel_group_back_"),
 		strings.HasPrefix(data, "retry_confirm_"), strings.HasPrefix(data, "retry_execute_"),
+		strings.HasPrefix(data, "retry_group_failed_"),
 		data == "task_action_back", data == "status_general":
 		return true
 	}
@@ -322,6 +323,11 @@ func (a *App) handleStatusCallback(ctx context.Context, cb tgclient.CallbackCont
 	case strings.HasPrefix(data, "retry_execute_"):
 		taskID := strings.TrimPrefix(data, "retry_execute_")
 		answer(a.retryTask(ctx, fmt.Sprintf("%d", cb.UserID), taskID), false)
+		return nil
+
+	case strings.HasPrefix(data, "retry_group_failed_"):
+		gid := strings.TrimPrefix(data, "retry_group_failed_")
+		answer(a.retryGroupFailed(ctx, fmt.Sprintf("%d", cb.UserID), gid), false)
 		return nil
 	}
 	return nil
@@ -426,6 +432,37 @@ func (a *App) cancelGroup(ctx context.Context, userID, gid string) string {
 		a.refreshGroupMonitor(ctx, &tasks[0], string(contract.StatusCancelled), nil)
 	}
 	return statusCmdSent
+}
+
+// retryGroupFailed 一键重试媒体组内全部失败的任务。
+func (a *App) retryGroupFailed(ctx context.Context, userID, gid string) string {
+	tasks, ok := a.groupTasks(ctx, userID, gid)
+	if !ok || len(tasks) == 0 {
+		return statusTaskNotFound
+	}
+	retried := 0
+	var firstFailed *store.Task
+	for i := range tasks {
+		t := &tasks[i]
+		if t.Status == contract.StatusFailed {
+			if _, err := a.tasks.RetryTask(ctx, t.ID); err == nil {
+				a.enqueue(ctx, t.ID)
+				retried++
+				if firstFailed == nil {
+					firstFailed = t
+				}
+			} else {
+				a.log.Error("重试媒体组失败任务切状态机失败", "taskId", t.ID, "err", err)
+			}
+		}
+	}
+	if retried > 0 {
+		if firstFailed != nil {
+			a.refreshGroupMonitor(ctx, firstFailed, string(contract.StatusQueued), nil)
+		}
+		return fmt.Sprintf("已重新排队 %d 个失败任务", retried)
+	}
+	return "没有可重试的失败任务"
 }
 
 func (a *App) retryTask(ctx context.Context, userID, taskID string) string {
