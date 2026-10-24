@@ -8,6 +8,11 @@ import { DriveConfigFlow } from "../modules/DriveConfigFlow.js";
 import { TaskManager } from "../processor/TaskManager.js";
 import { LinkParser } from "../processor/LinkParser.js";
 import {
+    extractSocialMediaUrls,
+    isSocialMediaUrl,
+    parseSocialMedia
+} from "../processor/SocialMediaParser.js";
+import {
     extractExternalHttpUrls,
     findUnsupportedExternalLinks,
     probeExternalUrl,
@@ -976,6 +981,8 @@ export class Dispatcher {
         if (!text) return false;
 
         try {
+            if (await this._handleSocialMediaUrl(target, userId, text, finalSelectedDrive)) return true;
+
             if (await this._handleExternalUrl(target, userId, text, finalSelectedDrive)) return true;
 
             const toProcess = await LinkParser.parse(text, userId);
@@ -1002,6 +1009,93 @@ export class Dispatcher {
             return true;
         }
         return false;
+    }
+
+    static async _handleSocialMediaUrl(target, userId, text, finalSelectedDrive) {
+        const socialUrls = extractSocialMediaUrls(text);
+        if (socialUrls.length === 0) return false;
+
+        const canCreateTask = await AuthGuard.can(userId, "task:create");
+        if (!canCreateTask) {
+            return false;
+        }
+
+        if (!finalSelectedDrive) {
+            await this._sendBindHint(target, userId);
+            return true;
+        }
+
+        if (socialUrls.length > 5) {
+            await runBotTaskWithRetry(() => client.sendMessage(target, {
+                message: STRINGS.task.social_limit,
+                parseMode: "html"
+            }), userId, {}, false, 3);
+        }
+
+        const urlsToProcess = socialUrls.slice(0, 5);
+        for (const socialUrl of urlsToProcess) {
+            let parsingMsg = null;
+            try {
+                parsingMsg = await runBotTaskWithRetry(() => client.sendMessage(target, {
+                    message: STRINGS.task.social_parsing,
+                    parseMode: "html"
+                }), userId, { priority: PRIORITY.UI }, false, 3);
+            } catch {}
+
+            try {
+                const result = await parseSocialMedia(socialUrl);
+                if (!result || !Array.isArray(result.media) || result.media.length === 0) {
+                    if (parsingMsg?.id) {
+                        await runBotTaskWithRetry(() => client.editMessage(target, {
+                            message: parsingMsg.id,
+                            text: STRINGS.task.social_no_media,
+                            parseMode: "html"
+                        }), userId, {}, false, 3);
+                    } else {
+                        await runBotTaskWithRetry(() => client.sendMessage(target, {
+                            message: STRINGS.task.social_no_media,
+                            parseMode: "html"
+                        }), userId, {}, false, 3);
+                    }
+                    continue;
+                }
+
+                if (parsingMsg?.id) {
+                    await runBotTaskWithRetry(() => client.deleteMessages(target, [parsingMsg.id], { revoke: true }), userId, {}, false, 2).catch(() => {});
+                }
+
+                for (const item of result.media.slice(0, 10)) {
+                    await TaskManager.addExternalUrlTask(target, {
+                        url: item.url,
+                        finalUrl: item.url,
+                        fileName: item.fileName,
+                        fileSize: item.fileSize || 0,
+                        displayUrl: redactUrlForDisplay(item.url),
+                        headers: item.headers,
+                        useYtDlp: Boolean(item.useYtDlp),
+                        webUrl: item.webUrl || socialUrl,
+                        platform: item.platform || result.platform,
+                        quality: item.quality
+                    }, userId);
+                }
+            } catch (err) {
+                log.warn("Social media transfer failed", { userId, url: socialUrl, error: err?.message });
+                if (parsingMsg?.id) {
+                    await runBotTaskWithRetry(() => client.editMessage(target, {
+                        message: parsingMsg.id,
+                        text: STRINGS.task.social_parse_failed,
+                        parseMode: "html"
+                    }), userId, {}, false, 3).catch(() => {});
+                } else {
+                    await runBotTaskWithRetry(() => client.sendMessage(target, {
+                        message: STRINGS.task.social_parse_failed,
+                        parseMode: "html"
+                    }), userId, {}, false, 3).catch(() => {});
+                }
+            }
+        }
+
+        return true;
     }
 
     static async _handleExternalUrl(target, userId, text, finalSelectedDrive) {

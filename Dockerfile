@@ -42,14 +42,18 @@ LABEL org.opencontainers.image.version="${APP_VERSION}" \
       org.opencontainers.image.created="${BUILD_TIME}" \
       org.opencontainers.image.ref.name="${IMAGE_TAG}"
 
-# 安装 rclone 和基础运行工具，包括 ping 工具
+# 安装 rclone、ffmpeg、yt-dlp 和基础运行工具，包括 ping 工具
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     unzip \
     ca-certificates \
     iputils-ping \
     xz-utils \
+    ffmpeg \
+    python3 \
     && curl -fsSL https://rclone.org/install.sh | bash \
+    && curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp \
+    && chmod a+rx /usr/local/bin/yt-dlp \
     && apt-get purge -y --auto-remove unzip \
     && rm -rf /var/lib/apt/lists/* /tmp/*
 

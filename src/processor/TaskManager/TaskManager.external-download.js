@@ -11,6 +11,7 @@ import {
     openExternalUrlStream,
     urlFingerprint
 } from "../ExternalUrlPolicy.js";
+import { downloadViaYtDlp } from "../SocialMediaParser.js";
 import { assertLocalStorageCapacity } from "../../utils/storageGuard.js";
 import { createHeartbeat, handleTaskFailure, retireTaskHeartbeat, escapeHTML } from "./TaskManager.utils.js";
 import {
@@ -87,52 +88,64 @@ export async function downloadExternalUrlTask(task) {
         const heartbeat = createHeartbeat(task, this, updateStatus, fileName);
         await heartbeat("downloading", 0, task.fileInfo.size || 0);
 
-        const transportOptions = task.externalUrlTransportOptions || {};
-        const { response, contentLength } = await openExternalUrlStream(sourceRef.url, {
-            timeoutMs: configured.timeoutMs,
-            maxRedirects: configured.maxRedirects,
-            maxBytes: configured.maxBytes,
-            lookupImpl: transportOptions.lookupImpl,
-            requestImpl: transportOptions.requestImpl
-        });
+        let localSize = 0;
+        if (sourceRef.useYtDlp) {
+            await downloadViaYtDlp(sourceRef.webUrl || sourceRef.url, localPath, {
+                heartbeat,
+                task,
+                config,
+                log
+            });
+            localSize = (await fs.promises.stat(localPath)).size;
+        } else {
+            const transportOptions = task.externalUrlTransportOptions || {};
+            const { response, contentLength } = await openExternalUrlStream(sourceRef.url, {
+                timeoutMs: configured.timeoutMs,
+                maxRedirects: configured.maxRedirects,
+                maxBytes: configured.maxBytes,
+                headers: sourceRef.headers || transportOptions.headers,
+                lookupImpl: transportOptions.lookupImpl,
+                requestImpl: transportOptions.requestImpl
+            });
 
-        const total = contentLength || task.fileInfo.size || 0;
-        await assertLocalStorageCapacity({
-            dirPath: config.downloadDir,
-            expectedBytes: total || configured.maxBytes || 0,
-            config,
-            purpose: `external URL download ${fileName}`
-        });
+            const total = contentLength || task.fileInfo.size || 0;
+            await assertLocalStorageCapacity({
+                dirPath: config.downloadDir,
+                expectedBytes: total || configured.maxBytes || 0,
+                config,
+                purpose: `external URL download ${fileName}`
+            });
 
-        let downloaded = 0;
-        let lastUpdate = Date.now();
-        const sourceStream = Readable.fromWeb(response.body);
-        const progressStream = new Transform({
-            transform(chunk, _encoding, callback) {
-                downloaded += chunk.length;
-                if (configured.maxBytes && downloaded > configured.maxBytes) {
-                    callback(new Error("External file is larger than the configured limit"));
-                    return;
+            let downloaded = 0;
+            let lastUpdate = Date.now();
+            const sourceStream = Readable.fromWeb(response.body);
+            const progressStream = new Transform({
+                transform(chunk, _encoding, callback) {
+                    downloaded += chunk.length;
+                    if (configured.maxBytes && downloaded > configured.maxBytes) {
+                        callback(new Error("External file is larger than the configured limit"));
+                        return;
+                    }
+                    const now = Date.now();
+                    if (now - lastUpdate > 3000 || (total > 0 && downloaded >= total)) {
+                        lastUpdate = now;
+                        void heartbeat("downloading", downloaded, total || downloaded).catch(error => {
+                            if (error?.message === "CANCELLED") {
+                                this.destroy(error);
+                                return;
+                            }
+                            log.warn("External download heartbeat failed", { taskId: task.id, error: error?.message || String(error) });
+                        });
+                    }
+                    callback(null, chunk);
                 }
-                const now = Date.now();
-                if (now - lastUpdate > 3000 || (total > 0 && downloaded >= total)) {
-                    lastUpdate = now;
-                    void heartbeat("downloading", downloaded, total || downloaded).catch(error => {
-                        if (error?.message === "CANCELLED") {
-                            this.destroy(error);
-                            return;
-                        }
-                        log.warn("External download heartbeat failed", { taskId: task.id, error: error?.message || String(error) });
-                    });
-                }
-                callback(null, chunk);
-            }
-        });
+            });
 
-        await pipeline(sourceStream, progressStream, fs.createWriteStream(partialPath, { flags: "wx" }));
-        await fs.promises.rename(partialPath, localPath);
+            await pipeline(sourceStream, progressStream, fs.createWriteStream(partialPath, { flags: "wx" }));
+            await fs.promises.rename(partialPath, localPath);
+            localSize = (await fs.promises.stat(localPath)).size;
+        }
 
-        const localSize = (await fs.promises.stat(localPath)).size;
         task.fileInfo = { name: fileName, size: localSize };
         await TaskRepository.updateFileMetadata?.(task.id, {
             fileName,
