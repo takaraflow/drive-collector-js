@@ -52,6 +52,11 @@ export function buildExternalUrlSourceRef(source = {}) {
         fileName: source.fileName || "download.bin",
         fileSize: Number.isFinite(source.fileSize) ? source.fileSize : 0,
         contentType: source.contentType || null,
-        probedAt: source.probedAt || Date.now()
+        probedAt: source.probedAt || Date.now(),
+        headers: source.headers || null,
+        useYtDlp: Boolean(source.useYtDlp),
+        webUrl: source.webUrl || null,
+        platform: source.platform || null,
+        quality: source.quality || null
     };
 }

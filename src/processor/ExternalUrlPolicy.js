@@ -187,6 +187,7 @@ async function requestExternalUrl(inputUrl, options = {}) {
             headers: {
                 "user-agent": USER_AGENT,
                 "accept": "*/*",
+                ...(options.headers || {}),
                 ...(options.rangeProbe ? { "range": "bytes=0-0" } : {})
             }
         }, {
