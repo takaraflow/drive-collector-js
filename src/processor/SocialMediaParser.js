@@ -18,7 +18,7 @@ export const SOCIAL_DOMAINS = [
     /(?:https?:\/\/)?(?:[a-zA-Z0-9_-]+\.)?tiktok\.com\/[^\s<>"'`]+/i,
 
     // Twitter / X
-    /(?:https?:\/\/)?(?:[a-zA-Z0-9_-]+\.)?(?:twitter|x|fxtwitter|vxtwitter|fixupx)\.com\/(?:#!\/)?(?:\w+)\/status(?:es)?\/\d+[^\s<>"'`]*/i,
+    /(?:https?:\/\/)?(?:[a-zA-Z0-9_-]+\.)?(?:twitter|x|fxtwitter|vxtwitter|fixupx)\.com\/(?:#!\/)?(?:[\w.-]+\/)?status(?:es)?\/\d+[^\s<>"`']*/i,
 
     // Instagram
     /(?:https?:\/\/)?(?:[a-zA-Z0-9_-]+\.)?(?:instagram\.com|instagr\.am)\/(?:p|reel|reels|tv)\/[\w-]+[^\s<>"'`]*/i,
@@ -118,7 +118,7 @@ export async function parseSocialMedia(url, options = {}) {
 // -------------------------------------------------------------
 export async function parseTwitter(url, options = {}) {
     const fetchImpl = options.fetchImpl || fetch;
-    const tweetIdMatch = url.match(/(?:twitter|x|fxtwitter|vxtwitter|fixupx)\.com\/(?:#!\/)?(?:\w+)\/status(?:es)?\/(\d+)/i);
+    const tweetIdMatch = url.match(/(?:twitter|x|fxtwitter|vxtwitter|fixupx)\.com\/(?:#!\/)?(?:[\w.-]+\/)?status(?:es)?\/(\d+)/i);
     if (!tweetIdMatch) return null;
     const tweetId = tweetIdMatch[1];
 
@@ -444,9 +444,10 @@ export async function parseInstagram(url, options = {}) {
         });
         if (res.ok) {
             const html = await res.text();
-            const videoUrlMatch = html.match(/"video_url":"([^"]+)"/);
+            const videoUrlMatch = html.match(/"video_url"\s*:\s*"([^"]+)"/) || html.match(/<video[^>]+src="([^"]+)"/);
             if (videoUrlMatch) {
-                const videoUrl = JSON.parse(`"${videoUrlMatch[1]}"`);
+                const rawUrl = videoUrlMatch[1].replace(/\\u0026/g, "&").replace(/\\/g, "");
+                const videoUrl = rawUrl.startsWith("http") ? rawUrl : JSON.parse(`"${videoUrlMatch[1]}"`);
                 return {
                     platform: "Instagram",
                     title: `Instagram ${shortcode}`,
@@ -457,6 +458,24 @@ export async function parseInstagram(url, options = {}) {
                         url: videoUrl,
                         quality: "highest",
                         fileName: sanitizeFileName(`[Instagram] ${shortcode}.mp4`),
+                        platform: "Instagram"
+                    }]
+                };
+            }
+
+            const imgUrlMatch = html.match(/"display_url"\s*:\s*"([^"]+)"/) || html.match(/<img[^>]+class="EmbeddedMediaImage"[^>]+src="([^"]+)"/);
+            if (imgUrlMatch) {
+                const rawUrl = imgUrlMatch[1].replace(/\\u0026/g, "&").replace(/\\/g, "");
+                return {
+                    platform: "Instagram",
+                    title: `Instagram ${shortcode}`,
+                    author: "Instagram",
+                    originalUrl: url,
+                    media: [{
+                        type: "photo",
+                        url: rawUrl,
+                        quality: "original",
+                        fileName: sanitizeFileName(`[Instagram] ${shortcode}.jpg`),
                         platform: "Instagram"
                     }]
                 };
