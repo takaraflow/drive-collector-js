@@ -719,3 +719,231 @@ func TestSmoke_Filen_EndToEnd(t *testing.T) {
 		t.Fatalf("Filen streamTransfer 失败: %v", err)
 	}
 }
+
+type fakeSmokeProtonRuntime struct {
+	session map[string]string
+	reason  string
+}
+
+func (f *fakeSmokeProtonRuntime) ValidateProton(_ context.Context, _, _, _ string) (map[string]string, string, string) {
+	return f.session, f.reason, ""
+}
+
+// TestSmoke_Mega_EndToEnd 全链路 Mega 冒烟测试：
+// 1. 引导流程：Email -> Password
+// 2. 敏感密码输入自动焚毁消息安全门禁
+// 3. Rclone 混淆落库
+// 4. 普通落盘上传 (upload) 完整路径验证
+// 5. 零磁盘流式直传 (streamTransfer) 完整管道验证
+func TestSmoke_Mega_EndToEnd(t *testing.T) {
+	ctx := context.Background()
+	rcloneMock := &fakeRclone{}
+	dlMock := &fakeDL{content: "smoke test mega payload"}
+	repoMock := &fakeRepo{}
+	drivesMock := &fakeDrives{}
+
+	app, _ := newTestApp(t, dlMock, repoMock, drivesMock)
+	app.rclone = rcloneMock
+	app.d1c = mockD1Client()
+
+	fakeTG := &fakeSmokeTG{}
+	app.tg = fakeTG
+
+	memSession := newFakeMemorySession()
+	app.bindSessions = memSession
+
+	userID := "999888777"
+	chatID := int64(999888777)
+
+	// 1. 触发引导
+	if err := app.bindStart(ctx, chatID, userID, "mega"); err != nil {
+		t.Fatalf("bindStart 失败: %v", err)
+	}
+
+	// 2. 输入邮箱
+	msgEmail := messageInfo{ChatID: chatID, SenderID: 999888777, ID: 501}
+	if !app.handleBindInput(ctx, msgEmail, "bob@mega.nz") {
+		t.Fatalf("handleBindInput 应该消费 Email 消息")
+	}
+
+	// 3. 输入密码
+	msgPass := messageInfo{ChatID: chatID, SenderID: 999888777, ID: 502}
+	if !app.handleBindInput(ctx, msgPass, "BobMegaSecretPassword999") {
+		t.Fatalf("handleBindInput 应该消费 Password 消息")
+	}
+
+	// 4. 门禁断言：敏感密码消息 (ID: 502) 必须被物理删除
+	deletedPass := false
+	for _, id := range fakeTG.deletedMsgIDs {
+		if id == 502 {
+			deletedPass = true
+			break
+		}
+	}
+	if !deletedPass {
+		t.Errorf("门禁失败: 密码消息未被物理删除, 已删: %v", fakeTG.deletedMsgIDs)
+	}
+
+	// 5. 验证落盘上传与连接串
+	megaDrive := &drive.Drive{
+		ID:     "smoke_mega_drive_1",
+		UserID: userID,
+		Type:   string(drive.TypeMega),
+		Status: "active",
+		Config: drive.DriveConfig{
+			User:       "bob@mega.nz",
+			Pass:       "obscured_mega_pass",
+			PassFormat: "rclone_obscured",
+		},
+	}
+	drivesMock.drive = megaDrive
+
+	task1 := store.Task{
+		ID:        "task_smoke_mega_1",
+		UserID:    userID,
+		FileName:  sqlStr("mega_test.dat"),
+		SourceRef: sqlStr("999888777/10"),
+	}
+
+	err := app.upload(ctx, task1)
+	if err != nil {
+		t.Fatalf("Mega upload 失败: %v", err)
+	}
+	conn := rcloneMock.lastConfig.Connection
+	if !strings.HasPrefix(conn, ":mega,") {
+		t.Errorf("连接串非 :mega 格式: %s", conn)
+	}
+	if !strings.Contains(conn, `user="bob@mega.nz"`) {
+		t.Errorf("连接串缺少 user: %s", conn)
+	}
+
+	// 6. 验证零磁盘直传
+	task2 := store.Task{
+		ID:        "task_smoke_mega_stream",
+		UserID:    userID,
+		FileName:  sqlStr("mega_stream.dat"),
+		SourceRef: sqlStr("999888777/11"),
+	}
+	err = app.streamTransfer(ctx, task2)
+	if err != nil {
+		t.Fatalf("Mega streamTransfer 失败: %v", err)
+	}
+}
+
+// TestSmoke_Proton_EndToEnd 全链路 ProtonDrive 冒烟测试：
+// 1. 引导流程：User -> Password -> 2FA Choice -> 2FA Code
+// 2. 敏感凭据物理删除门禁断言
+// 3. Session 存储与上传验证
+// 4. 零磁盘直传管道验证
+func TestSmoke_Proton_EndToEnd(t *testing.T) {
+	ctx := context.Background()
+	rcloneMock := &fakeRclone{}
+	dlMock := &fakeDL{content: "smoke test proton payload"}
+	repoMock := &fakeRepo{}
+	drivesMock := &fakeDrives{}
+
+	app, _ := newTestApp(t, dlMock, repoMock, drivesMock)
+	app.rclone = rcloneMock
+	app.d1c = mockD1Client()
+	app.bindRuntime = &fakeSmokeProtonRuntime{
+		session: map[string]string{
+			"access_token":  "mock_access_token_123",
+			"refresh_token": "mock_refresh_token_456",
+			"uid":           "mock_uid_789",
+		},
+	}
+
+	fakeTG := &fakeSmokeTG{}
+	app.tg = fakeTG
+
+	memSession := newFakeMemorySession()
+	app.bindSessions = memSession
+
+	userID := "333444555"
+	chatID := int64(333444555)
+
+	// 1. 触发引导
+	if err := app.bindStart(ctx, chatID, userID, "protondrive"); err != nil {
+		t.Fatalf("bindStart 失败: %v", err)
+	}
+
+	// 2. 输入用户名
+	msgUser := messageInfo{ChatID: chatID, SenderID: 333444555, ID: 601}
+	if !app.handleBindInput(ctx, msgUser, "charlie@proton.me") {
+		t.Fatalf("handleBindInput 应该消费 User 消息")
+	}
+
+	// 3. 输入密码
+	msgPass := messageInfo{ChatID: chatID, SenderID: 333444555, ID: 602}
+	if !app.handleBindInput(ctx, msgPass, "CharlieProtonPassSecret#1") {
+		t.Fatalf("handleBindInput 应该消费 Password 消息")
+	}
+
+	// 4. 选择开启 2FA
+	msg2FAEnable := messageInfo{ChatID: chatID, SenderID: 333444555, ID: 603}
+	if !app.handleBindInput(ctx, msg2FAEnable, "yes") {
+		t.Fatalf("handleBindInput 应该消费 2FA Enable 消息")
+	}
+
+	// 5. 输入 2FA 动态码
+	msg2FACode := messageInfo{ChatID: chatID, SenderID: 333444555, ID: 604}
+	if !app.handleBindInput(ctx, msg2FACode, "654321") {
+		t.Fatalf("handleBindInput 应该消费 2FA Code 消息")
+	}
+
+	// 6. 门禁断言：密码 (ID 602) 与 2FA 码 (ID 604) 必须都被删除
+	deleted602 := false
+	deleted604 := false
+	for _, id := range fakeTG.deletedMsgIDs {
+		if id == 602 {
+			deleted602 = true
+		}
+		if id == 604 {
+			deleted604 = true
+		}
+	}
+	if !deleted602 || !deleted604 {
+		t.Errorf("门禁失败: 密码或 2FA 消息未被物理删除, 已删: %v", fakeTG.deletedMsgIDs)
+	}
+
+	// 7. 构造真实 Proton 网盘验证落盘上传与连接
+	protonDrive := &drive.Drive{
+		ID:     "smoke_proton_drive_1",
+		UserID: userID,
+		Type:   string(drive.TypeProton),
+		Status: "active",
+		Config: drive.DriveConfig{
+			Username:           "charlie@proton.me",
+			Password:           "obscured_proton_pass",
+			PassFormat:         "rclone_obscured",
+			ClientUID:          "mock_uid_789",
+			ClientAccessToken:  "mock_access_token_123",
+			ClientRefreshToken: "mock_refresh_token_456",
+		},
+	}
+	drivesMock.drive = protonDrive
+
+	task1 := store.Task{
+		ID:        "task_smoke_proton_1",
+		UserID:    userID,
+		FileName:  sqlStr("proton_file.pdf"),
+		SourceRef: sqlStr("333444555/50"),
+	}
+
+	err := app.upload(ctx, task1)
+	if err != nil {
+		t.Fatalf("Proton upload 失败: %v", err)
+	}
+
+	// 8. 验证零磁盘直传
+	task2 := store.Task{
+		ID:        "task_smoke_proton_stream",
+		UserID:    userID,
+		FileName:  sqlStr("proton_stream.pdf"),
+		SourceRef: sqlStr("333444555/51"),
+	}
+	err = app.streamTransfer(ctx, task2)
+	if err != nil {
+		t.Fatalf("Proton streamTransfer 失败: %v", err)
+	}
+}
