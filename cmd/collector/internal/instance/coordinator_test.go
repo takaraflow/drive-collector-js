@@ -280,23 +280,6 @@ func TestHasLockReportsOwnership(t *testing.T) {
 }
 
 // TestRegisterKeepsHeartbeatAlive 心跳必须【持续】刷新实例键。
-//
-// 这是生产事故的回归测试:Register 里写了
-//
-//	ticker := time.NewTicker(15 * time.Second)
-//	defer ticker.Stop()        // ← 函数一返回就停
-//	go func(){ <-ticker.C ... }()
-//	return nil                 // ← 到这里 ticker 已经死了
-//
-// ticker 被 defer 停掉后,那个 channel 再也不会发信号,心跳 goroutine
-// 永远阻塞在 <-ticker.C 上。于是 registerOnce 一辈子只跑启动那一次,
-// 实例键 90 秒后过期消失 —— 而 lock:telegram_client 仍在续租。
-//
-// 症状极难发现:服务看起来正常(锁在续),但 instance:<id> 不见了。
-// 这正是生产上观察到的现象。
-//
-// 修法:ticker 必须由 goroutine 自己拥有并在退出时 Stop,
-// 不能挂在 Register 上 defer —— Register 是【非阻塞】的。
 func TestRegisterKeepsHeartbeatAlive(t *testing.T) {
 	c, mr := newTest(t, "go-1", "https://go.example.com")
 	c.heartbeatEvery = 5 * time.Millisecond // 别让测试等 15 秒
@@ -333,18 +316,12 @@ func TestRegisterKeepsHeartbeatAlive(t *testing.T) {
 }
 
 // TestRegisterHeartbeatRefreshesTimestamp 心跳要更新 lastHeartbeat。
-//
-// 光看「键存在」还不够:如果每次写的是同一份旧 payload,
-// Node 会因为 lastHeartbeat 太旧而判定实例已下线,进而抢占它的锁。
 func TestRegisterHeartbeatRefreshesTimestamp(t *testing.T) {
 	c, mr := newTest(t, "go-1", "https://go.example.com")
 	c.heartbeatEvery = 5 * time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// 假时钟必须用原子量:心跳 goroutine 在另一条协程上读它,
-	// 直接改一个普通变量会被 -race 判定为数据竞争。
-	// (生产里 c.now 构造后就不再写,不存在这个问题。)
 	var clock atomic.Int64
 	clock.Store(time.Unix(1791100000, 0).UnixNano())
 	c.now = func() time.Time { return time.Unix(0, clock.Load()) }
@@ -382,9 +359,6 @@ func TestRegisterHeartbeatRefreshesTimestamp(t *testing.T) {
 }
 
 // TestRegisterDoesNotDeregisterWhileCtxAlive 只要 ctx 没结束,实例键就得在。
-//
-// 这是「非阻塞 Register」的另一面:Register 返回后调用方继续跑,
-// 心跳必须一直活着 —— 而不是随 Register 的返回一起结束。
 func TestRegisterDoesNotDeregisterWhileCtxAlive(t *testing.T) {
 	c, mr := newTest(t, "go-1", "https://go.example.com")
 	c.heartbeatEvery = 5 * time.Millisecond
@@ -395,11 +369,191 @@ func TestRegisterDoesNotDeregisterWhileCtxAlive(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 模拟「调用方继续干别的事」——睡够好几轮心跳周期。
 	mr.FastForward(instanceTimeout * 2)
 	time.Sleep(100 * time.Millisecond)
 
 	if !mr.Exists("instance:go-1") {
 		t.Error("ctx 还活着,实例键不该消失")
+	}
+}
+
+// TestReleaseTelegramLock 主动释放锁与防误删他人锁
+func TestReleaseTelegramLock(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	ctx := context.Background()
+
+	node1 := NewCoordinator(rdb, "node-1", "https://node.example.com", quiet())
+	node2 := NewCoordinator(rdb, "node-2", "https://node.example.com", quiet())
+	_ = node1.Register(ctx)
+	_ = node2.Register(ctx)
+
+	ok, err := node1.AcquireTelegramLock(ctx)
+	if err != nil || !ok {
+		t.Fatalf("node-1 应该获取锁: %v", err)
+	}
+
+	// node-2 尝试释放 node-1 的锁，应该被拒绝且锁仍在
+	if err := node2.ReleaseTelegramLock(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !mr.Exists("lock:telegram_client") {
+		t.Error("node-2 误删了 node-1 的锁!")
+	}
+
+	// node-1 正常主动释放锁
+	if err := node1.ReleaseTelegramLock(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if mr.Exists("lock:telegram_client") {
+		t.Error("node-1 释放后锁应已被删除")
+	}
+
+	// 现在 node-2 应当可以立即获取锁，无需等待 90 秒 TTL
+	ok2, err := node2.AcquireTelegramLock(ctx)
+	if err != nil || !ok2 {
+		t.Errorf("node-2 应该能立即获取已释放的锁: %v", err)
+	}
+}
+
+// TestGetTelegramLockHolder 读取锁持有者
+func TestGetTelegramLockHolder(t *testing.T) {
+	c, _ := newTest(t, "worker-1", "https://w1.example.com")
+	ctx := context.Background()
+
+	// 锁不存在时
+	holder, err := c.GetTelegramLockHolder(ctx)
+	if err != nil || holder != "" {
+		t.Errorf("锁不存在时 holder 期望空, 实际: %q, err: %v", holder, err)
+	}
+
+	// 获取锁后
+	_, _ = c.AcquireTelegramLock(ctx)
+	holder, err = c.GetTelegramLockHolder(ctx)
+	if err != nil || holder != "worker-1" {
+		t.Errorf("holder 期望 worker-1, 实际: %q", holder)
+	}
+}
+
+// TestActiveTaskCountHeartbeat 测试负载指标 activeTaskCount 上报
+func TestActiveTaskCountHeartbeat(t *testing.T) {
+	c, mr := newTest(t, "worker-1", "https://w1.example.com")
+	ctx := context.Background()
+
+	counter := 3
+	c.RegisterActiveTaskCounter(func() int {
+		return counter
+	})
+
+	if err := c.Register(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := mr.Get("instance:worker-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var info InstanceInfo
+	if err := json.Unmarshal([]byte(raw), &info); err != nil {
+		t.Fatal(err)
+	}
+	if info.ActiveTaskCount != 3 {
+		t.Errorf("activeTaskCount 期望 3, 实际 %d", info.ActiveTaskCount)
+	}
+}
+
+// TestGenericDistributedLock 测试通用分布式锁和任务锁
+func TestGenericDistributedLock(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	ctx := context.Background()
+
+	w1 := NewCoordinator(rdb, "worker-1", "https://w1.example.com", quiet())
+	w2 := NewCoordinator(rdb, "worker-2", "https://w2.example.com", quiet())
+	_ = w1.Register(ctx)
+	_ = w2.Register(ctx)
+
+	taskID := "task-abc-123"
+
+	// worker-1 获取任务锁
+	leaseID1, acquired, err := w1.AcquireTaskLock(ctx, taskID, 60*time.Second)
+	if err != nil || !acquired || leaseID1 == "" {
+		t.Fatalf("w1 应成功获取任务锁: lease=%s, ok=%v, err=%v", leaseID1, acquired, err)
+	}
+
+	// worker-2 尝试获取同一任务锁应失败
+	_, acquired2, err := w2.AcquireTaskLock(ctx, taskID, 60*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if acquired2 {
+		t.Error("同一任务锁不应被两个 worker 同时获取")
+	}
+
+	// worker-1 续租任务锁
+	renewed, err := w1.RenewLock(ctx, "task:"+taskID, leaseID1, 60*time.Second)
+	if err != nil || !renewed {
+		t.Errorf("w1 续租任务锁失败: renewed=%v, err=%v", renewed, err)
+	}
+
+	// worker-2 无法释放 worker-1 的锁
+	_ = w2.ReleaseTaskLock(ctx, taskID, "wrong-lease")
+	if !mr.Exists("lock:task:" + taskID) {
+		t.Error("w2 不应能误删 w1 的任务锁")
+	}
+
+	// worker-1 正常释放任务锁
+	if err := w1.ReleaseTaskLock(ctx, taskID, leaseID1); err != nil {
+		t.Fatal(err)
+	}
+	if mr.Exists("lock:task:" + taskID) {
+		t.Error("w1 释放后任务锁应已被删除")
+	}
+}
+
+// TestClusterLeaderAndCleanup 测试集群 Leader 选举与过期实例清理
+func TestClusterLeaderAndCleanup(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	ctx := context.Background()
+
+	nodeA := NewCoordinator(rdb, "instance-a", "https://a.example.com", quiet())
+	nodeB := NewCoordinator(rdb, "instance-b", "https://b.example.com", quiet())
+	_ = nodeA.Register(ctx)
+	_ = nodeB.Register(ctx)
+
+	// 按照字典序最小原则，instance-a 是集群 Leader
+	isLeaderA, err := nodeA.IsClusterLeader(ctx)
+	if err != nil || !isLeaderA {
+		t.Errorf("nodeA 应该是 Leader: %v", err)
+	}
+	isLeaderB, err := nodeB.IsClusterLeader(ctx)
+	if err != nil || isLeaderB {
+		t.Errorf("nodeB 不应是 Leader: %v", err)
+	}
+
+	// 模拟过期死节点 instance-z
+	deadPayload, _ := json.Marshal(InstanceInfo{
+		ID:            "instance-z",
+		URL:           "https://z.example.com",
+		LastHeartbeat: time.Now().Add(-5 * time.Minute).UnixMilli(),
+		Status:        "active",
+	})
+	mr.Set("instance:instance-z", string(deadPayload))
+
+	// 清理过期实例 (maxAge = 90s)
+	cleaned, err := nodeA.CleanupExpiredInstances(ctx, 90*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleaned != 1 {
+		t.Errorf("预期清理 1 个过期实例, 实际清理 %d 个", cleaned)
+	}
+	if mr.Exists("instance:instance-z") {
+		t.Error("过期实例 instance-z 应该已被清除")
+	}
+	if !mr.Exists("instance:instance-a") || !mr.Exists("instance:instance-b") {
+		t.Error("活跃实例不应被清除")
 	}
 }

@@ -98,7 +98,7 @@ func NewMediaGroupBuffer(rdb *redis.Client, cfg BufferConfig) *MediaGroupBuffer 
 // GroupMeta 是组里除消息 id 之外的上下文。
 //
 // 单独导出是因为刷盘发生在 1 秒缓冲窗口之后 —— 那时 update 的
-// chat/user 上下文已经不在手上,只能靠组数据里存的那份。
+// chat/user 上下文已经不在手上,只能靠组数据里存的那份回溯。
 type GroupMeta struct {
 	GID    string
 	ChatID int64
@@ -184,7 +184,7 @@ func (b *MediaGroupBuffer) appendAtomic(
 	// 用 Lua 保证「读 → 去重 → 追加 → 写回」是一步。
 	//
 	// 不用 WATCH/MULTI:那需要重试循环,在高并发下重试率很高,
-	// 而这里每次调用都要付这个代价。
+	// 而这里每次调用都要付出这个代价。
 	const lua = `
 local raw = redis.call('GET', KEYS[1])
 local meta
@@ -283,7 +283,8 @@ func (b *MediaGroupBuffer) flush(ctx context.Context, gid string) {
 	}()
 
 	lockKey := b.lockKey(gid)
-	ok, err := b.redis.SetNX(ctx, lockKey, "1", b.lockTTL).Result()
+	leaseToken := fmt.Sprintf("%d:%s", b.Now().UnixNano(), gid)
+	ok, err := b.redis.SetNX(ctx, lockKey, leaseToken, b.lockTTL).Result()
 	if err != nil {
 		b.log.Warn("媒体组抢锁失败", "gid", gid, "err", err)
 		return
@@ -300,7 +301,16 @@ func (b *MediaGroupBuffer) flush(ctx context.Context, gid string) {
 		})
 		return
 	}
-	defer b.redis.Del(context.WithoutCancel(ctx), lockKey)
+	defer func() {
+		// CAS 安全删除：只有锁仍然持有当前 leaseToken 时才删除，防误删他人锁
+		const delLua = `
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+  return redis.call("DEL", KEYS[1])
+else
+  return 0
+end`
+		_ = b.redis.Eval(context.WithoutCancel(ctx), delLua, []string{lockKey}, leaseToken).Err()
+	}()
 
 	meta, err := b.load(ctx, gid)
 	if err != nil {
@@ -314,7 +324,7 @@ func (b *MediaGroupBuffer) flush(ctx context.Context, gid string) {
 	// 过期太久的组直接丢弃 —— 那些消息多半已经没意义了
 	// (用户早就放弃了这批)。
 	//
-	// Warn 而不是 Debug:这【是用户数据消失】的时刻(重启超过 60 秒就
+	// Warn 而不是 Debug:这【是用​​户数据消失】的时刻(重启超过 60 秒就
 	// 会走到这里),记在 Debug 等于没记 —— 排「相册没反应」时看到的
 	// 只有「入缓冲」和什么都没有。
 	if b.Now().UnixMilli()-meta.CreatedAt > b.staleThreshold.Milliseconds() {
@@ -361,57 +371,99 @@ func (b *MediaGroupBuffer) load(ctx context.Context, gid string) (*groupMeta, er
 	}
 	var meta groupMeta
 	if err := json.Unmarshal(raw, &meta); err != nil {
-		// 数据损坏 —— 删掉重建,否则这个组永远卡住。
-		b.log.Warn("媒体组数据损坏,重建", "gid", gid, "err", err)
-		return nil, nil
+		return nil, fmt.Errorf("解析媒体组状态失败(gid=%s): %w", gid, err)
 	}
 	return &meta, nil
 }
 
-func (b *MediaGroupBuffer) save(ctx context.Context, meta *groupMeta) error {
-	payload, err := json.Marshal(meta)
-	if err != nil {
-		return err
-	}
-	// TTL 与 staleThreshold 对齐:超过它这个组就没意义了。
-	if err := b.redis.Set(ctx, b.bufferKey(meta.GID), payload, b.staleThreshold).Err(); err != nil {
-		return err
-	}
-	return b.track(ctx, meta.GID)
-}
-
-// track 把 gid 加进索引 —— 进程重启后靠索引找回遗留组。
+// track 把 gid 加进待处理索引(集合)。
 func (b *MediaGroupBuffer) track(ctx context.Context, gid string) error {
 	return b.redis.SAdd(ctx, b.indexKey(), gid).Err()
 }
 
-// Restore 捞回上次运行遗留的组并立即刷出。
+// Restore 把上次运行遗留下来的组全部刷出 —— 启动时调用。
 //
-// 这是【必须】的:进程重启会丢掉所有内存里的定时器,组就永远留在
-// Redis 里不会刷。用户的相册会卡在「处理中」直到 staleThreshold 过期。
+// 这是相册链路在【多实例部署或频繁重启】时的守护神:
 //
-// 与 JS 侧 bootstrap 的 restore() 同义。
+// 1 秒缓冲窗口完全在内存里(定时器),一旦进程崩溃或重启,这批定时器
+// 瞬间蒸发 —— 而组数据因为是 Redis 持久的,会永远躺在 Redis 里,
+// 用户看得到「入缓冲」的日志,但永远等不到任务被创建。
+//
+// Restore 扫索引里的所有 gid,挨个调 flush,把上辈子没做完的事做完。
+// 返回成功刷出的组数。
 func (b *MediaGroupBuffer) Restore(ctx context.Context) (int, error) {
 	gids, err := b.redis.SMembers(ctx, b.indexKey()).Result()
 	if err != nil {
 		return 0, fmt.Errorf("读取媒体组索引失败: %w", err)
 	}
+	if len(gids) == 0 {
+		return 0, nil
+	}
 
+	b.log.Info("发现上次运行遗留的媒体组,准备恢复", "组数", len(gids))
 	restored := 0
-	// 排序保证刷出顺序与组创建顺序一致 —— 影响任务在队列里的次序,
-	// 而用户会按顺序看到结果。
-	sort.Strings(gids)
 	for _, gid := range gids {
+		select {
+		case <-ctx.Done():
+			return restored, ctx.Err()
+		default:
+		}
+		// 读出来看看是不是真有数据
 		meta, err := b.load(ctx, gid)
-		if err != nil || meta == nil || len(meta.MsgIDs) == 0 {
-			// 空组或读失败:清掉,别让索引无限增长。
+		if err != nil {
+			b.log.Warn("恢复时读取组失败", "gid", gid, "err", err)
+			continue
+		}
+		if meta == nil || len(meta.MsgIDs) == 0 {
+			// 空组或坏数据,清理索引
 			b.drop(ctx, gid)
 			continue
 		}
-		restored++
+
+		b.log.Info("恢复遗留媒体组",
+			"gid", gid, "条数", len(meta.MsgIDs),
+			"距离创建", time.Duration(b.Now().UnixMilli()-meta.CreatedAt)*time.Millisecond)
+
+		// 同步刷 —— 启动阶段不需要定时器,直接走 flush
 		b.flush(ctx, gid)
+		restored++
 	}
 	return restored, nil
+}
+
+// ActiveGroups 列出当前正在等待刷盘的组 —— 暴露给 /diagnosis。
+//
+// 这里只读状态,不触发刷盘。每个组带上它已攒的条数和创建时间。
+type ActiveGroup struct {
+	GID       string `json:"gid"`
+	Count     int    `json:"count"`
+	CreatedAt int64  `json:"createdAt"`
+	ChatID    int64  `json:"chatId"`
+}
+
+func (b *MediaGroupBuffer) ActiveGroups(ctx context.Context) ([]ActiveGroup, error) {
+	gids, err := b.redis.SMembers(ctx, b.indexKey()).Result()
+	if err != nil {
+		return nil, err
+	}
+	var out []ActiveGroup
+	for _, gid := range gids {
+		meta, err := b.load(ctx, gid)
+		if err != nil || meta == nil {
+			continue
+		}
+		out = append(out, ActiveGroup{
+			GID:       gid,
+			Count:     len(meta.MsgIDs),
+			CreatedAt: meta.CreatedAt,
+			ChatID:    meta.ChatID,
+		})
+	}
+	// 按创建时间升序排,老组在前
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].CreatedAt < out[j].CreatedAt
+	})
+	return out, nil
 }
 
 // Count 返回当前缓冲的组数 —— 诊断用。

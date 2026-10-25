@@ -256,6 +256,8 @@ func runWorker(log *slog.Logger) error {
 		return errors.New("REDIS_URL/NF_REDIS_URL 未配置 —— 媒体组缓冲与实例锁都依赖它")
 	}
 
+	standby := os.Getenv("STANDBY_MODE") == "true" || os.Getenv("STANDBY_MODE") == "1"
+
 	application, err := app.New(app.Config{
 		Auth:        authGuard,
 		APIID:       apiID,
@@ -269,6 +271,7 @@ func runWorker(log *slog.Logger) error {
 		Redis:       rdb,
 		Log:         log,
 		Coord:       coord,
+		StandbyMode: standby,
 	})
 	if err != nil {
 		return err
@@ -276,7 +279,8 @@ func runWorker(log *slog.Logger) error {
 
 	log.Info("worker 模式启动",
 		"dc", parsed.DCID,
-		"下载目录", envOr("DOWNLOAD_DIR", app.DefaultDownloadDir))
+		"下载目录", envOr("DOWNLOAD_DIR", app.DefaultDownloadDir),
+		"standbyMode", standby)
 	return application.Run(ctx)
 }
 
@@ -320,33 +324,35 @@ func serveHealth(ctx context.Context, log *slog.Logger) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"status":"ok"}`))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok","mode":"worker"}`))
 	})
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"status":"ok"}`))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
 	})
 	mux.HandleFunc("/version", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		v := envOr("APP_VERSION", "dev")
-		sha := envOr("GIT_SHA", "unknown")
-		_, _ = fmt.Fprintf(w, `{"version":%q,"sha":%q,"mode":"worker"}`, v, sha)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"version":"go-worker-2.0.0"}`))
 	})
 
 	srv := &http.Server{
-		Addr:              ":" + strconv.Itoa(port),
+		Addr:              fmt.Sprintf(":%d", port),
 		Handler:           mux,
-		ReadHeaderTimeout: 10 * time.Second,
+		ReadHeaderTimeout: 5 * time.Second,
 	}
+
 	go func() {
-		log.Info("健康端点已启动", "port", port, "路径", "/health /healthz /version")
+		log.Info("worker healthcheck endpoint listening", "port", port)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Error("健康服务异常退出", "err", err)
+			log.Warn("worker health server error", "err", err)
 		}
 	}()
+
 	go func() {
 		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(shutdownCtx)
 	}()
