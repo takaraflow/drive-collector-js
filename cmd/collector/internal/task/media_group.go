@@ -371,7 +371,9 @@ func (b *MediaGroupBuffer) load(ctx context.Context, gid string) (*groupMeta, er
 	}
 	var meta groupMeta
 	if err := json.Unmarshal(raw, &meta); err != nil {
-		return nil, fmt.Errorf("解析媒体组状态失败(gid=%s): %w", gid, err)
+		b.log.Warn("媒体组数据损坏，清理损坏数据", "gid", gid, "err", err)
+		b.drop(ctx, gid)
+		return nil, nil
 	}
 	return &meta, nil
 }
@@ -401,6 +403,7 @@ func (b *MediaGroupBuffer) Restore(ctx context.Context) (int, error) {
 	}
 
 	b.log.Info("发现上次运行遗留的媒体组,准备恢复", "组数", len(gids))
+	sort.Strings(gids)
 	restored := 0
 	for _, gid := range gids {
 		select {
