@@ -241,6 +241,15 @@ func fileSizeOf(m tg.MessageMediaClass) int64 {
 			}
 			return bestSize
 		}
+	case *tg.MessageMediaWebPage:
+		if wp, ok := v.Webpage.(*tg.WebPage); ok {
+			if docClass := wp.Document; docClass != nil {
+				return fileSizeOf(&tg.MessageMediaDocument{Document: docClass})
+			}
+			if photoClass := wp.Photo; photoClass != nil {
+				return fileSizeOf(&tg.MessageMediaPhoto{Photo: photoClass})
+			}
+		}
 	}
 	return 0
 }
@@ -295,6 +304,17 @@ func fileNameOf(m tg.MessageMediaClass) string {
 			return ""
 		}
 		return fmt.Sprintf("photo_%d_%d.jpg", photo.DCID, photo.ID)
+
+	case *tg.MessageMediaWebPage:
+		if wp, ok := v.Webpage.(*tg.WebPage); ok {
+			if docClass := wp.Document; docClass != nil {
+				return fileNameOf(&tg.MessageMediaDocument{Document: docClass})
+			}
+			if photoClass := wp.Photo; photoClass != nil {
+				return fileNameOf(&tg.MessageMediaPhoto{Photo: photoClass})
+			}
+		}
+		return ""
 
 	default:
 		return ""

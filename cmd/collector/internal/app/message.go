@@ -93,6 +93,11 @@ func fromMessage(m tg.MessageClass) (messageInfo, bool) {
 
 	media, hasMedia := msg.GetMedia()
 	info.HasMedia = hasMedia && media != nil
+	if wp, ok := media.(*tg.MessageMediaWebPage); ok {
+		if page, ok := wp.Webpage.(*tg.WebPage); !ok || (page.Document == nil && page.Photo == nil) {
+			info.HasMedia = false
+		}
+	}
 	if info.HasMedia {
 		info.FileName = fileNameOf(media)
 	}

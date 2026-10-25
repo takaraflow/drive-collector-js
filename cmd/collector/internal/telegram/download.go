@@ -211,6 +211,19 @@ func locationOf(m tg.MessageMediaClass) (file, error) {
 			TotalSize: bestSize,
 		}, nil
 
+	case *tg.MessageMediaWebPage:
+		wp, ok := v.Webpage.(*tg.WebPage)
+		if !ok {
+			return file{}, fmt.Errorf("telegram: 网页预览内容为空")
+		}
+		if docClass := wp.Document; docClass != nil {
+			return locationOf(&tg.MessageMediaDocument{Document: docClass})
+		}
+		if photoClass := wp.Photo; photoClass != nil {
+			return locationOf(&tg.MessageMediaPhoto{Photo: photoClass})
+		}
+		return file{}, fmt.Errorf("telegram: 网页预览未包含可直接下载的媒体")
+
 	default:
 		return file{}, fmt.Errorf("telegram: 该媒体类型(%s)暂不支持直接下载", m.TypeName())
 	}

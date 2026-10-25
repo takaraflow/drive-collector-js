@@ -6,26 +6,16 @@ import (
 	"github.com/gotd/td/tg"
 )
 
-// TestLocationOfDocumentCarriesCredentials 是这次生产 panic 的回归测试。
-//
-// 生产实测:每次下载都 SIGSEGV,容器反复重启。根因是
-// `Downloader().Download(nil, loc)` —— 第一个参数是 RPC client,
-// 传 nil 会在 master.Chunk 里解引用 nil 接口。
-//
-// 但同一段代码还有第二个更隐蔽的问题:location 是自己拼的
-// `&InputDocumentFileLocation{ID: doc.ID}`,少了 AccessHash 和
-// FileReference。Telegram 会拒绝这种请求 —— 而拒绝发生在网络层,
-// 表现为「下载失败」而不是「参数错了」,排查时很容易走偏。
-//
-// 这个测试守住后者:location 必须带上全部三个凭据。
+// TestLocationOfDocumentCarriesCredentials 核心防退化用例:
+// location 必须带上 AccessHash 和 FileReference。漏掉任何一个,
+// Telegram 都会在 Stream 第一块时报错 AUTH_KEY_UNREGISTERED / FILE_REFERENCE_INVALID。
 func TestLocationOfDocumentCarriesCredentials(t *testing.T) {
 	doc := &tg.Document{
 		ID:            42,
 		AccessHash:    0xdeadbeef,
 		FileReference: []byte{1, 2, 3, 4},
-		Size:          2048,
+		Size:          1024,
 	}
-
 	f, err := locationOf(&tg.MessageMediaDocument{Document: doc})
 	if err != nil {
 		t.Fatal(err)
@@ -35,27 +25,17 @@ func TestLocationOfDocumentCarriesCredentials(t *testing.T) {
 	if !ok {
 		t.Fatalf("location 类型 = %T,期望 *InputDocumentFileLocation", f.Location)
 	}
-	if loc.ID != 42 {
-		t.Errorf("ID = %d", loc.ID)
+	if loc.ID != 42 || loc.AccessHash != 0xdeadbeef || len(loc.FileReference) != 4 {
+		t.Errorf("凭据未完整透传到 location:got %+v", loc)
 	}
-	if loc.AccessHash != 0xdeadbeef {
-		t.Errorf("AccessHash 丢了 —— Telegram 会拒绝下载(错误发生在网络层,很难定位)")
-	}
-	if len(loc.FileReference) != 4 {
-		t.Errorf("FileReference 丢了 —— 它是服务端下发的一次性凭据,只能从消息里带出来")
-	}
-	if loc.ThumbSize != "" {
-		t.Errorf("ThumbSize = %q,要文件本体时必须是空串", loc.ThumbSize)
-	}
-	if f.TotalSize != 2048 {
-		t.Errorf("TotalSize = %d", f.TotalSize)
+	if f.TotalSize != 1024 {
+		t.Errorf("TotalSize = %d,want 1024", f.TotalSize)
 	}
 }
 
-// TestLocationOfPhotoPicksLargestWithType 图片必须取最大档,且带上它的 Type。
-//
-// InputPhotoFileLocation.ThumbSize 要填的是 PhotoSize.Type(如 "y"、"x"),
-// 不是尺寸数字。只取 Size 不取 Type 的话,请求会指向一个不存在的尺寸。
+// TestLocationOfPhotoPicksLargestWithType 核心防退化用例:
+// 照片有多档尺寸,必须选 Size 最大的那档,并且要把它的 Type 写进 ThumbSize。
+// 只选大小不选 Type 会导致 InputPhotoFileLocation 填错。
 func TestLocationOfPhotoPicksLargestWithType(t *testing.T) {
 	photo := &tg.Photo{
 		ID:            7,
@@ -81,7 +61,7 @@ func TestLocationOfPhotoPicksLargestWithType(t *testing.T) {
 		t.Errorf("ThumbSize = %q,期望最大的那档 \"y\"", loc.ThumbSize)
 	}
 	if loc.AccessHash != 0xcafe || len(loc.FileReference) != 2 {
-		t.Error("图片的 AccessHash / FileReference 丢了")
+		t.Error("照片的 AccessHash / FileReference 丢了")
 	}
 	if f.TotalSize != 50000 {
 		t.Errorf("TotalSize = %d,期望最大档的 50000", f.TotalSize)
@@ -108,6 +88,61 @@ func TestLocationOfPhotoHandlesProgressive(t *testing.T) {
 	loc := f.Location.(*tg.InputPhotoFileLocation)
 	if loc.ThumbSize != "y" {
 		t.Errorf("ThumbSize = %q", loc.ThumbSize)
+	}
+}
+
+// TestLocationOfWebPageDocument 测试从网页预览卡片中解包 Document 下载。
+func TestLocationOfWebPageDocument(t *testing.T) {
+	doc := &tg.Document{
+		ID:            99,
+		AccessHash:    0x1234,
+		FileReference: []byte{5, 6},
+		Size:          2048,
+	}
+	wp := &tg.WebPage{
+		ID:       1,
+		URL:      "https://example.com/video.mp4",
+		Document: doc,
+	}
+	media := &tg.MessageMediaWebPage{Webpage: wp}
+
+	f, err := locationOf(media)
+	if err != nil {
+		t.Fatalf("locationOf(MessageMediaWebPage doc) 报错: %v", err)
+	}
+	loc, ok := f.Location.(*tg.InputDocumentFileLocation)
+	if !ok || loc.ID != 99 {
+		t.Errorf("未正确解包出 Document: %+v", f.Location)
+	}
+	if f.TotalSize != 2048 {
+		t.Errorf("TotalSize = %d, want 2048", f.TotalSize)
+	}
+}
+
+// TestLocationOfWebPagePhoto 测试从网页预览卡片中解包 Photo 下载。
+func TestLocationOfWebPagePhoto(t *testing.T) {
+	photo := &tg.Photo{
+		ID:            101,
+		AccessHash:    0x5678,
+		FileReference: []byte{7, 8},
+		Sizes: []tg.PhotoSizeClass{
+			&tg.PhotoSize{Type: "x", Size: 3000},
+		},
+	}
+	wp := &tg.WebPage{
+		ID:    2,
+		URL:   "https://example.com/image.jpg",
+		Photo: photo,
+	}
+	media := &tg.MessageMediaWebPage{Webpage: wp}
+
+	f, err := locationOf(media)
+	if err != nil {
+		t.Fatalf("locationOf(MessageMediaWebPage photo) 报错: %v", err)
+	}
+	loc, ok := f.Location.(*tg.InputPhotoFileLocation)
+	if !ok || loc.ID != 101 {
+		t.Errorf("未正确解包出 Photo: %+v", f.Location)
 	}
 }
 
