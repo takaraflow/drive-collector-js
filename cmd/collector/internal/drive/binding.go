@@ -178,10 +178,14 @@ func HandleMegaStep(ctx context.Context, runner *rclone.Runner, step, input stri
 			return BindResult{Success: false, Message: "🔑 <b>请输入密码</b>"}
 		}
 		// 最后一步:验证 → 建 config。失败是终态(清会话)。
-		passObscured, err := runner.Obscure(ctx, pass)
-		if err != nil {
-			return BindResult{Success: false, Failed: true, FailureReason: "ERROR",
-				Message: "❌ <b>绑定失败</b>\n\n原因：混淆密码时出错，请稍后重试。"}
+		passObscured := pass
+		if runner != nil {
+			var err error
+			passObscured, err = runner.Obscure(ctx, pass)
+			if err != nil {
+				return BindResult{Success: false, Failed: true, FailureReason: "ERROR",
+					Message: "❌ <b>绑定失败</b>\n\n原因：混淆密码时出错，请稍后重试。"}
+			}
 		}
 		cfg := DriveConfig{
 			User: data["user"], Pass: passObscured,

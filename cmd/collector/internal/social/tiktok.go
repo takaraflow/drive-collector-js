@@ -11,6 +11,8 @@ import (
 	"time"
 )
 
+var tikWMBaseURL = "https://www.tikwm.com"
+
 type tikWMResponse struct {
 	Code int    `json:"code"`
 	Msg  string `json:"msg"`
@@ -37,7 +39,7 @@ func ParseTikTokOrDouyin(ctx context.Context, rawURL string) (*ParseResult, erro
 		platform = "douyin"
 	}
 
-	apiURL := fmt.Sprintf("https://www.tikwm.com/api/?url=%s&hd=1", url.QueryEscape(rawURL))
+	apiURL := fmt.Sprintf("%s/api/?url=%s&hd=1", tikWMBaseURL, url.QueryEscape(rawURL))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
 	if err == nil {
 		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
@@ -71,9 +73,9 @@ func ParseTikTokOrDouyin(ctx context.Context, rawURL string) (*ParseResult, erro
 					}
 
 					if videoURL != "" {
-						if strings.HasPrefix(videoURL, "/") {
-							videoURL = "https://www.tikwm.com" + videoURL
-						}
+					if strings.HasPrefix(videoURL, "/") {
+						videoURL = tikWMBaseURL + videoURL
+					}
 						tag := "[TikTok]"
 						if platform == "douyin" {
 							tag = "[抖音]"
@@ -85,6 +87,24 @@ func ParseTikTokOrDouyin(ctx context.Context, rawURL string) (*ParseResult, erro
 							FileName: SanitizeFileName(rawName),
 							FileSize: fileSize,
 							Quality:  quality,
+							Platform: platform,
+							WebURL:   rawURL,
+						})
+					}
+
+					for idx, imgURL := range wm.Data.Images {
+						if imgURL == "" {
+							continue
+						}
+						tag := "[TikTok]"
+						if platform == "douyin" {
+							tag = "[抖音]"
+						}
+						rawName := fmt.Sprintf("%s %s - %s_%s_%d.jpg", tag, author, truncateString(title, 40), wm.Data.ID, idx+1)
+						items = append(items, MediaItem{
+							Type:     "photo",
+							URL:      imgURL,
+							FileName: SanitizeFileName(rawName),
 							Platform: platform,
 							WebURL:   rawURL,
 						})
