@@ -53,14 +53,16 @@ type LockValue struct {
 //
 // url 决定 LB 把 webhook 转发到哪 —— 这就是「Go 接管」的机制:
 // Go 抢到锁并注册,LB 就会把流量打到 Go。无需改 LB 配置。
+// activeTaskCount 对齐 JS 侧 InstanceCoordinator，供 LB 动态均衡和监控探针读取。
 type InstanceInfo struct {
-	ID            string `json:"id"`
-	URL           string `json:"url"`
-	Hostname      string `json:"hostname"`
-	Region        string `json:"region"`
-	StartedAt     int64  `json:"startedAt"`
-	LastHeartbeat int64  `json:"lastHeartbeat"`
-	Status        string `json:"status"`
+	ID              string `json:"id"`
+	URL             string `json:"url"`
+	Hostname        string `json:"hostname"`
+	Region          string `json:"region"`
+	StartedAt       int64  `json:"startedAt"`
+	LastHeartbeat   int64  `json:"lastHeartbeat"`
+	Status          string `json:"status"`
+	ActiveTaskCount int    `json:"activeTaskCount"`
 }
 
 // Coordinator 管理本实例的注册与锁。
@@ -76,6 +78,9 @@ type Coordinator struct {
 	// 「心跳真的在持续刷新」—— 这个行为出问题时是静默的(实例键
 	// 过期消失,但锁还在续),只有真跑过几次心跳才测得出来。
 	heartbeatEvery time.Duration
+
+	// activeTaskCounter 活跃任务计数回调
+	activeTaskCounter func() int
 }
 
 // NewCoordinator 构造协调器。
@@ -110,6 +115,11 @@ func NewCoordinator(rdb *redis.Client, id, publicURL string, log *slog.Logger) *
 // ID 返回实例 ID。
 func (c *Coordinator) ID() string { return c.id }
 
+// RegisterActiveTaskCounter 注册活跃任务计数回调函数，用于心跳上报负载指标。
+func (c *Coordinator) RegisterActiveTaskCounter(fn func() int) {
+	c.activeTaskCounter = fn
+}
+
 // Register 把本实例写进 Redis,并周期性刷新心跳。
 //
 // 心跳是「本实例还活着」的信号:Node 判断能否抢占别人锁时,靠的就是
@@ -122,17 +132,6 @@ func (c *Coordinator) Register(ctx context.Context) error {
 		return err
 	}
 
-	// ticker 必须由这个 goroutine 自己拥有。
-	//
-	// 曾经写成 `ticker := time.NewTicker(...); defer ticker.Stop()` 再起
-	// goroutine —— 但 Register 是【非阻塞】的:它一 return,defer 就执行,
-	// ticker 当场停摆,channel 再不发信号,心跳 goroutine 永久卡在
-	// <-ticker.C 上。结果是 registerOnce 一生只跑启动那一次,实例键
-	// 90 秒后过期消失,而 lock:telegram_client 还在续租 ——
-	// 「锁在续、实例没了」这个自相矛盾的现象就是这么来的。
-	//
-	// (RunLockHeartbeat 里同样的写法没问题,因为那个函数【阻塞】在
-	// 循环里,defer 只在真正退出时才跑。差别就在这里。)
 	every := c.heartbeatEvery
 	if every <= 0 {
 		every = heartbeatEvery
@@ -157,14 +156,19 @@ func (c *Coordinator) Register(ctx context.Context) error {
 
 func (c *Coordinator) registerOnce(ctx context.Context) error {
 	now := c.now()
+	activeCount := 0
+	if c.activeTaskCounter != nil {
+		activeCount = c.activeTaskCounter()
+	}
 	payload, err := json.Marshal(InstanceInfo{
-		ID:            c.id,
-		URL:           c.url,
-		Hostname:      os.Getenv("HOSTNAME"),
-		Region:        c.region,
-		StartedAt:     now.UnixMilli(),
-		LastHeartbeat: now.UnixMilli(),
-		Status:        "active",
+		ID:              c.id,
+		URL:             c.url,
+		Hostname:        os.Getenv("HOSTNAME"),
+		Region:          c.region,
+		StartedAt:       now.UnixMilli(),
+		LastHeartbeat:   now.UnixMilli(),
+		Status:          "active",
+		ActiveTaskCount: activeCount,
 	})
 	if err != nil {
 		return err
@@ -206,32 +210,27 @@ func (c *Coordinator) readLock(ctx context.Context, name string) (v *LockValue, 
 }
 
 // deleteCorruptedLock 删掉解析不了的锁。
-//
-// 为什么要删:锁值损坏时,没有人能证明当前持有者是谁 —— 保守做法
-// (等它过期)会让服务停摆到 TTL 结束(90 秒),而 TTL 每次续租还会重置,
-// 在持续续租的场景下等于永久卡死。
 func (c *Coordinator) deleteCorruptedLock(ctx context.Context, name string) error {
 	return c.redis.Del(ctx, c.lockKey(name)).Err()
 }
 
 // setLockIfNotExists 原子抢占:SET NX。
-func (c *Coordinator) setLockIfNotExists(ctx context.Context, name string, lv *LockValue) (bool, error) {
+func (c *Coordinator) setLockIfNotExists(ctx context.Context, name string, lv *LockValue, ttl time.Duration) (bool, error) {
 	payload, err := json.Marshal(lv)
 	if err != nil {
 		return false, err
 	}
-	// TTL 用秒 —— 与 JS 侧一致。这里最容易踩「毫秒当秒」的坑。
-	ok, err := c.redis.SetNX(ctx, c.lockKey(name), payload, TelegramLockTTL).Result()
+	if ttl <= 0 {
+		ttl = TelegramLockTTL
+	}
+	ok, err := c.redis.SetNX(ctx, c.lockKey(name), payload, ttl).Result()
 	return ok, err
 }
 
 // setLockIfEquals CAS 续租:只有锁值还是 ours 时才覆盖。
-//
-// 这个比较是整个锁协议的核心:它保证「只有持有者能续租」,
-// 否则两个实例会互相把对方的锁抢走。
-func (c *Coordinator) setLockIfEquals(ctx context.Context, name string, next, current *LockValue) (bool, error) {
+func (c *Coordinator) setLockIfEquals(ctx context.Context, name string, next, current *LockValue, ttl time.Duration) (bool, error) {
 	if current == nil {
-		return c.setLockIfNotExists(ctx, name, next)
+		return c.setLockIfNotExists(ctx, name, next, ttl)
 	}
 	curPayload, err := json.Marshal(current)
 	if err != nil {
@@ -240,6 +239,9 @@ func (c *Coordinator) setLockIfEquals(ctx context.Context, name string, next, cu
 	nextPayload, err := json.Marshal(next)
 	if err != nil {
 		return false, err
+	}
+	if ttl <= 0 {
+		ttl = TelegramLockTTL
 	}
 	// Lua 保证「比较 + 写入」原子。分开做的话,两个续租会同时通过比较。
 	const lua = `
@@ -251,7 +253,7 @@ end
 return 0
 `
 	res, err := c.redis.Eval(ctx, lua, []string{c.lockKey(name)},
-		string(curPayload), string(nextPayload), int(TelegramLockTTL.Seconds())).Int()
+		string(curPayload), string(nextPayload), int(ttl.Seconds())).Int()
 	if err != nil {
 		return false, err
 	}
@@ -262,7 +264,7 @@ return 0
 //
 // leaseId 复用上一份锁的值 —— 这是 Node 的行为,改了会导致 Node 的
 // 续租 CAS 永远不命中,两边互相认为对方持锁。
-func (c *Coordinator) newLockValue(prev *LockValue) *LockValue {
+func (c *Coordinator) newLockValue(prev *LockValue, ttl time.Duration) *LockValue {
 	leaseID := ""
 	if prev != nil && prev.InstanceID == c.id && prev.LeaseID != "" {
 		leaseID = prev.LeaseID
@@ -270,10 +272,13 @@ func (c *Coordinator) newLockValue(prev *LockValue) *LockValue {
 	if leaseID == "" {
 		leaseID = fmt.Sprintf("%s:%d:%s", c.id, c.now().UnixMilli(), randomID())
 	}
+	if ttl <= 0 {
+		ttl = TelegramLockTTL
+	}
 	return &LockValue{
 		InstanceID: c.id,
 		AcquiredAt: c.now().UnixMilli(),
-		TTL:        int64(TelegramLockTTL.Seconds()),
+		TTL:        int64(ttl.Seconds()),
 		LeaseID:    leaseID,
 	}
 }
@@ -293,10 +298,6 @@ func (c *Coordinator) ownerAlive(ctx context.Context, instanceID string) bool {
 }
 
 // ActiveInstances 列出当前活跃的实例 —— /diagnosis 的「多实例状态」段。
-//
-// 判活跃靠 lastHeartbeat 新鲜度而不是 key 是否存在:键的 TTL 是
-// instanceTimeout 的两倍,心跳断了之后还会多活 45 秒。拿「键在」
-// 当「实例活着」会把一个已经下线的实例算进诊断报告里。
 func (c *Coordinator) ActiveInstances(ctx context.Context) ([]InstanceInfo, error) {
 	if c.redis == nil {
 		return nil, fmt.Errorf("instance: 未配置 Redis")
@@ -328,13 +329,71 @@ func (c *Coordinator) ActiveInstances(ctx context.Context) ([]InstanceInfo, erro
 	}
 }
 
+// IsClusterLeader 按照字典序最小原则选举集群管理 Leader（对齐 JS 端 watchInstances 实现）。
+func (c *Coordinator) IsClusterLeader(ctx context.Context) (bool, error) {
+	actives, err := c.ActiveInstances(ctx)
+	if err != nil {
+		return false, err
+	}
+	if len(actives) == 0 {
+		return true, nil
+	}
+	leaderID := actives[0].ID
+	for _, inst := range actives {
+		if inst.ID < leaderID {
+			leaderID = inst.ID
+		}
+	}
+	return leaderID == c.id, nil
+}
+
+// CleanupExpiredInstances 清理已失效或过期的实例心跳键，防止 Redis 中残留僵尸实例（对齐 JS 端 cleanupExpiredInstances）。
+func (c *Coordinator) CleanupExpiredInstances(ctx context.Context, maxAge time.Duration) (int, error) {
+	if c.redis == nil {
+		return 0, fmt.Errorf("instance: 未配置 Redis")
+	}
+	if maxAge <= 0 {
+		maxAge = instanceTimeout * 2
+	}
+	var cursor uint64
+	cleaned := 0
+	for {
+		keys, next, err := c.redis.Scan(ctx, cursor, instancePrefix+"*", 100).Result()
+		if err != nil {
+			return cleaned, err
+		}
+		for _, key := range keys {
+			raw, err := c.redis.Get(ctx, key).Bytes()
+			if err != nil {
+				continue
+			}
+			var info InstanceInfo
+			if err := json.Unmarshal(raw, &info); err != nil {
+				_ = c.redis.Del(ctx, key).Err()
+				cleaned++
+				continue
+			}
+			age := time.Duration(c.now().UnixMilli()-info.LastHeartbeat) * time.Millisecond
+			if age > maxAge {
+				_ = c.redis.Del(ctx, key).Err()
+				cleaned++
+			}
+		}
+		if next == 0 {
+			break
+		}
+		cursor = next
+	}
+	return cleaned, nil
+}
+
 // AcquireTelegramLock 尝试拿到 telegram_client 锁。
 //
 // 语义与 JS 侧 _tryAcquire 一致:
 //   - 锁不存在 → SET NX
 //   - 锁被别人持有且持有者活跃 → 失败
 //   - 锁被别人持有但持有者已下线 → CAS 抢占
-//   - 锁是自己��� → CAS 续租
+//   - 锁是自己持有 → CAS 续租
 func (c *Coordinator) AcquireTelegramLock(ctx context.Context) (bool, error) {
 	if c.redis == nil {
 		return false, fmt.Errorf("instance: 未配置 Redis")
@@ -352,7 +411,7 @@ func (c *Coordinator) AcquireTelegramLock(ctx context.Context) (bool, error) {
 	}
 
 	if missing {
-		return c.setLockIfNotExists(ctx, TelegramLockKey, c.newLockValue(nil))
+		return c.setLockIfNotExists(ctx, TelegramLockKey, c.newLockValue(nil, TelegramLockTTL), TelegramLockTTL)
 	}
 
 	// 别人持有且仍然有效
@@ -365,7 +424,19 @@ func (c *Coordinator) AcquireTelegramLock(ctx context.Context) (bool, error) {
 			"holder", current.InstanceID)
 	}
 
-	return c.setLockIfEquals(ctx, TelegramLockKey, c.newLockValue(current), current)
+	return c.setLockIfEquals(ctx, TelegramLockKey, c.newLockValue(current, TelegramLockTTL), current, TelegramLockTTL)
+}
+
+// GetTelegramLockHolder 获取当前 telegram_client 锁的持有者 instanceId。
+func (c *Coordinator) GetTelegramLockHolder(ctx context.Context) (string, error) {
+	current, missing, _, err := c.readLock(ctx, TelegramLockKey)
+	if err != nil {
+		return "", err
+	}
+	if missing || current == nil {
+		return "", nil
+	}
+	return current.InstanceID, nil
 }
 
 // HasTelegramLock 报告本实例是否持锁。
@@ -378,8 +449,6 @@ func (c *Coordinator) HasTelegramLock(ctx context.Context) (bool, error) {
 }
 
 // RenewTelegramLock 续租。返回是否仍然持有。
-//
-// 返回 false 时调用方必须停手 —— 锁被别人拿走了,继续处理会双实例并发。
 func (c *Coordinator) RenewTelegramLock(ctx context.Context) (bool, error) {
 	has, err := c.HasTelegramLock(ctx)
 	if err != nil || !has {
@@ -389,17 +458,32 @@ func (c *Coordinator) RenewTelegramLock(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return c.setLockIfEquals(ctx, TelegramLockKey, c.newLockValue(current), current)
+	return c.setLockIfEquals(ctx, TelegramLockKey, c.newLockValue(current, TelegramLockTTL), current, TelegramLockTTL)
+}
+
+// ReleaseTelegramLock 主动释放 telegram_client 锁（CAS 原子释放）。
+// 仅当锁持有者是当前实例时才执行删除，避免误删他人锁。
+func (c *Coordinator) ReleaseTelegramLock(ctx context.Context) error {
+	if c.redis == nil {
+		return nil
+	}
+	const lua = `
+local raw = redis.call('GET', KEYS[1])
+if not raw then
+  return 1
+end
+local data = cjson.decode(raw)
+if data and data.instanceId == ARGV[1] then
+  redis.call('DEL', KEYS[1])
+  return 1
+end
+return 0
+`
+	return c.redis.Eval(ctx, lua, []string{c.lockKey(TelegramLockKey)}, c.id).Err()
 }
 
 // RunLockHeartbeat 周期续租直到失去锁或 ctx 结束。
-//
-// 失去锁时返回 error —— 调用方必须断开 Telegram 客户端。这是「切流量」
-// 的触发点:LB 下一��请求就打到新主人了。
 func (c *Coordinator) RunLockHeartbeat(ctx context.Context) error {
-	// 这里的 `defer ticker.Stop()` 是【对的】,别照 Register 的教训改它:
-	// 本函数阻塞在这个循环里,defer 只在真正退出时才执行。
-	// Register 之所以出过 bug,是因为它非阻塞 —— 一 return defer 就跑了。
 	ticker := time.NewTicker(lockRenewEvery)
 	defer ticker.Stop()
 	for {
@@ -413,11 +497,123 @@ func (c *Coordinator) RunLockHeartbeat(ctx context.Context) error {
 				continue
 			}
 			if !held {
-				return fmt.Errorf("instance: 已失去 telegram_client 锁(被 %s 接管)", c.id)
+				holder, _ := c.GetTelegramLockHolder(ctx)
+				if holder == "" {
+					holder = "未知实例"
+				}
+				return fmt.Errorf("instance: 已失去 telegram_client 锁(被 %s 接管)", holder)
 			}
 			c.log.Debug("锁续租成功", "instance", c.id)
 		}
 	}
+}
+
+// ============================================================================
+// 通用分布式锁（对齐 JS 端 DistributedLock 与 InstanceCoordinator.acquireLock）
+// ============================================================================
+
+// AcquireLock 获取通用分布式锁。
+// 返回生成的 leaseID，若已被其他活跃实例持有则返回 acquired=false。
+func (c *Coordinator) AcquireLock(ctx context.Context, key string, ttl time.Duration) (string, bool, error) {
+	if c.redis == nil {
+		return "", false, fmt.Errorf("instance: 未配置 Redis")
+	}
+	if ttl <= 0 {
+		ttl = TelegramLockTTL
+	}
+	current, missing, corrupted, err := c.readLock(ctx, key)
+	if err != nil {
+		return "", false, err
+	}
+	if corrupted {
+		_ = c.deleteCorruptedLock(ctx, key)
+		missing = true
+	}
+
+	leaseID := fmt.Sprintf("%s:%d:%s", c.id, c.now().UnixMilli(), randomID())
+	lv := &LockValue{
+		InstanceID: c.id,
+		AcquiredAt: c.now().UnixMilli(),
+		TTL:        int64(ttl.Seconds()),
+		LeaseID:    leaseID,
+	}
+
+	if missing {
+		ok, err := c.setLockIfNotExists(ctx, key, lv, ttl)
+		if err != nil || !ok {
+			return "", false, err
+		}
+		return leaseID, true, nil
+	}
+
+	// 检查现有锁
+	age := time.Duration(c.now().UnixMilli() - current.AcquiredAt)
+	if current.InstanceID != c.id && age < time.Duration(current.TTL)*time.Second {
+		if c.ownerAlive(ctx, current.InstanceID) {
+			return "", false, nil
+		}
+		c.log.Info("通用锁持有者已下线，尝试抢占", "key", key, "holder", current.InstanceID)
+	}
+
+	ok, err := c.setLockIfEquals(ctx, key, lv, current, ttl)
+	if err != nil || !ok {
+		return "", false, err
+	}
+	return leaseID, true, nil
+}
+
+// RenewLock 续期分布式锁。
+func (c *Coordinator) RenewLock(ctx context.Context, key string, leaseID string, ttl time.Duration) (bool, error) {
+	if c.redis == nil {
+		return false, fmt.Errorf("instance: 未配置 Redis")
+	}
+	if ttl <= 0 {
+		ttl = TelegramLockTTL
+	}
+	current, missing, _, err := c.readLock(ctx, key)
+	if err != nil || missing || current == nil {
+		return false, err
+	}
+	if current.InstanceID != c.id || (leaseID != "" && current.LeaseID != leaseID) {
+		return false, nil
+	}
+	next := &LockValue{
+		InstanceID: c.id,
+		AcquiredAt: c.now().UnixMilli(),
+		TTL:        int64(ttl.Seconds()),
+		LeaseID:    current.LeaseID,
+	}
+	return c.setLockIfEquals(ctx, key, next, current, ttl)
+}
+
+// ReleaseLock 释放通用分布式锁（CAS 原子释放）。
+func (c *Coordinator) ReleaseLock(ctx context.Context, key string, leaseID string) error {
+	if c.redis == nil {
+		return nil
+	}
+	const lua = `
+local raw = redis.call('GET', KEYS[1])
+if not raw then return 1 end
+local data = cjson.decode(raw)
+if data and data.instanceId == ARGV[1] then
+  if not ARGV[2] or ARGV[2] == '' or data.leaseId == ARGV[2] then
+    redis.call('DEL', KEYS[1])
+    return 1
+  end
+end
+return 0
+`
+	return c.redis.Eval(ctx, lua, []string{c.lockKey(key)}, c.id, leaseID).Err()
+}
+
+// AcquireTaskLock 获取任务分布式锁，防止多实例并发处理同一任务（对齐 JS 端 acquireTaskLock）。
+func (c *Coordinator) AcquireTaskLock(ctx context.Context, taskID string, ttl time.Duration) (string, bool, error) {
+	return c.AcquireLock(ctx, "task:"+taskID, ttl)
+}
+
+// ReleaseTaskLock 释放任务分布式锁（对齐 JS 端 releaseTaskLock）。
+func (c *Coordinator) ReleaseTaskLock(ctx context.Context, taskID string, leaseID string) error {
+	return c.ReleaseLock(ctx, "task:"+taskID, leaseID)
 }
 
 func randomID() string {

@@ -215,6 +215,25 @@ func (a *App) enqueue(ctx context.Context, taskID string) {
 func (a *App) processTask(ctx context.Context, taskID string) {
 	started := time.Now()
 
+	// 尝试获取任务分布式锁，防止多实例或故障转移期间并发处理同一任务（对齐 JS 端 acquireTaskLock）
+	var taskLeaseID string
+	if a.cfg.Coord != nil {
+		leaseID, acquired, err := a.cfg.Coord.AcquireTaskLock(ctx, taskID, 120*time.Second)
+		if err != nil {
+			a.log.Warn("获取任务分布式锁失败", "taskId", taskID, "err", err)
+		} else if !acquired {
+			a.log.Info("任务正由其他实例处理中，跳过本地执行", "taskId", taskID)
+			return
+		} else {
+			taskLeaseID = leaseID
+			defer func() {
+				releaseCtx, cancelRel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer cancelRel()
+				_ = a.cfg.Coord.ReleaseTaskLock(releaseCtx, taskID, taskLeaseID)
+			}()
+		}
+	}
+
 	// 每个任务一条独立的可取消 ctx,并登记进账本。
 	//
 	// ctx 一取消,底下的 rclone Runner 会通过 cmd.Cancel 杀掉整个进程组
@@ -245,6 +264,9 @@ func (a *App) processTask(ctx context.Context, taskID string) {
 				touchCtx, cancelTouch := context.WithTimeout(heartbeatCtx, 5*time.Second)
 				if err := a.touchTask(touchCtx, taskID); err != nil {
 					a.log.Debug("任务心跳刷新失败", "taskId", taskID, "err", err)
+				}
+				if a.cfg.Coord != nil && taskLeaseID != "" {
+					_, _ = a.cfg.Coord.RenewLock(touchCtx, "task:"+taskID, taskLeaseID, 120*time.Second)
 				}
 				cancelTouch()
 			}

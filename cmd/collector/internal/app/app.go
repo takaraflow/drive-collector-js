@@ -62,6 +62,9 @@ type Config struct {
 	// EnableStreamPipe 开启零磁盘直传管道（边下边传），失败时自动降级到落盘重试。
 	EnableStreamPipe bool
 
+	// StandbyMode 开启热备选举等待：未抢到 Telegram 锁时不硬失败退出，而是保持在线等待接管。
+	StandbyMode bool
+
 	// StorageGuard 是存储容量守卫配置。
 	StorageGuard storageguard.Config
 
@@ -298,6 +301,16 @@ func New(cfg Config) (*App, error) {
 			Sessions: a,
 		})
 	}
+
+	// 注册活跃任务计数回调给 Coordinator，让 Redis 心跳实时上报负载指标（对齐 JS 端 activeTaskCount）
+	if cfg.Coord != nil {
+		cfg.Coord.RegisterActiveTaskCounter(func() int {
+			a.runningMu.Lock()
+			defer a.runningMu.Unlock()
+			return len(a.running)
+		})
+	}
+
 	return a, nil
 }
 
@@ -332,12 +345,52 @@ func (a *App) Run(ctx context.Context) error {
 		return fmt.Errorf("app: 抢 telegram_client 锁失败: %w", err)
 	}
 	if !held {
-		// 别人还持着锁。这不是错误 —— 是「现在不该我处理」。
-		// 硬失败比安静等待好:调用方(容器编排)会看到明确的退出原因,
-		// 而不是服务「活着但什么都不做」。
-		return fmt.Errorf("app: telegram_client 锁被 %s 持有,本实例不接管",
-			a.cfg.Coord.ID())
+		holder, _ := a.cfg.Coord.GetTelegramLockHolder(ctx)
+		if holder == "" {
+			holder = "未知实例"
+		}
+		if !a.cfg.StandbyMode {
+			return fmt.Errorf("app: telegram_client 锁被 %s 持有,本实例不接管", holder)
+		}
+
+		a.log.Info("telegram_client 锁被占用,进入 Standby 备用热备模式等待接管...",
+			"holder", holder, "instance", a.cfg.Coord.ID())
+
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+
+		acquired := false
+		for !acquired {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-ticker.C:
+				var aerr error
+				acquired, aerr = a.cfg.Coord.AcquireTelegramLock(ctx)
+				if aerr != nil {
+					a.log.Warn("Standby 轮询争抢锁失败", "err", aerr)
+					continue
+				}
+				if !acquired {
+					a.log.Debug("Standby 持续等待中,锁仍被占用...")
+				}
+			}
+		}
+		a.log.Info("Standby 节点成功接管 telegram_client 锁,晋升为活跃 Leader!",
+			"instance", a.cfg.Coord.ID())
 	}
+
+	// 退出时优雅释放 telegram_client 锁，让集群其他 standby 节点或新部署能立刻接管
+	defer func() {
+		releaseCtx, cancelRelease := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancelRelease()
+		if err := a.cfg.Coord.ReleaseTelegramLock(releaseCtx); err != nil {
+			a.log.Warn("释放 telegram_client 锁失败", "err", err)
+		} else {
+			a.log.Info("已主动释放 telegram_client 锁", "instance", a.cfg.Coord.ID())
+		}
+	}()
+
 	a.log.Info("已持有 telegram_client 锁,开始接管",
 		"instance", a.cfg.Coord.ID(), "ttl", "90s")
 
@@ -401,6 +454,16 @@ func (a *App) recoverLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			a.recoverOnStart(ctx)
+
+			// 若本实例为集群 Leader，定期清理已过期的残留僵尸实例键
+			if a.cfg.Coord != nil {
+				isLeader, err := a.cfg.Coord.IsClusterLeader(ctx)
+				if err == nil && isLeader {
+					if cleaned, cerr := a.cfg.Coord.CleanupExpiredInstances(ctx, 90*time.Second); cerr == nil && cleaned > 0 {
+						a.log.Info("已清理过期僵尸实例", "cleaned", cleaned)
+					}
+				}
+			}
 		}
 	}
 }
