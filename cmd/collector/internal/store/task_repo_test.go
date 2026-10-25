@@ -157,6 +157,10 @@ const oneRow = `{"success":true,"result":[{"success":true,"results":[` +
 	`{"id":"t1","user_id":"u1","status":"queued","file_size":0,` +
 	`"created_at":100,"updated_at":100,"source_type":"telegram_media"}]}]}`
 
+const oneRowDownloading = `{"success":true,"result":[{"success":true,"results":[` +
+	`{"id":"t1","user_id":"u1","status":"downloading","file_size":0,` +
+	`"created_at":100,"updated_at":100,"source_type":"telegram_media","claimed_by":"worker-1","claim_lease_id":"lease-1"}]}]}`
+
 const noRows = `{"success":true,"result":[{"success":true,"results":[]}]}`
 
 const oneWritten = `{"success":true,"result":[{"success":true,"results":[],` +
@@ -453,5 +457,83 @@ func TestTouchTaskUpdatesTimestamp(t *testing.T) {
 	}
 	if len(req.Params) != 2 || req.Params[1] != "task-123" {
 		t.Errorf("Touch 参数不符合预期: %v", req.Params)
+	}
+}
+
+func TestClaimTaskWritesInstanceAndLease(t *testing.T) {
+	f := &fakeD1{responder: func(req capturedReq) string {
+		if strings.HasPrefix(req.SQL, "SELECT") {
+			return oneRow // status queued
+		}
+		return oneWritten
+	}}
+	r := newTestRepo(t, f)
+
+	ok, err := r.ClaimTask(context.Background(), "t1", "worker-node-1", "lease-abc-123")
+	if err != nil {
+		t.Fatalf("ClaimTask error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected ClaimTask to succeed")
+	}
+
+	req := f.last()
+	if !strings.Contains(req.SQL, "claimed_by = ?") || !strings.Contains(req.SQL, "claim_lease_id = ?") {
+		t.Fatalf("claim SQL missing claim fields: %s", req.SQL)
+	}
+}
+
+func TestTouchLeaseFencesWorkerAndLease(t *testing.T) {
+	f := &fakeD1{responder: func(capturedReq) string { return oneWritten }}
+	r := newTestRepo(t, f)
+
+	if err := r.TouchLease(context.Background(), "t1", "worker-1", "lease-1"); err != nil {
+		t.Fatalf("TouchLease error: %v", err)
+	}
+
+	req := f.last()
+	if !strings.Contains(req.SQL, "WHERE id = ? AND claimed_by = ? AND claim_lease_id = ?") {
+		t.Fatalf("TouchLease SQL missing lease fence: %s", req.SQL)
+	}
+}
+
+func TestReleaseTaskResetsToQueued(t *testing.T) {
+	f := &fakeD1{responder: func(capturedReq) string { return oneWritten }}
+	r := newTestRepo(t, f)
+
+	if err := r.ReleaseTask(context.Background(), "t1", "worker-1", "lease-1"); err != nil {
+		t.Fatalf("ReleaseTask error: %v", err)
+	}
+
+	req := f.last()
+	if !strings.Contains(req.SQL, "claimed_by = NULL, claim_lease_id = NULL") || !strings.Contains(req.SQL, "status =") {
+		t.Fatalf("ReleaseTask SQL incorrect: %s", req.SQL)
+	}
+}
+
+func TestTransitionWithRequireClaimFencing(t *testing.T) {
+	f := &fakeD1{responder: func(req capturedReq) string {
+		if strings.HasPrefix(req.SQL, "SELECT") {
+			return oneRowDownloading // status downloading
+		}
+		return oneWritten
+	}}
+	r := newTestRepo(t, f)
+
+	res, err := r.TransitionWithOptions(context.Background(), "t1", contract.EventFinishDownload, nil, TransitionOptions{
+		ClaimedBy:    "worker-1",
+		ClaimLeaseID: "lease-1",
+		RequireClaim: true,
+	})
+	if err != nil {
+		t.Fatalf("Transition error: %v", err)
+	}
+	if !res.Changed {
+		t.Fatalf("expected transition to succeed: %+v", res)
+	}
+
+	req := f.last()
+	if !strings.Contains(req.SQL, "WHERE id = ? AND status = ? AND claimed_by = ? AND claim_lease_id = ?") {
+		t.Fatalf("SQL missing fence: %s", req.SQL)
 	}
 }

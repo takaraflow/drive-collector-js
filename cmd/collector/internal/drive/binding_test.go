@@ -210,3 +210,147 @@ func TestMain(m *testing.M) {
 
 // 编译期保证 fake 实现满足接口。
 var _ ProtonRuntime = (*fakeProtonRuntime)(nil)
+
+func TestWebDAVBindingFlow(t *testing.T) {
+	ctx := context.Background()
+	data := map[string]string{}
+
+	// 1. URL 格式不合法
+	r := HandleWebDAVStep(ctx, nil, WebDAVStepURL, "ftp://invalid-url", data)
+	if r.Success || r.NextStep != "" {
+		t.Fatalf("bad url should be rejected: %+v", r)
+	}
+
+	// 2. 正确 URL
+	r = HandleWebDAVStep(ctx, nil, WebDAVStepURL, " https://dav.example.com/ ", data)
+	if !r.Success || r.NextStep != WebDAVStepUser || r.Data["url"] != "https://dav.example.com/" {
+		t.Fatalf("valid url should advance: %+v", r)
+	}
+	merge(data, r.Data)
+
+	// 3. 用户名
+	r = HandleWebDAVStep(ctx, nil, WebDAVStepUser, " admin ", data)
+	if !r.Success || r.NextStep != WebDAVStepPass || r.Data["user"] != "admin" {
+		t.Fatalf("valid user should advance: %+v", r)
+	}
+	merge(data, r.Data)
+
+	// 4. 密码
+	r = HandleWebDAVStep(ctx, nil, WebDAVStepPass, " secret ", data)
+	if !r.Success || r.NextStep != "" || r.Config == nil {
+		t.Fatalf("valid pass should complete: %+v", r)
+	}
+	if r.Config.URL != "https://dav.example.com/" || r.Config.User != "admin" || r.Config.Pass != "secret" {
+		t.Fatalf("mismatched config: %+v", r.Config)
+	}
+	if r.DriveName != "WebDAV-admin" {
+		t.Errorf("drive name mismatch: %s", r.DriveName)
+	}
+}
+
+func TestOSSBindingFlow(t *testing.T) {
+	ctx := context.Background()
+	data := map[string]string{}
+
+	// 1. Endpoint
+	r := HandleOSSStep(ctx, nil, OSSStepEndpoint, " oss-cn-hangzhou.aliyuncs.com ", data)
+	if !r.Success || r.NextStep != OSSStepBucket || r.Data["endpoint"] != "https://oss-cn-hangzhou.aliyuncs.com" {
+		t.Fatalf("endpoint should prepend https: %+v", r)
+	}
+	merge(data, r.Data)
+
+	// 2. Bucket
+	r = HandleOSSStep(ctx, nil, OSSStepBucket, " my-bucket ", data)
+	if !r.Success || r.NextStep != OSSStepAK || r.Data["bucket"] != "my-bucket" {
+		t.Fatalf("valid bucket should advance: %+v", r)
+	}
+	merge(data, r.Data)
+
+	// 3. AK
+	r = HandleOSSStep(ctx, nil, OSSStepAK, " ak123 ", data)
+	if !r.Success || r.NextStep != OSSStepSK || r.Data["ak"] != "ak123" {
+		t.Fatalf("valid ak should advance: %+v", r)
+	}
+	merge(data, r.Data)
+
+	// 4. SK
+	r = HandleOSSStep(ctx, nil, OSSStepSK, " sk456 ", data)
+	if !r.Success || r.NextStep != "" || r.Config == nil {
+		t.Fatalf("valid sk should complete: %+v", r)
+	}
+	if r.Config.Endpoint != "https://oss-cn-hangzhou.aliyuncs.com" || r.Config.Bucket != "my-bucket" || r.Config.AK != "ak123" || r.Config.SK != "sk456" {
+		t.Fatalf("mismatched config: %+v", r.Config)
+	}
+	if r.DriveName != "OSS-my-bucket" {
+		t.Errorf("drive name mismatch: %s", r.DriveName)
+	}
+}
+
+func TestPikPakBindingFlow(t *testing.T) {
+	ctx := context.Background()
+	data := map[string]string{}
+
+	// 1. 输入用户名
+	res := HandlePikPakStep(ctx, nil, PikPakStepUser, "pikpak_test_user@example.com", data)
+	if !res.Success || res.NextStep != PikPakStepPass {
+		t.Fatalf("User step 失败: %+v", res)
+	}
+	merge(data, res.Data)
+
+	// 2. 输入密码
+	res = HandlePikPakStep(ctx, nil, PikPakStepPass, "MyPikPakPassword123", data)
+	if !res.Success || res.Config == nil {
+		t.Fatalf("Pass step 失败: %+v", res)
+	}
+	if res.Config.User != "pikpak_test_user@example.com" {
+		t.Errorf("Config.User 不匹配: %s", res.Config.User)
+	}
+	if res.Config.Pass != "MyPikPakPassword123" {
+		t.Errorf("Config.Pass 不匹配: %s", res.Config.Pass)
+	}
+}
+
+type fakeMockFilenClient struct {
+	key    string
+	req2FA bool
+	err    error
+}
+
+func (f *fakeMockFilenClient) Login(ctx context.Context, email, password, twoFactorCode string) (string, bool, error) {
+	if f.req2FA && twoFactorCode == "" {
+		return "", true, nil
+	}
+	return f.key, false, f.err
+}
+
+func TestFilenBindingFlow(t *testing.T) {
+	ctx := context.Background()
+	data := map[string]string{}
+	fc := &fakeMockFilenClient{key: "generated_filen_key_999", req2FA: true}
+
+	// 1. 输入邮箱
+	res := HandleFilenStep(ctx, nil, fc, FilenStepEmail, "user@filen.io", data)
+	if !res.Success || res.NextStep != FilenStepPass {
+		t.Fatalf("Email step 失败: %+v", res)
+	}
+	merge(data, res.Data)
+
+	// 2. 输入密码 (触发 2FA)
+	res = HandleFilenStep(ctx, nil, fc, FilenStepPass, "Password123", data)
+	if !res.Success || res.NextStep != FilenStep2FA {
+		t.Fatalf("Pass step 应该进入 2FA: %+v", res)
+	}
+	merge(data, res.Data)
+
+	// 3. 输入 2FA 动态码
+	res = HandleFilenStep(ctx, nil, fc, FilenStep2FA, "654321", data)
+	if !res.Success || res.Config == nil {
+		t.Fatalf("2FA step 应该成功: %+v", res)
+	}
+	if res.Config.APIKey != "generated_filen_key_999" {
+		t.Errorf("Config.APIKey 不匹配: %s", res.Config.APIKey)
+	}
+	if res.Config.User != "user@filen.io" {
+		t.Errorf("Config.User 不匹配: %s", res.Config.User)
+	}
+}

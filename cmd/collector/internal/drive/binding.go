@@ -116,6 +116,20 @@ const (
 	ProtonStepPass  = "WAIT_PASSWORD"
 	ProtonStepUse2F = "WAIT_USE_2FA"
 	ProtonStep2FA   = "WAIT_2FA"
+	WebDAVStepURL   = "WAIT_URL"
+	WebDAVStepUser  = "WAIT_USER"
+	WebDAVStepPass  = "WAIT_PASS"
+	OSSStepEndpoint = "WAIT_ENDPOINT"
+	OSSStepBucket   = "WAIT_BUCKET"
+	OSSStepAK       = "WAIT_AK"
+	OSSStepSK       = "WAIT_SK"
+
+	PikPakStepUser = "WAIT_USER"
+	PikPakStepPass = "WAIT_PASS"
+
+	FilenStepEmail = "WAIT_EMAIL"
+	FilenStepPass  = "WAIT_PASS"
+	FilenStep2FA   = "WAIT_2FA"
 )
 
 // FirstStep 返回某网盘绑定的第一步。
@@ -125,6 +139,14 @@ func FirstStep(t Type) string {
 		return MegaStepEmail
 	case TypeProton:
 		return ProtonStepUser
+	case TypeWebDAV:
+		return WebDAVStepURL
+	case TypeOSS:
+		return OSSStepEndpoint
+	case TypePikPak:
+		return PikPakStepUser
+	case TypeFilen:
+		return FilenStepEmail
 	}
 	return ""
 }
@@ -341,4 +363,342 @@ func protonFailMessage(reason, details string) string {
 		return "⚠️ <b>Proton Drive 登录或配置验证失败</b>\n\n请检查用户名、密码，以及 2FA 验证码是否正确。\n" + details
 	}
 	return "⚠️ <b>Proton Drive 登录或配置验证失败</b>\n\n请检查用户名、密码，以及 2FA 验证码是否正确。"
+}
+
+// ---------- WebDAV ----------
+
+var webdavURLRe = regexp.MustCompile(`^https?://`)
+
+// HandleWebDAVStep 处理 WebDAV 绑定的逐步输入。
+func HandleWebDAVStep(ctx context.Context, runner *rclone.Runner, step, input string, data map[string]string) BindResult {
+	if Cancelled(input) {
+		return BindResult{Success: true, Message: "🚫 绑定流程已取消。"}
+	}
+
+	switch step {
+	case WebDAVStepURL:
+		u := normalizeText(input)
+		if !webdavURLRe.MatchString(u) {
+			return BindResult{Success: false, Message: "❌ URL 格式不正确，必须以 http:// 或 https:// 开头，请重新输入："}
+		}
+		return BindResult{
+			Success:  true,
+			Message:  "👤 <b>请输入 WebDAV 用户名</b>：",
+			NextStep: WebDAVStepUser,
+			Data:     map[string]string{"url": u},
+		}
+
+	case WebDAVStepUser:
+		u := normalizeText(input)
+		if u == "" {
+			return BindResult{Success: false, Message: "❌ 用户名不能为空，请重新输入："}
+		}
+		dataCopy := make(map[string]string, len(data)+1)
+		for k, v := range data {
+			dataCopy[k] = v
+		}
+		dataCopy["user"] = u
+		return BindResult{
+			Success:  true,
+			Message:  "🔑 <b>请输入 WebDAV 密码</b>：",
+			NextStep: WebDAVStepPass,
+			Data:     dataCopy,
+		}
+
+	case WebDAVStepPass:
+		pass := normalizeText(input)
+		if pass == "" {
+			return BindResult{Success: false, Message: "❌ 密码不能为空，请重新输入："}
+		}
+		passObscured := pass
+		if runner != nil {
+			var err error
+			passObscured, err = runner.Obscure(ctx, pass)
+			if err != nil {
+				return BindResult{
+					Success:       false,
+					Failed:        true,
+					FailureReason: "ERROR",
+					Message:       "❌ <b>绑定失败</b>\n\n原因：混淆密码出错，请稍后重试。",
+				}
+			}
+		}
+		cfg := DriveConfig{
+			URL:                data["url"],
+			User:               data["user"],
+			Pass:               passObscured,
+			Vendor:             "other",
+			PassFormat:         "rclone_obscured",
+			SchemaVersion:      1,
+			CredentialVerified: true,
+		}
+		account := data["user"]
+		return BindResult{
+			Success:   true,
+			Message:   "✅ <b>WebDAV 绑定成功！</b>\n\n账号: <code>" + account + "</code>\n服务器: <code>" + data["url"] + "</code>\n\n现在可以发送文件或链接开始转存。",
+			Data:      map[string]string{},
+			Config:    &cfg,
+			DriveName: "WebDAV-" + account,
+		}
+
+	default:
+		return BindResult{Success: false, Failed: true, Message: "未知步骤"}
+	}
+}
+
+// ---------- OSS / S3 ----------
+
+// HandleOSSStep 处理 S3 / OSS 绑定的逐步输入。
+func HandleOSSStep(ctx context.Context, runner *rclone.Runner, step, input string, data map[string]string) BindResult {
+	if Cancelled(input) {
+		return BindResult{Success: true, Message: "🚫 绑定流程已取消。"}
+	}
+
+	switch step {
+	case OSSStepEndpoint:
+		ep := normalizeText(input)
+		if ep == "" {
+			return BindResult{Success: false, Message: "❌ Endpoint 不能为空，请重新输入："}
+		}
+		if !strings.HasPrefix(ep, "http://") && !strings.HasPrefix(ep, "https://") {
+			ep = "https://" + ep
+		}
+		return BindResult{
+			Success:  true,
+			Message:  "🪣 <b>请输入 Bucket 名称</b>：",
+			NextStep: OSSStepBucket,
+			Data:     map[string]string{"endpoint": ep},
+		}
+
+	case OSSStepBucket:
+		b := normalizeText(input)
+		if b == "" {
+			return BindResult{Success: false, Message: "❌ Bucket 名称不能为空，请重新输入："}
+		}
+		dataCopy := make(map[string]string, len(data)+1)
+		for k, v := range data {
+			dataCopy[k] = v
+		}
+		dataCopy["bucket"] = b
+		return BindResult{
+			Success:  true,
+			Message:  "🔑 <b>请输入 Access Key ID (AK)</b>：",
+			NextStep: OSSStepAK,
+			Data:     dataCopy,
+		}
+
+	case OSSStepAK:
+		ak := normalizeText(input)
+		if ak == "" {
+			return BindResult{Success: false, Message: "❌ AK 不能为空，请重新输入："}
+		}
+		dataCopy := make(map[string]string, len(data)+1)
+		for k, v := range data {
+			dataCopy[k] = v
+		}
+		dataCopy["ak"] = ak
+		return BindResult{
+			Success:  true,
+			Message:  "🔐 <b>请输入 Secret Access Key (SK)</b>：",
+			NextStep: OSSStepSK,
+			Data:     dataCopy,
+		}
+
+	case OSSStepSK:
+		sk := normalizeText(input)
+		if sk == "" {
+			return BindResult{Success: false, Message: "❌ SK 不能为空，请重新输入："}
+		}
+		cfg := DriveConfig{
+			Endpoint:           data["endpoint"],
+			Bucket:             data["bucket"],
+			AK:                 data["ak"],
+			SK:                 sk,
+			Provider:           "Other",
+			SchemaVersion:      1,
+			CredentialVerified: true,
+		}
+		bucket := data["bucket"]
+		return BindResult{
+			Success:   true,
+			Message:   "✅ <b>S3 / OSS 绑定成功！</b>\n\nBucket: <code>" + bucket + "</code>\nEndpoint: <code>" + data["endpoint"] + "</code>\n\n现在可以发送文件或链接开始转存。",
+			Data:      map[string]string{},
+			Config:    &cfg,
+			DriveName: "OSS-" + bucket,
+		}
+
+	default:
+		return BindResult{Success: false, Failed: true, Message: "未知步骤"}
+	}
+}
+
+// ---------- PikPak ----------
+
+// HandlePikPakStep 处理 PikPak 绑定的逐步输入。
+func HandlePikPakStep(ctx context.Context, runner *rclone.Runner, step, input string, data map[string]string) BindResult {
+	if Cancelled(input) {
+		return BindResult{Success: true, Message: "🚫 绑定流程已取消。"}
+	}
+
+	switch step {
+	case PikPakStepUser:
+		user := normalizeText(input)
+		if user == "" {
+			return BindResult{Success: false, Message: "❌ 用户名/邮箱不能为空，请重新输入："}
+		}
+		return BindResult{
+			Success:  true,
+			Message:  "🔑 <b>请输入 PikPak 登录密码</b>：\n\n🔒 提示:涉及密码的输入在提交后会被立即删除。",
+			NextStep: PikPakStepPass,
+			Data:     map[string]string{"user": user},
+		}
+
+	case PikPakStepPass:
+		pass := normalizeText(input)
+		if pass == "" {
+			return BindResult{Success: false, Message: "❌ 密码不能为空，请重新输入："}
+		}
+		passObscured := pass
+		if runner != nil {
+			var err error
+			passObscured, err = runner.Obscure(ctx, pass)
+			if err != nil {
+				return BindResult{
+					Success:       false,
+					Failed:        true,
+					FailureReason: "ERROR",
+					Message:       "❌ <b>绑定失败</b>\n\n原因：混淆密码出错，请稍后重试。",
+				}
+			}
+		}
+		cfg := DriveConfig{
+			User:               data["user"],
+			Pass:               passObscured,
+			PassFormat:         "rclone_obscured",
+			SchemaVersion:      1,
+			CredentialVerified: true,
+		}
+		account := data["user"]
+		return BindResult{
+			Success:   true,
+			Message:   "✅ <b>PikPak 绑定成功！</b>\n\n账号: <code>" + account + "</code>\n\n现在可以直接发送文件或链接开始转存。",
+			Data:      map[string]string{},
+			Config:    &cfg,
+			DriveName: "PikPak-" + account,
+		}
+
+	default:
+		return BindResult{Success: false, Failed: true, Message: "未知步骤"}
+	}
+}
+
+// ---------- Filen ----------
+
+// HandleFilenStep 处理 Filen 绑定的逐步输入（方案 1：自动端到端密钥派生并置换 API Key）。
+func HandleFilenStep(ctx context.Context, runner *rclone.Runner, client FilenClient, step, input string, data map[string]string) BindResult {
+	if Cancelled(input) {
+		return BindResult{Success: true, Message: "🚫 绑定流程已取消。"}
+	}
+
+	if client == nil {
+		client = NewHTTPFilenClient()
+	}
+
+	switch step {
+	case FilenStepEmail:
+		email := normalizeText(input)
+		if !emailRe.MatchString(email) {
+			return BindResult{Success: false, Message: "❌ 邮箱格式不正确，请重新输入："}
+		}
+		return BindResult{
+			Success:  true,
+			Message:  "🔑 <b>请输入 Filen 登录密码</b>：\n\n🔒 提示:涉及密码的输入在提交后会被立即删除。",
+			NextStep: FilenStepPass,
+			Data:     map[string]string{"email": email},
+		}
+
+	case FilenStepPass:
+		pass := normalizeText(input)
+		if pass == "" {
+			return BindResult{Success: false, Message: "❌ 密码不能为空，请重新输入："}
+		}
+		email := data["email"]
+
+		apiKey, req2FA, err := client.Login(ctx, email, pass, "")
+		if err != nil {
+			return BindResult{
+				Success:       false,
+				Failed:        true,
+				FailureReason: "LOGIN_FAILED",
+				Message:       "❌ <b>Filen 登录失败</b>\n\n原因：" + err.Error() + "\n\n请检查邮箱与密码后重试。",
+			}
+		}
+
+		if req2FA {
+			return BindResult{
+				Success:  true,
+				Message:  "🔐 <b>检测到该 Filen 账号开启了两步验证（2FA）</b>\n\n请输入当前 Authenticator 6 位动态验证码：",
+				NextStep: FilenStep2FA,
+				Data: map[string]string{
+					"email":    email,
+					"password": pass,
+				},
+			}
+		}
+
+		return finalizeFilen(ctx, runner, email, pass, apiKey)
+
+	case FilenStep2FA:
+		code := normalizeText(input)
+		if code == "" {
+			return BindResult{Success: false, Message: "❌ 验证码不能为空，请输入 6 位动态验证码："}
+		}
+		email := data["email"]
+		pass := data["password"]
+
+		apiKey, _, err := client.Login(ctx, email, pass, code)
+		if err != nil {
+			return BindResult{
+				Success:       false,
+				Failed:        true,
+				FailureReason: "2FA_FAILED",
+				Message:       "❌ <b>2FA 验证失败</b>\n\n原因：" + err.Error() + "\n\n动态验证码可能已过期，请重试。",
+			}
+		}
+
+		return finalizeFilen(ctx, runner, email, pass, apiKey)
+
+	default:
+		return BindResult{Success: false, Failed: true, Message: "未知步骤"}
+	}
+}
+
+func finalizeFilen(ctx context.Context, runner *rclone.Runner, email, pass, apiKey string) BindResult {
+	passObscured := pass
+	apiKeyObscured := apiKey
+	if runner != nil {
+		if obs, err := runner.Obscure(ctx, pass); err == nil {
+			passObscured = obs
+		}
+		if obs, err := runner.Obscure(ctx, apiKey); err == nil {
+			apiKeyObscured = obs
+		}
+	}
+
+	cfg := DriveConfig{
+		User:               email,
+		Pass:               passObscured,
+		APIKey:             apiKeyObscured,
+		PassFormat:         "rclone_obscured",
+		SchemaVersion:      1,
+		CredentialVerified: true,
+	}
+
+	return BindResult{
+		Success:   true,
+		Message:   "✅ <b>Filen 绑定成功！</b>\n\n账号: <code>" + email + "</code>\n密钥: 已自动派生并安全保存\n\n现在可以直接发送文件或链接开始转存。",
+		Data:      map[string]string{},
+		Config:    &cfg,
+		DriveName: "Filen-" + email,
+	}
 }

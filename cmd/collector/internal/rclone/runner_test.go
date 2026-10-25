@@ -457,3 +457,24 @@ func TestListFilesFailsOnOtherError(t *testing.T) {
 		t.Errorf("错误详情丢了 stderr 原文: %v", err)
 	}
 }
+
+// TestRunStreamAndRcat 验证 RunStream 与 Rcat 能正确将 stdin 字节流重定向给子进程。
+func TestRunStreamAndRcat(t *testing.T) {
+	outPath := filepath.Join(t.TempDir(), "stream_output")
+	bin := fakeRclone(t, `cat > `+outPath)
+
+	r := quietRunner(bin)
+	data := "hello zero-disk streaming"
+	err := r.Rcat(context.Background(), Config{Connection: ":test:"}, "test.txt", strings.NewReader(data), nil)
+	if err != nil {
+		t.Fatalf("Rcat failed: %v", err)
+	}
+
+	got, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("read failed: %v", err)
+	}
+	if string(got) != data {
+		t.Errorf("expected %q, got %q", data, string(got))
+	}
+}

@@ -16,6 +16,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -33,6 +34,8 @@ import (
 	"github.com/youngsx/drive-collector/cmd/collector/internal/drive"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/instance"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/rclone"
+	"github.com/youngsx/drive-collector/cmd/collector/internal/streampipe"
+	"github.com/youngsx/drive-collector/cmd/collector/internal/storageguard"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/store"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/task"
 	tgclient "github.com/youngsx/drive-collector/cmd/collector/internal/telegram"
@@ -55,6 +58,12 @@ type Config struct {
 	// DownloadDir 是下载落盘目录。必须有空间 —— 上传失败回退到
 	// 本地暂存时依赖它(见 config 的 DIRECT_TRANSFER_FALLBACK_TO_LOCAL)。
 	DownloadDir string
+
+	// EnableStreamPipe 开启零磁盘直传管道（边下边传），失败时自动降级到落盘重试。
+	EnableStreamPipe bool
+
+	// StorageGuard 是存储容量守卫配置。
+	StorageGuard storageguard.Config
 
 	// RemoteBase 是网盘上的基础路径。
 	RemoteBase string
@@ -90,6 +99,8 @@ type App struct {
 	// downloader 默认可用 tg;测试注入假实现。
 	// 单独一个字段是因为 download 要用假实现测,而 tg 是具体类型。
 	downloader Downloader
+	// storage 是本地存储容量守卫。
+	storage StorageGuard
 	// fetcher 是 flushMediaGroup 回源取消息的能力。
 	//
 	// 同样是因为 tg 是具体类型没法注入:媒体组缓冲只存 id,内容一律
@@ -126,8 +137,9 @@ type App struct {
 	notices NoticeSender
 	// 绑定向导的依赖。bindSessions 为 nil 时绑定流程整体禁用
 	// (handleBindInput 直接放行消息,不当成向导输入)。
-	bindSessions *bindingsession.Store
+	bindSessions BindingSessionStore
 	bindRuntime  drive.ProtonRuntime
+	filenClient  drive.FilenClient
 	// rcloneRunner 是绑定向导验证凭据用的执行器(rclone 的另一个引用)。
 	rcloneRunner *rclone.Runner
 	// d1 是绑定向导写 drives 表用的;为 nil 时绑定写入禁用。
@@ -197,6 +209,12 @@ func New(cfg Config) (*App, error) {
 		cfg.DownloadDir = DefaultDownloadDir
 	}
 
+	if env := os.Getenv("ENABLE_STREAM_PIPE"); env != "" {
+		cfg.EnableStreamPipe = env == "true" || env == "1"
+	} else if !cfg.EnableStreamPipe {
+		cfg.EnableStreamPipe = true
+	}
+
 	runner := rclone.NewRunner()
 	// Auth 为 nil 是允许的(没装配权限层就没有角色概念),所以 ownerID
 	// 要单独取 —— 直接 cfg.Auth.OwnerID() 会在 nil 上炸,炸的还是构造期。
@@ -207,6 +225,7 @@ func New(cfg Config) (*App, error) {
 	a := &App{
 		locks:          drive.NewSessionLock(),
 		rclone:         runner,
+		storage:        storageguard.New(cfg.StorageGuard),
 		repo:           cfg.Repo,
 		drives:         cfg.Drives,
 		admin:          cfg.Repo,
@@ -226,6 +245,7 @@ func New(cfg Config) (*App, error) {
 		a.d1c = cfg.D1
 		drive.SetObscureRunner(a.rcloneRunner)
 		a.bindRuntime = newProtonRuntime(a.rcloneRunner)
+		a.filenClient = drive.NewHTTPFilenClient()
 	}
 
 	// task.Manager 只负责「该不该处理」和状态推进,具体怎么做由这里注入。
@@ -390,6 +410,7 @@ func (a *App) recoverLoop(ctx context.Context) {
 // 两个都是「重启后会静默消失」的东西:
 //   - 媒体组:定时器全在内存里,进程一死组就卡在缓冲里不刷
 //   - 僵尸任务:停在 downloading/uploading,用户永远等不到结果
+//
 // sweepOrphanedDownloads 清理下载目录中的历史残留临时文件（如进程异常重启遗留的 .dl-* 或超过 1 小时的孤儿文件）。
 //
 // 守卫规则：
@@ -695,8 +716,18 @@ func (a *App) handleDriveCommand(ctx context.Context, msg messageInfo) error {
 	}
 
 	buttons := [][]tgclient.Button{
-		{{Text: "🟢 Mega", Data: "drive_bind_mega"}},
-		{{Text: "🛡️ Proton Drive", Data: "drive_bind_protondrive"}},
+		{
+			{Text: "🟢 Mega", Data: "drive_bind_mega"},
+			{Text: "🛡️ Proton Drive", Data: "drive_bind_protondrive"},
+		},
+		{
+			{Text: "🌐 WebDAV", Data: "drive_bind_webdav"},
+			{Text: "📦 S3 / OSS", Data: "drive_bind_oss"},
+		},
+		{
+			{Text: "⚡ PikPak", Data: "drive_bind_pikpak"},
+			{Text: "🔒 Filen", Data: "drive_bind_filen"},
+		},
 	}
 	for i := range drives {
 		d := &drives[i]
@@ -1000,6 +1031,13 @@ func (a *App) download(ctx context.Context, t store.Task) error {
 		return fmt.Errorf("任务 %s 没有源引用", t.ID)
 	}
 
+	// 容量预检: 下载落盘前先检查挂载点空间是否足够，防止写满容器磁盘
+	if a.storage != nil {
+		if err := a.storage.AssertCapacity(a.cfg.DownloadDir, t.FileSize, fmt.Sprintf("task %s", t.ID)); err != nil {
+			return fmt.Errorf("存储容量检查不通过: %w", err)
+		}
+	}
+
 	if t.SourceType == "external_url" {
 		return a.downloadExternal(ctx, t)
 	}
@@ -1185,4 +1223,91 @@ func (a *App) buildRuntime(ctx context.Context, d *drive.Drive) (rclone.Config, 
 		return a.drives.UpdateConfigData(context.WithoutCancel(ctx), d.ID, d.UserID, next)
 	}
 	return rclone.Config{Runtime: rt, Timeout: 6 * time.Hour}, harvest, nil
+}
+
+// streamTransfer 执行零磁盘直传管道（Telegram 流式下载 -> streampipe.Pipe -> Rclone Rcat 网盘写入）。
+// 包含 SpeedWatchdog 速率巡检和停滞保护。
+func (a *App) streamTransfer(ctx context.Context, t store.Task) error {
+	if !t.FileName.Valid {
+		return fmt.Errorf("任务 %s 没有文件名", t.ID)
+	}
+	if a.downloader == nil || a.rclone == nil {
+		return fmt.Errorf("下载器或网盘传输器未就绪")
+	}
+
+	if !t.SourceRef.Valid || t.SourceRef.String == "" {
+		return fmt.Errorf("任务 %s 没有源引用", t.ID)
+	}
+	chatID, msgID, accessHash, err := ParseSourceRefFull(t.SourceRef.String)
+	if err != nil {
+		return fmt.Errorf("任务 %s 的 sourceRef 无法解析: %w", t.ID, err)
+	}
+	if accessHash != 0 {
+		if chID, isChannel := tgclient.ParseChannelID(chatID); isChannel {
+			if peerHolder, ok := a.downloader.(interface{ StoreChannelPeer(int64, int64) }); ok {
+				peerHolder.StoreChannelPeer(chID, accessHash)
+			}
+		}
+	}
+
+	d, err := a.drives.DefaultDrive(ctx, t.UserID)
+	if err != nil {
+		return fmt.Errorf("查询用户 %s 的网盘失败: %w", t.UserID, err)
+	}
+	if d == nil {
+		return fmt.Errorf("用户 %s 没有绑定网盘", t.UserID)
+	}
+
+	remoteBase := d.RemotePath(a.cfg.RemoteBase)
+	remote := path.Join(remoteBase, t.FileName.String)
+
+	key := drive.Key(drive.Type(d.Type), t.UserID)
+	return a.locks.WithSession(ctx, key, func() error {
+		cfg, harvest, err := a.buildRuntime(ctx, d)
+		if err != nil {
+			return err
+		}
+		if cfg.Runtime != nil {
+			defer cfg.Runtime.Dispose()
+		}
+		if harvest != nil {
+			defer func() {
+				if err := harvest(); err != nil {
+					a.log.Error("收获 session 失败", "taskId", t.ID, "err", err)
+				}
+			}()
+		}
+
+		if err := a.rclone.Mkdir(ctx, cfg, remoteBase); err != nil {
+			return fmt.Errorf("创建远端目录失败: %w", err)
+		}
+
+		producer := func(w io.Writer) error {
+			return a.downloader.DownloadStream(ctx, chatID, msgID, w, nil)
+		}
+
+		consumer := func(r io.Reader) error {
+			return a.rclone.Rcat(ctx, cfg, remote, r, nil)
+		}
+
+		opts := streampipe.PipeOptions{
+			Watchdog: streampipe.WatchdogOptions{
+				IdleTimeout:   30 * time.Second,
+				CheckInterval: 1 * time.Second,
+			},
+		}
+
+		stats, err := streampipe.Pipe(ctx, producer, consumer, opts)
+		if err != nil {
+			return err
+		}
+
+		a.log.Info("零磁盘管道直传成功",
+			"taskId", t.ID,
+			"bytes", stats.TotalBytes,
+			"avgSpeedBps", stats.AverageSpeedBps,
+			"elapsed", stats.Elapsed.String(),
+		)
+		return nil
+	})
 }

@@ -13,8 +13,8 @@ import (
 )
 
 var (
-	tweetIDRegex      = regexp.MustCompile(`(?i)(?:twitter|x|fxtwitter|vxtwitter|fixupx)\.com/(?:#!/)?(?:[\w.-]+/)?status(?:es)?/(\d+)`)
-	fxTwitterBaseURL  = "https://api.fxtwitter.com"
+	tweetIDRegex       = regexp.MustCompile(`(?i)(?:twitter|x|fxtwitter|vxtwitter|fixupx)\.com/(?:#!/)?(?:[\w.-]+/)?status(?:es)?/(\d+)`)
+	fxTwitterBaseURL   = "https://api.fxtwitter.com"
 	syndicationBaseURL = "https://cdn.syndication.twimg.com"
 )
 

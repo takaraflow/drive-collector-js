@@ -211,3 +211,92 @@ func TestUnmarshalRealD1Config(t *testing.T) {
 func sqlNullString(s string) sql.NullString {
 	return sql.NullString{String: s, Valid: s != ""}
 }
+
+func TestWebDAVConnectionString(t *testing.T) {
+	d := &Drive{
+		Type: "webdav",
+		Config: DriveConfig{
+			URL:  "https://dav.jianguoyun.com/dav/",
+			User: "alice@example.com",
+			Pass: "obscured_pass",
+		},
+	}
+	got, err := ToConnectionString(d)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	wantPrefix := ":webdav,url=\"https://dav.jianguoyun.com/dav/\",user=\"alice@example.com\",pass=\"obscured_pass\",vendor=\"other\":"
+	if got != wantPrefix {
+		t.Errorf("got %q, want %q", got, wantPrefix)
+	}
+}
+
+func TestOSSConnectionString(t *testing.T) {
+	d := &Drive{
+		Type: "oss",
+		Config: DriveConfig{
+			Endpoint: "https://oss-cn-hangzhou.aliyuncs.com",
+			Bucket:   "my-backup-bucket",
+			AK:       "LTAI5txxxxxxxxxxxx",
+			SK:       "SecRetKey1234567890",
+		},
+	}
+	got, err := ToConnectionString(d)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := ":s3,provider=\"Other\",endpoint=\"https://oss-cn-hangzhou.aliyuncs.com\",access_key_id=\"LTAI5txxxxxxxxxxxx\",secret_access_key=\"SecRetKey1234567890\":my-backup-bucket"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestPikPakConnectionString(t *testing.T) {
+	d := &Drive{
+		Type: "pikpak",
+		Config: DriveConfig{
+			User: "pikpak_user@example.com",
+			Pass: "PikPakSecret#2026",
+		},
+	}
+	got, err := ToConnectionString(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(got, ":pikpak,") {
+		t.Errorf("缺少 :pikpak, 前缀: %q", got)
+	}
+	if !strings.Contains(got, `user="pikpak_user@example.com"`) {
+		t.Errorf("缺少 user 字段: %q", got)
+	}
+	if !strings.Contains(got, `pass="PikPakSecret#2026"`) {
+		t.Errorf("缺少 pass 字段: %q", got)
+	}
+}
+
+func TestFilenConnectionString(t *testing.T) {
+	d := &Drive{
+		Type: "filen",
+		Config: DriveConfig{
+			User:   "filen_user@example.com",
+			Pass:   "FilenSecret#2026",
+			APIKey: "filen_api_key_sample_token",
+		},
+	}
+	got, err := ToConnectionString(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(got, ":filen,") {
+		t.Errorf("缺少 :filen, 前缀: %q", got)
+	}
+	if !strings.Contains(got, `email="filen_user@example.com"`) {
+		t.Errorf("缺少 email 字段: %q", got)
+	}
+	if !strings.Contains(got, `password="FilenSecret#2026"`) {
+		t.Errorf("缺少 password 字段: %q", got)
+	}
+	if !strings.Contains(got, `api_key="filen_api_key_sample_token"`) {
+		t.Errorf("缺少 api_key 字段: %q", got)
+	}
+}

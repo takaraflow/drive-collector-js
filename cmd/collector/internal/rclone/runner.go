@@ -109,7 +109,17 @@ type ProgressFunc func(ratio float64, bytesDone, bytesTotal int64)
 //
 // 超时和取消都由 ctx 控制,进程组会被一并杀掉 —— 只杀父进程会
 // 留下孤儿 rclone 继续占着网络和磁盘。
+// Run 执行一次 rclone 操作，返回解析后的日志条目。
 func (r *Runner) Run(ctx context.Context, cfg Config, args []string, progress ProgressFunc) ([]LogEntry, error) {
+	return r.runWithStdin(ctx, cfg, args, nil, progress)
+}
+
+// RunStream 执行带 stdin 输入流的 rclone 操作（零磁盘直传管道）。
+func (r *Runner) RunStream(ctx context.Context, cfg Config, args []string, stdin io.Reader, progress ProgressFunc) ([]LogEntry, error) {
+	return r.runWithStdin(ctx, cfg, args, stdin, progress)
+}
+
+func (r *Runner) runWithStdin(ctx context.Context, cfg Config, args []string, stdin io.Reader, progress ProgressFunc) ([]LogEntry, error) {
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = 15 * time.Minute
 	}
@@ -120,6 +130,9 @@ func (r *Runner) Run(ctx context.Context, cfg Config, args []string, progress Pr
 
 	cmd := exec.CommandContext(runCtx, r.Binary, full...)
 	cmd.Env = r.Env
+	if stdin != nil {
+		cmd.Stdin = stdin
+	}
 	// 自己的进程组 —— 超时时连同子进程一起清理。
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
@@ -485,4 +498,10 @@ func (r *Runner) Obscure(ctx context.Context, password string) (string, error) {
 		return "", fmt.Errorf("rclone: obscure 返回了空密码")
 	}
 	return obscured, nil
+}
+
+// Rcat 将 stdin 流实时写入 remotePath (零磁盘落地直传)。
+func (r *Runner) Rcat(ctx context.Context, cfg Config, remotePath string, stdin io.Reader, progress ProgressFunc) error {
+	_, err := r.RunStream(ctx, cfg, []string{"rcat", cfg.target(remotePath)}, stdin, progress)
+	return err
 }

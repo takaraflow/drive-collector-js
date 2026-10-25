@@ -2,6 +2,7 @@ package telegram
 
 import (
 	"context"
+	"io"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,6 +26,50 @@ type ProgressFunc func(ratio float64)
 // 取回而不是直接下载,是因为 gotd 没有「给个 message id 就能下」
 // 的快捷 API —— location 必须从 media 对象里解析,而 update 里的
 // Message 在很多路径上被标记为已消费(不能重放),所以必须重新取。
+// DownloadStream 把 chatID 里的 msgID 媒体以实时流写入目标 writer（零磁盘落盘直传）。
+func (c *Client) DownloadStream(ctx context.Context, chatID, msgID int64, w io.Writer, progress ProgressFunc) error {
+	msg, err := c.fetchMessage(ctx, chatID, msgID)
+	if err != nil {
+		return err
+	}
+
+	media, ok := msg.GetMedia()
+	if !ok || media == nil {
+		return fmt.Errorf("telegram: 消息 %d 没有媒体,无法下载", msgID)
+	}
+	loc, err := locationOf(media)
+	if err != nil {
+		return err
+	}
+
+	idleCtx, cancelIdle := context.WithCancel(ctx)
+	defer cancelIdle()
+
+	idleTimer := time.AfterFunc(DownloadIdleTimeout, func() {
+		cancelIdle()
+	})
+	defer idleTimer.Stop()
+
+	resetIdle := func() {
+		idleTimer.Reset(DownloadIdleTimeout)
+	}
+
+	writer := &progressWriter{
+		w:          w,
+		total:      loc.TotalSize,
+		progress:   progress,
+		onActivity: resetIdle,
+	}
+	builder := c.tg.Downloader().Download(c.tg.API(), loc.Location)
+	if _, err := builder.Stream(idleCtx, writer); err != nil {
+		if idleCtx.Err() != nil && ctx.Err() == nil {
+			return fmt.Errorf("telegram: 流式下载空闲超时(超过 %v 无数据传输)", DownloadIdleTimeout)
+		}
+		return fmt.Errorf("telegram: 流式下载失败: %w", err)
+	}
+	return nil
+}
+
 func (c *Client) DownloadTo(ctx context.Context, chatID, msgID int64, destPath string, progress ProgressFunc) error {
 	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
 		return fmt.Errorf("telegram: 创建下载目录失败: %w", err)
@@ -234,7 +279,7 @@ func locationOf(m tg.MessageMediaClass) (file, error) {
 // 刻意用 bufio 包一层再写 —— 直接 Write 会让每个分片都触发一次
 // 系统调用,大文件下 syscall 数量会成为瓶颈。
 type progressWriter struct {
-	w          *os.File
+	w          io.Writer
 	total      int64
 	written    int64
 	progress   ProgressFunc

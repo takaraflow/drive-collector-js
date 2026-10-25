@@ -39,12 +39,14 @@ import (
 
 	"github.com/youngsx/drive-collector/cmd/collector/internal/app"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/auth"
+	"github.com/youngsx/drive-collector/cmd/collector/internal/axiom"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/d1"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/edge"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/instance"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/leader"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/qstash"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/redisenv"
+	"github.com/youngsx/drive-collector/cmd/collector/internal/schema"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/store"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/tgsession"
 )
@@ -57,7 +59,26 @@ func main() {
 		return
 	}
 
-	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel()}))
+	if len(os.Args) > 1 && (os.Args[1] == "db" || os.Args[1] == "migrate" || os.Args[1] == "schema") {
+		runDatabaseCommand(os.Args[1:])
+		return
+	}
+
+	stdoutHandler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel()})
+	var rootHandler slog.Handler = stdoutHandler
+
+	if axiomToken := os.Getenv("AXIOM_TOKEN"); axiomToken != "" {
+		axiomHandler := axiom.NewHandler(axiom.Config{
+			Token:      axiomToken,
+			OrgID:      os.Getenv("AXIOM_ORG_ID"),
+			Dataset:    os.Getenv("AXIOM_DATASET"),
+			InstanceID: os.Getenv("INSTANCE_ID"),
+		}, stdoutHandler)
+		defer axiomHandler.Close()
+		rootHandler = axiomHandler
+	}
+
+	log := slog.New(rootHandler)
 
 	mode := os.Getenv("RUN_MODE")
 	if mode == "" {
@@ -207,6 +228,16 @@ func runWorker(log *slog.Logger) error {
 		return fmt.Errorf("D1 配置不完整: %w", err)
 	}
 
+	// 启动前验证 D1 数据库是否处于最新版本，防止旧 Schema 运行导致脏数据或异常
+	schemaStatus, err := schema.GetStatus(ctx, db)
+	if err != nil {
+		log.Warn("获取数据库 Schema 状态失败", "err", err)
+	} else if !schemaStatus.IsCurrent {
+		return fmt.Errorf("数据库 Schema 不是最新版本: %s (请先执行 collector db migrate)", schema.FormatStatus(schemaStatus))
+	} else {
+		log.Info("数据库 Schema 校验通过", "version", schemaStatus.CurrentVersion)
+	}
+
 	// 实例 ID / 公网 URL 决定 LB 把 webhook 转发到哪 ——
 	// 这就是「Go 接管」的机制:抢到锁并注册,LB 自动改指向,无需改 LB 配置。
 	publicURL := os.Getenv("APP_EXTERNAL_URL")
@@ -319,4 +350,80 @@ func serveHealth(ctx context.Context, log *slog.Logger) {
 		defer cancel()
 		_ = srv.Shutdown(shutdownCtx)
 	}()
+}
+
+func runDatabaseCommand(args []string) {
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	ctx, cancel := signalCtx()
+	defer cancel()
+
+	subcmd := "status"
+	if len(args) > 1 && !strings.HasPrefix(args[1], "-") {
+		subcmd = args[1]
+	}
+
+	dryRun := false
+	noLock := false
+	for _, a := range args {
+		if a == "--dry-run" {
+			dryRun = true
+		}
+		if a == "--no-lock" {
+			noLock = true
+		}
+	}
+
+	db, err := d1.New(d1.Config{
+		AccountID:  os.Getenv("CLOUDFLARE_D1_ACCOUNT_ID"),
+		DatabaseID: os.Getenv("CLOUDFLARE_D1_DATABASE_ID"),
+		Token:      os.Getenv("CLOUDFLARE_D1_TOKEN"),
+		Log:        log,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "D1 configuration error: %v\n", err)
+		os.Exit(1)
+	}
+
+	switch subcmd {
+	case "status":
+		status, err := schema.GetStatus(ctx, db)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to get schema status: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(schema.FormatStatus(status))
+		if !status.IsCurrent {
+			os.Exit(1)
+		}
+	case "check":
+		status, err := schema.AssertCurrent(ctx, db)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(schema.FormatStatus(status))
+	case "migrate":
+		res, err := schema.Migrate(ctx, db, schema.MigrateOptions{
+			DryRun:  dryRun,
+			UseLock: !noLock,
+			Log:     log,
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Migration failed: %v\n", err)
+			os.Exit(1)
+		}
+		for _, step := range res.Results {
+			duration := ""
+			if step.ExecutionTimeMs > 0 {
+				duration = fmt.Sprintf(" (%dms)", step.ExecutionTimeMs)
+			}
+			fmt.Printf("- %d:%s %s%s\n", step.Version, step.Name, step.Action, duration)
+		}
+		if res.Status != nil {
+			fmt.Println(schema.FormatStatus(res.Status))
+		}
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown db command %q. Usage: collector db [status|check|migrate [--dry-run] [--no-lock]]\n", subcmd)
+		os.Exit(1)
+	}
 }

@@ -23,10 +23,16 @@ type Type string
 const (
 	TypeMega   Type = "mega"
 	TypeProton Type = "protondrive"
+	TypeWebDAV Type = "webdav"
+	TypeOSS    Type = "oss"
+	TypePikPak Type = "pikpak"
+	TypeFilen  Type = "filen"
 )
 
 // Supported 列出当前实现的网盘。
-func Supported() []Type { return []Type{TypeMega, TypeProton} }
+func Supported() []Type {
+	return []Type{TypeMega, TypeProton, TypeWebDAV, TypeOSS, TypePikPak, TypeFilen}
+}
 
 // IsSupported 报告该类型是否已实现。
 //
@@ -53,6 +59,20 @@ type Config struct {
 
 	// PassFormat 标记密码是否已经 rclone obscure 过。
 	PassFormat string
+
+	// WebDAV
+	URL    string
+	Vendor string
+
+	// OSS / S3
+	Endpoint string
+	Bucket   string
+	AK       string
+	SK       string
+	Provider string
+
+	// Filen
+	APIKey string
 }
 
 // ProtonSession 是 Proton 的可复用会话。
@@ -88,6 +108,14 @@ func ConnectionString(t Type, cfg Config) (string, error) {
 		return withUserPass(t, cfg)
 	case TypeProton:
 		return protonConn(cfg)
+	case TypeWebDAV:
+		return webdavConn(cfg)
+	case TypeOSS:
+		return ossConn(cfg)
+	case TypePikPak:
+		return pikpakConn(cfg)
+	case TypeFilen:
+		return filenConn(cfg)
 	default:
 		return "", fmt.Errorf("drive: %q 尚未实现(占位,后续补)", t)
 	}
@@ -137,4 +165,51 @@ func escapeValue(v string) string {
 	v = strings.ReplaceAll(v, `\`, `\\`)
 	v = strings.ReplaceAll(v, `"`, `\"`)
 	return v
+}
+
+func webdavConn(cfg Config) (string, error) {
+	if cfg.URL == "" || cfg.User == "" || cfg.Pass == "" {
+		return "", fmt.Errorf("drive: webdav 缺少 URL、用户名或密码")
+	}
+	vendor := cfg.Vendor
+	if vendor == "" {
+		vendor = "other"
+	}
+	return fmt.Sprintf(":%s,url=%q,user=%q,pass=%q,vendor=%q:",
+		TypeWebDAV, escapeValue(cfg.URL), escapeValue(cfg.User), escapeValue(cfg.Pass), escapeValue(vendor)), nil
+}
+
+func ossConn(cfg Config) (string, error) {
+	if cfg.Endpoint == "" || cfg.Bucket == "" || cfg.AK == "" || cfg.SK == "" {
+		return "", fmt.Errorf("drive: oss 缺少 endpoint、bucket、AK 或 SK")
+	}
+	provider := cfg.Provider
+	if provider == "" {
+		provider = "Other"
+	}
+	return fmt.Sprintf(":s3,provider=%q,endpoint=%q,access_key_id=%q,secret_access_key=%q:%s",
+		escapeValue(provider), escapeValue(cfg.Endpoint), escapeValue(cfg.AK), escapeValue(cfg.SK), cfg.Bucket), nil
+}
+
+func pikpakConn(c Config) (string, error) {
+	if c.User == "" || c.Pass == "" {
+		return "", fmt.Errorf("drive: pikpak 缺少用户名或密码")
+	}
+	parts := []string{
+		fmt.Sprintf("user=%q", escapeValue(c.User)),
+		fmt.Sprintf("pass=%q", escapeValue(c.Pass)),
+	}
+	return fmt.Sprintf(":pikpak,%s:", strings.Join(parts, ",")), nil
+}
+
+func filenConn(c Config) (string, error) {
+	if c.User == "" || c.Pass == "" || c.APIKey == "" {
+		return "", fmt.Errorf("drive: filen 缺少邮箱、密码或 API Key")
+	}
+	parts := []string{
+		fmt.Sprintf("email=%q", escapeValue(c.User)),
+		fmt.Sprintf("password=%q", escapeValue(c.Pass)),
+		fmt.Sprintf("api_key=%q", escapeValue(c.APIKey)),
+	}
+	return fmt.Sprintf(":filen,%s:", strings.Join(parts, ",")), nil
 }

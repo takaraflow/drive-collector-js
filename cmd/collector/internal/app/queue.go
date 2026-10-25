@@ -264,7 +264,32 @@ func (a *App) processTask(ctx context.Context, taskID string) {
 
 	isGroup := t != nil && t.GroupedID.Valid && t.GroupedID.Int64 > 0
 
-	// 下载。被状态机挡住(用户已取消 / 已在处理中)不是错误,直接停手。
+	// 1. 尝试零磁盘管道直传（如果开启且为 Telegram 任务）
+	if a.cfg.EnableStreamPipe && t != nil && (t.SourceType == "" || t.SourceType == "telegram") {
+		claim, terr := a.repo.Transition(ctx, taskID, contract.EventStartDownload, nil)
+		if terr == nil && !claim.Blocked {
+			if isGroup {
+				a.refreshGroupMonitor(ctx, t, string(contract.StatusDownloading), nil)
+			} else {
+				a.notify(ctx, t, noticeDownloading, busy)
+			}
+			streamErr := a.streamTransfer(ctx, *t)
+			if streamErr == nil {
+				_, _ = a.repo.Transition(ctx, taskID, contract.EventFinishDownload, nil)
+				_, _ = a.repo.Transition(ctx, taskID, contract.EventStartUpload, nil)
+				_, _ = a.repo.Transition(ctx, taskID, contract.EventComplete, nil)
+				a.log.Info("任务转存完成(零磁盘管道直传)", "taskId", taskID, "耗时", time.Since(started).Round(time.Millisecond).String())
+				a.notifyOutcome(ctx, taskID, true)
+				return
+			}
+			// 直传失败或熔断，记录警告并平滑回退到标准落盘模式
+			a.log.Warn("零磁盘管道直传失败，降级至标准本地磁盘分段传输", "taskId", taskID, "err", streamErr)
+			resetMsg := fmt.Sprintf("stream fallback: %v", streamErr)
+			_, _ = a.repo.Transition(ctx, taskID, contract.EventResetStalled, &resetMsg)
+		}
+	}
+
+	// 2. 标准落盘下载。被状态机挡住(用户已取消 / 已在处理中)不是错误,直接停手。
 	if isGroup {
 		a.refreshGroupMonitor(ctx, t, string(contract.StatusDownloading), nil)
 	} else {

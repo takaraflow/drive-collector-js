@@ -9,14 +9,13 @@ import (
 	"time"
 )
 
-func TestSupportedOnlyMegaAndProton(t *testing.T) {
-	// 精简规格:只保留实测可用的两家。其余是占位。
-	for _, tp := range []Type{TypeMega, TypeProton} {
+func TestSupportedDrives(t *testing.T) {
+	for _, tp := range []Type{TypeMega, TypeProton, TypeWebDAV, TypeOSS, TypePikPak, TypeFilen} {
 		if !IsSupported(tp) {
 			t.Errorf("%s 应被支持", tp)
 		}
 	}
-	for _, tp := range []Type{"box", "dropbox", "gdrive", "onedrive", "webdav", "pikpak"} {
+	for _, tp := range []Type{"box", "dropbox", "gdrive", "onedrive", "baidupan"} {
 		if IsSupported(tp) {
 			t.Errorf("%s 是占位,不该被报为支持", tp)
 		}
