@@ -44,12 +44,12 @@ type Handler struct {
 	ch            chan LogEvent
 	client        *http.Client
 	done          chan struct{}
-	wg            sync.WaitGroup
+	wg            *sync.WaitGroup
 	prefixedAttrs []prefixedAttr
 	currentGroups []string
-	suspended     atomic.Int64 // UnixMilli: 熔断退避截止时间
-	dropCount     atomic.Uint64
-	closed        atomic.Bool
+	suspended     *atomic.Int64 // UnixMilli: 熔断退避截止时间
+	dropCount     *atomic.Uint64
+	closed        *atomic.Bool
 }
 
 // NewHandler 创建 Axiom slog 处理器。如果传入了 next，则所有日志依然同步流经 next（如 stdout）。
@@ -78,11 +78,15 @@ func NewHandler(cfg Config, next slog.Handler) *Handler {
 	}
 
 	h := &Handler{
-		cfg:    cfg,
-		next:   next,
-		ch:     make(chan LogEvent, cfg.QueueSize),
-		client: client,
-		done:   make(chan struct{}),
+		cfg:       cfg,
+		next:      next,
+		ch:        make(chan LogEvent, cfg.QueueSize),
+		client:    client,
+		done:      make(chan struct{}),
+		wg:        &sync.WaitGroup{},
+		suspended: &atomic.Int64{},
+		dropCount: &atomic.Uint64{},
+		closed:    &atomic.Bool{},
 	}
 
 	h.wg.Add(1)
