@@ -40,6 +40,20 @@ type DriveConfig struct {
 
 	// CredentialVerified 表示凭据曾成功验证过。
 	CredentialVerified bool `json:"credential_verified"`
+
+	// WebDAV
+	URL    string `json:"url,omitempty"`
+	Vendor string `json:"vendor,omitempty"`
+
+	// S3 / OSS
+	Endpoint string `json:"endpoint,omitempty"`
+	Bucket   string `json:"bucket,omitempty"`
+	AK       string `json:"ak,omitempty"`
+	SK       string `json:"sk,omitempty"`
+	Provider string `json:"provider,omitempty"`
+
+	// Filen
+	APIKey string `json:"api_key,omitempty"`
 }
 
 // Drive 是 drives 表的一行。
@@ -110,6 +124,60 @@ func ToConnectionString(d *Drive) (string, error) {
 			User:    user,
 			Pass:    pass,
 			Session: sess,
+		})
+
+	case TypeWebDAV:
+		if d.Config.URL == "" || d.Config.User == "" || d.Config.Pass == "" {
+			return "", fmt.Errorf("drive: webdav 凭据不完整(url=%q user=%q pass=%v)",
+				d.Config.URL, d.Config.User, d.Config.Pass != "")
+		}
+		return ConnectionString(TypeWebDAV, Config{
+			URL:    d.Config.URL,
+			User:   d.Config.User,
+			Pass:   d.Config.Pass,
+			Vendor: d.Config.Vendor,
+		})
+
+	case TypeOSS:
+		if d.Config.Endpoint == "" || d.Config.Bucket == "" || d.Config.AK == "" || d.Config.SK == "" {
+			return "", fmt.Errorf("drive: oss 凭据不完整(endpoint=%q bucket=%q ak=%q sk=%v)",
+				d.Config.Endpoint, d.Config.Bucket, d.Config.AK, d.Config.SK != "")
+		}
+		return ConnectionString(TypeOSS, Config{
+			Endpoint: d.Config.Endpoint,
+			Bucket:   d.Config.Bucket,
+			AK:       d.Config.AK,
+			SK:       d.Config.SK,
+			Provider: d.Config.Provider,
+		})
+
+	case TypePikPak:
+		if d.Config.User == "" || d.Config.Pass == "" {
+			return "", fmt.Errorf("drive: pikpak 凭据不完整(user=%q pass=%v)",
+				d.Config.User, d.Config.Pass != "")
+		}
+		return ConnectionString(TypePikPak, Config{
+			User: d.Config.User,
+			Pass: d.Config.Pass,
+		})
+
+	case TypeFilen:
+		user := d.Config.User
+		if user == "" {
+			user = d.Config.Username
+		}
+		pass := d.Config.Pass
+		if pass == "" {
+			pass = d.Config.Password
+		}
+		if user == "" || pass == "" || d.Config.APIKey == "" {
+			return "", fmt.Errorf("drive: filen 凭据不完整(email=%q pass=%v apiKey=%v)",
+				user, pass != "", d.Config.APIKey != "")
+		}
+		return ConnectionString(TypeFilen, Config{
+			User:   user,
+			Pass:   pass,
+			APIKey: d.Config.APIKey,
 		})
 	}
 	return "", fmt.Errorf("drive: %q 尚未实现(占位)", d.Type)

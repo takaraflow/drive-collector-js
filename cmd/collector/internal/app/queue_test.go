@@ -260,7 +260,6 @@ func TestEnqueueUnblocksOnShutdown(t *testing.T) {
 	}
 }
 
-
 // TestRecoverSkipsCurrentlyRunningTasks 正在被本地 Worker 活跃处理的任务绝不能被 recoverOnStart 误杀。
 //
 // 生产实测事故：617MB 大文件下载耗时超过 5 分钟，recoverOnStart 误判为僵尸强行重置为 queued，

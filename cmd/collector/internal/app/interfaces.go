@@ -2,12 +2,15 @@ package app
 
 import (
 	"context"
+	"io"
 	"time"
 
+	"github.com/youngsx/drive-collector/cmd/collector/internal/bindingsession"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/auth"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/contract"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/drive"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/rclone"
+	"github.com/youngsx/drive-collector/cmd/collector/internal/storageguard"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/store"
 	tgclient "github.com/youngsx/drive-collector/cmd/collector/internal/telegram"
 )
@@ -17,6 +20,14 @@ import (
 // 抽接口的理由与 TaskRepo 相同:没绑盘的提示必须能测 —— 而真的发消息
 // 需要连上 Telegram(要真实凭据,且会真的给用户发消息)。默认实现
 // 就是 tg 客户端。
+// BindingSessionStore 抽象绑定向导的会话存储能力。
+type BindingSessionStore interface {
+	Start(ctx context.Context, userID, step string, data map[string]string) error
+	Get(ctx context.Context, userID string) (*bindingsession.Session, error)
+	Update(ctx context.Context, userID, step string, data map[string]string) error
+	Clear(ctx context.Context, userID string) error
+}
+
 type Notifier interface {
 	SendMessage(ctx context.Context, chatID int64, text string) error
 }
@@ -59,8 +70,15 @@ type NoticeSender interface {
 // 抽接口而不是直接用 *telegram.Client:download 是「真正把用户文件
 // 拉下来」的地方,恰恰是最该被测的 —— 而测它不需要真连 Telegram
 // (那需要真实凭据,且会真的写文件)。
+// StorageGuard 是 download() 需要的本地存储容量预检能力。
+type StorageGuard interface {
+	AssertCapacity(dirPath string, expectedBytes int64, purpose string) error
+	AvailableBytes(dirPath string) (uint64, error)
+}
+
 type Downloader interface {
 	DownloadTo(ctx context.Context, chatID, msgID int64, destPath string, progress tgclient.ProgressFunc) error
+	DownloadStream(ctx context.Context, chatID, msgID int64, w io.Writer, progress tgclient.ProgressFunc) error
 }
 
 // Rclone 是 upload() 与 /files 需要的网盘调度能力。
@@ -70,6 +88,7 @@ type Downloader interface {
 type Rclone interface {
 	Mkdir(ctx context.Context, cfg rclone.Config, remotePath string) error
 	Upload(ctx context.Context, cfg rclone.Config, localPath, remotePath string, progress rclone.ProgressFunc) error
+	Rcat(ctx context.Context, cfg rclone.Config, remotePath string, stdin io.Reader, progress rclone.ProgressFunc) error
 	ListFiles(ctx context.Context, cfg rclone.Config, remotePath string) ([]rclone.FileEntry, error)
 	// ScanFiles 是 /scan_dup 专用:递归 + 内容哈希。判重没有哈希就退化成
 	// 「按大小猜」,所以它必须是另一个方法而不是 ListFiles 的参数。
@@ -150,6 +169,7 @@ var (
 	_ DriveRepo      = (*store.DriveRepository)(nil)
 	_ Telegram       = (*tgclient.Client)(nil)
 	_ Downloader     = (*tgclient.Client)(nil)
+	_ StorageGuard   = (*storageguard.Guard)(nil)
 	_ MessageFetcher = (*tgclient.Client)(nil)
 	_ NoticeSender   = (*tgclient.Client)(nil)
 	_ Rclone         = (*rclone.Runner)(nil)

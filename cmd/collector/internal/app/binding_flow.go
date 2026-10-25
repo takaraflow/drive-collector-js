@@ -36,7 +36,7 @@ func encodeStep(t drive.Type, step string) string {
 func (a *App) bindStart(ctx context.Context, chatID int64, userID, typeStr string) error {
 	t := drive.Type(typeStr)
 	if !drive.IsSupported(t) {
-		return a.sendSafe(ctx, chatID, "⚠️ 暂不支持该网盘类型。当前可用:Mega、Proton Drive。")
+		return a.sendSafe(ctx, chatID, "⚠️ 暂不支持该网盘类型。当前可用:Mega、Proton Drive、WebDAV、S3/OSS、PikPak、Filen。")
 	}
 	step := drive.FirstStep(t)
 	if step == "" {
@@ -53,6 +53,14 @@ func (a *App) bindStart(ctx context.Context, chatID int64, userID, typeStr strin
 	case drive.TypeProton:
 		prompt = "👤 <b>请输入 Proton 账号用户名</b>\n\n通常是邮箱，例如 <code>you@proton.me</code>。\n\n发送 /cancel 或输入 取消 可随时退出绑定流程。" +
 			"\n\n🔒 提示:涉及密码的输入在提交后会被立即删除。"
+	case drive.TypeWebDAV:
+		prompt = "🌐 <b>请输入 WebDAV 服务器地址</b>（以 http:// 或 https:// 开头）：\n\n例如：<code>https://dav.example.com/dav/</code>\n\n发送 /cancel 或输入 取消 可随时退出绑定流程。"
+	case drive.TypeOSS:
+		prompt = "📦 <b>请输入 S3 / OSS Endpoint 地址</b>：\n\n例如：<code>https://oss-cn-hangzhou.aliyuncs.com</code> 或 <code>https://<id>.r2.cloudflarestorage.com</code>\n\n发送 /cancel 或输入 取消 可随时退出绑定流程。"
+	case drive.TypePikPak:
+		prompt = "⚡ <b>请输入 PikPak 账号/邮箱</b>：\n\n发送 /cancel 或输入 取消 可随时退出绑定流程。"
+	case drive.TypeFilen:
+		prompt = "🔒 <b>请输入 Filen 账号邮箱</b>：\n\n发送 /cancel 或输入 取消 可随时退出绑定流程。"
 	}
 	return a.tg.SendMessage(ctx, chatID, prompt)
 }
@@ -94,6 +102,14 @@ func (a *App) handleBindInput(ctx context.Context, msg messageInfo, text string)
 		res = drive.HandleMegaStep(ctx, a.rcloneRunner, step, text, sess.Data)
 	case drive.TypeProton:
 		res = drive.HandleProtonStep(ctx, a.bindRuntime, step, text, sess.Data)
+	case drive.TypeWebDAV:
+		res = drive.HandleWebDAVStep(ctx, a.rcloneRunner, step, text, sess.Data)
+	case drive.TypeOSS:
+		res = drive.HandleOSSStep(ctx, a.rcloneRunner, step, text, sess.Data)
+	case drive.TypePikPak:
+		res = drive.HandlePikPakStep(ctx, a.rcloneRunner, step, text, sess.Data)
+	case drive.TypeFilen:
+		res = drive.HandleFilenStep(ctx, a.rcloneRunner, a.filenClient, step, text, sess.Data)
 	default:
 		_ = a.bindSessions.Clear(ctx, userID)
 		return false
@@ -165,7 +181,7 @@ func (a *App) createBoundDrive(ctx context.Context, userID string, t drive.Type,
 // 与 JS isSensitiveBindingStepName 对齐(WAIT_PASS / WAIT_PASSWORD / WAIT_2FA)。
 func isSensitiveStep(step string) bool {
 	switch step {
-	case "WAIT_PASS", "WAIT_PASSWORD", "WAIT_2FA":
+	case "WAIT_PASS", "WAIT_PASSWORD", "WAIT_2FA", "WAIT_SK":
 		return true
 	}
 	return false

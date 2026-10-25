@@ -21,9 +21,9 @@ type ParsedLink struct {
 //
 // 捕获组:
 //
-//	1. 私有频道/超级群 ID: t.me/c/(\d+)
-//	2. 公开频道/超级群用户名: t.me/([a-zA-Z0-9_]+)
-//	3. 消息 ID: (\d+) (支持带话题/Forum 分区号: /topic/msgId)
+//  1. 私有频道/超级群 ID: t.me/c/(\d+)
+//  2. 公开频道/超级群用户名: t.me/([a-zA-Z0-9_]+)
+//  3. 消息 ID: (\d+) (支持带话题/Forum 分区号: /topic/msgId)
 var tgLinkRe = regexp.MustCompile(`(?i)(?:https?:\/\/)?(?:t\.me|telegram\.me)\/(?:s\/)?(?:c\/(\d+)|([a-zA-Z0-9_]+))\/(?:(?:\d+)\/)?(\d+)`)
 
 // ParseLink 从文本中解析第一处 Telegram 消息链接。

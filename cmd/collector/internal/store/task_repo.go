@@ -37,9 +37,10 @@ type Task struct {
 	FileName   sql.NullString
 	FileSize   int64
 	Status     contract.TaskStatus
-	ErrorMsg   sql.NullString
-	ClaimedBy  sql.NullString
-	CreatedAt  int64
+	ErrorMsg     sql.NullString
+	ClaimedBy    sql.NullString
+	ClaimLeaseID sql.NullString
+	CreatedAt    int64
 	UpdatedAt  int64
 }
 
@@ -248,16 +249,30 @@ type TransitionResult struct {
 	ToStatus   contract.TaskStatus
 }
 
+// TransitionOptions 控制状态机流转的高级分布式协调选项（认领、租约与隔离围栏）。
+type TransitionOptions struct {
+	ClaimedBy    string
+	ClaimLeaseID string
+	RequireClaim bool
+}
+
 // Transition 把任务推进到目标状态。
-//
-// 乐观锁在这里:`WHERE id = ? AND status = ?`。
-// 两个并发请求同时推进同一任务时,只有一个能命中,另一个拿到
-// changed=false —— 这就是防重复消费的全部机制。
 func (r *Repository) Transition(
 	ctx context.Context,
 	taskID string,
 	eventOrStatus contract.TaskEvent,
 	errorMsg *string,
+) (TransitionResult, error) {
+	return r.TransitionWithOptions(ctx, taskID, eventOrStatus, errorMsg, TransitionOptions{})
+}
+
+// TransitionWithOptions 包含分布式租约围栏的状态机推进。
+func (r *Repository) TransitionWithOptions(
+	ctx context.Context,
+	taskID string,
+	eventOrStatus contract.TaskEvent,
+	errorMsg *string,
+	opts TransitionOptions,
 ) (TransitionResult, error) {
 	current, err := r.FindById(ctx, taskID)
 	if err != nil {
@@ -284,15 +299,28 @@ func (r *Repository) Transition(
 	now := time.Now().UnixMilli()
 	assignments, params := buildTransitionSQL(resolution.ToStatus, errorMsg, now)
 
-	// 终态和回到 queued 时清掉认领信息,与 JS 侧 _buildTransitionSQL 一致。
-	if resolution.ToStatus == contract.StatusQueued ||
+	if opts.ClaimedBy != "" {
+		assignments = append(assignments, "claimed_by = ?", "claim_lease_id = ?")
+		params = append(params, opts.ClaimedBy, opts.ClaimLeaseID)
+	} else if resolution.ToStatus == contract.StatusQueued ||
 		contract.IsTerminalStatus(resolution.ToStatus) {
 		assignments = append(assignments, "claimed_by = NULL", "claim_lease_id = NULL")
 	}
 
-	args := append(append([]interface{}{}, params...), taskID, string(current.Status))
+	whereClauses := []string{"id = ?", "status = ?"}
+	whereParams := []interface{}{taskID, string(current.Status)}
+
+	if opts.RequireClaim {
+		if opts.ClaimedBy == "" || opts.ClaimLeaseID == "" {
+			return TransitionResult{}, fmt.Errorf("Transition: claimedBy and claimLeaseId required when RequireClaim is true")
+		}
+		whereClauses = append(whereClauses, "claimed_by = ?", "claim_lease_id = ?")
+		whereParams = append(whereParams, opts.ClaimedBy, opts.ClaimLeaseID)
+	}
+
+	args := append(append([]interface{}{}, params...), whereParams...)
 	changed, err := r.db.Exec(ctx,
-		"UPDATE tasks SET "+strings.Join(assignments, ", ")+" WHERE id = ? AND status = ?", args...)
+		"UPDATE tasks SET "+strings.Join(assignments, ", ")+" WHERE "+strings.Join(whereClauses, " AND "), args...)
 	if err != nil {
 		return TransitionResult{}, fmt.Errorf("转移任务 %s 失败: %w", taskID, err)
 	}
@@ -305,18 +333,57 @@ func (r *Repository) Transition(
 		Idempotent: resolution.Idempotent,
 	}
 	if changed == 0 {
-		// 没命中乐观锁 —— 可能并发已经推进过了。重新读一次确认终态。
+		// 没命中乐观锁 —— 可能并发已经推进过或租约失效。重新读一次确认。
 		latest, err := r.FindById(ctx, taskID)
 		if err != nil {
 			return out, err
 		}
 		if latest != nil && latest.Status == resolution.ToStatus {
 			out.Idempotent = true
+		} else if opts.RequireClaim && latest != nil && (latest.ClaimedBy.String != opts.ClaimedBy || latest.ClaimLeaseID.String != opts.ClaimLeaseID) {
+			out.Reason = "task claim lease no longer matches current worker"
 		} else {
 			out.Reason = "concurrent transition detected"
 		}
 	}
 	return out, nil
+}
+
+// ClaimTask 原子认领任务：将任务状态从 queued 推进到 downloading 并加贴实例认领租约。
+func (r *Repository) ClaimTask(ctx context.Context, taskID, instanceID, leaseID string) (bool, error) {
+	if taskID == "" || instanceID == "" || leaseID == "" {
+		return false, fmt.Errorf("ClaimTask: 缺少必要参数")
+	}
+	res, err := r.TransitionWithOptions(ctx, taskID, contract.EventStartDownload, nil, TransitionOptions{
+		ClaimedBy:    instanceID,
+		ClaimLeaseID: leaseID,
+	})
+	if err != nil {
+		return false, err
+	}
+	return res.Changed || res.Idempotent, nil
+}
+
+// TouchLease 刷新任务的分布式认领心跳（仅限持有当前租约的实例）。
+func (r *Repository) TouchLease(ctx context.Context, taskID, instanceID, leaseID string) error {
+	now := time.Now().UnixMilli()
+	_, err := r.db.Exec(ctx, `UPDATE tasks SET updated_at = ? WHERE id = ? AND claimed_by = ? AND claim_lease_id = ? AND status NOT IN (completed,failed,cancelled)`,
+		now, taskID, instanceID, leaseID)
+	if err != nil {
+		return fmt.Errorf("touch task %s lease failed: %w", taskID, err)
+	}
+	return nil
+}
+
+// ReleaseTask 主动释放任务认领（例如节点优雅退出前释放未完成的任务回 queued）。
+func (r *Repository) ReleaseTask(ctx context.Context, taskID, instanceID, leaseID string) error {
+	now := time.Now().UnixMilli()
+	_, err := r.db.Exec(ctx, `UPDATE tasks SET status = queued, claimed_by = NULL, claim_lease_id = NULL, updated_at = ? WHERE id = ? AND claimed_by = ? AND claim_lease_id = ? AND status NOT IN (completed,failed,cancelled)`,
+		now, taskID, instanceID, leaseID)
+	if err != nil {
+		return fmt.Errorf("release task %s lease failed: %w", taskID, err)
+	}
+	return nil
 }
 
 // MarkCancelled 取消任务。
@@ -409,7 +476,7 @@ func (r *Repository) CountByUserStatus(ctx context.Context, userID string) (map[
 }
 
 const taskSelect = `SELECT id, user_id, chat_id, msg_id, source_msg_id, grouped_id, source_type,
-	source_ref, file_name, file_size, status, error_msg, claimed_by,
+	source_ref, file_name, file_size, status, error_msg, claimed_by, claim_lease_id,
 	created_at, updated_at FROM tasks`
 
 // buildTransitionSQL 与 JS 侧 _buildTransitionSQL 对齐。
@@ -437,6 +504,7 @@ func rowToTask(row map[string]interface{}) (*Task, error) {
 	t.Status = contract.TaskStatus(str(row["status"]))
 	t.ErrorMsg = nullOf(str(row["error_msg"]))
 	t.ClaimedBy = nullOf(str(row["claimed_by"]))
+	t.ClaimLeaseID = nullOf(str(row["claim_lease_id"]))
 	t.CreatedAt = intOf(row["created_at"])
 	t.UpdatedAt = intOf(row["updated_at"])
 	return t, nil

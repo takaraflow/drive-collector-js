@@ -46,6 +46,16 @@ func (f *fakeDL) DownloadTo(_ context.Context, chatID, msgID int64, dest string,
 	return os.WriteFile(dest, []byte(f.content), 0o644)
 }
 
+func (f *fakeDL) DownloadStream(_ context.Context, chatID, msgID int64, w io.Writer, _ tgclient.ProgressFunc) error {
+	f.calls++
+	f.chatID, f.msgID = chatID, msgID
+	if f.err != nil {
+		return f.err
+	}
+	_, err := w.Write([]byte(f.content))
+	return err
+}
+
 // fakeRepo 记录仓储调用并返回预设结果。
 type fakeRepo struct {
 	// mu 只护 trans/transByID:并发测试会让多个 goroutine 同时调
@@ -190,6 +200,7 @@ type fakeRclone struct {
 	uploadErr   error
 	mkdirCalls  []string
 	uploadCalls []string
+	lastConfig  rclone.Config
 	// list/listErr 是 ListFiles 的预设结果 —— /files 的测试用。
 	list    []rclone.FileEntry
 	listErr error
@@ -207,9 +218,20 @@ func (f *fakeRclone) Mkdir(_ context.Context, _ rclone.Config, remotePath string
 	return f.mkdirErr
 }
 
-func (f *fakeRclone) Upload(_ context.Context, _ rclone.Config, localPath, remotePath string, _ rclone.ProgressFunc) error {
+func (f *fakeRclone) Upload(_ context.Context, cfg rclone.Config, localPath, remotePath string, _ rclone.ProgressFunc) error {
+	f.lastConfig = cfg
 	f.uploadCalls = append(f.uploadCalls, remotePath)
 	return f.uploadErr
+}
+
+func (f *fakeRclone) Rcat(_ context.Context, cfg rclone.Config, remotePath string, stdin io.Reader, _ rclone.ProgressFunc) error {
+	f.lastConfig = cfg
+	f.uploadCalls = append(f.uploadCalls, remotePath)
+	if f.uploadErr != nil {
+		return f.uploadErr
+	}
+	_, _ = io.Copy(io.Discard, stdin)
+	return nil
 }
 
 func (f *fakeRclone) ListFiles(_ context.Context, _ rclone.Config, remotePath string) ([]rclone.FileEntry, error) {
