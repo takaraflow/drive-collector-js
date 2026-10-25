@@ -574,6 +574,11 @@ func (a *App) onUpdate(ctx context.Context, u tgclient.Update) error {
 			return nil
 		}
 
+		// 社媒链接优先提取最高画质解析（不论是否生成了 TG 网页预览卡片）
+		if a.handleSocialMediaMessage(ctx, msg) {
+			return nil
+		}
+
 		if !msg.HasMedia {
 			if a.handleLinkMessage(ctx, msg) {
 				return nil
@@ -993,6 +998,10 @@ func (a *App) createTaskFrom(ctx context.Context, u tgclient.Update) error {
 func (a *App) download(ctx context.Context, t store.Task) error {
 	if !t.SourceRef.Valid || t.SourceRef.String == "" {
 		return fmt.Errorf("任务 %s 没有源引用", t.ID)
+	}
+
+	if t.SourceType == "external_url" {
+		return a.downloadExternal(ctx, t)
 	}
 	chatID, msgID, accessHash, err := ParseSourceRefFull(t.SourceRef.String)
 	if err != nil {

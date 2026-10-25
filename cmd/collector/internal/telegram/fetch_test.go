@@ -16,9 +16,12 @@ func privatePhoto(id int, userID int64) *tg.Message {
 		ID:     id,
 		PeerID: &tg.PeerUser{UserID: userID},
 	}
-	msg.SetMedia(&tg.MessageMediaPhoto{
-		Photo: &tg.Photo{ID: int64(500 + id), DCID: 4},
-	})
+	photo := &tg.Photo{ID: int64(500 + id), DCID: 4}
+	photo.Sizes = []tg.PhotoSizeClass{
+		&tg.PhotoSize{Type: "s", W: 100, H: 100, Size: 1000},
+		&tg.PhotoSize{Type: "y", W: 800, H: 600, Size: 50000},
+	}
+	msg.SetMedia(&tg.MessageMediaPhoto{Photo: photo})
 	return msg
 }
 
@@ -38,6 +41,9 @@ func TestMessageInfoFallsBackToPeerForSenderID(t *testing.T) {
 	if info.SenderID != userID {
 		t.Fatalf("SenderID = %d,期望 %d —— 私聊里 from_id 不发,必须从 peer 兜底",
 			info.SenderID, userID)
+	}
+	if info.ChatID != userID {
+		t.Errorf("ChatID = %d,期望 %d", info.ChatID, userID)
 	}
 }
 
@@ -185,5 +191,43 @@ func TestExtractMessagesFlagsUnknownContainer(t *testing.T) {
 		privatePhoto(1, 555),
 	}}); known {
 		t.Error("不认识的容器必须返回 known=false,好让调用方报错而不是丢弃相册")
+	}
+}
+
+// TestFileNameAndSizeOfWebPage 网页预览卡片中的内嵌 Document/Photo 也应支持解析文件名和大小。
+func TestFileNameAndSizeOfWebPage(t *testing.T) {
+	doc := &tg.Document{
+		ID:   88,
+		DCID: 1,
+		Size: 5000,
+		Attributes: []tg.DocumentAttributeClass{
+			&tg.DocumentAttributeFilename{FileName: "video.mp4"},
+		},
+	}
+	wpDoc := &tg.WebPage{Document: doc}
+	mediaDoc := &tg.MessageMediaWebPage{Webpage: wpDoc}
+
+	if gotName := FileNameOf(mediaDoc); gotName != "video.mp4" {
+		t.Errorf("FileNameOf(WebPage) = %q, want video.mp4", gotName)
+	}
+	if gotSize := FileSizeOf(mediaDoc); gotSize != 5000 {
+		t.Errorf("FileSizeOf(WebPage) = %d, want 5000", gotSize)
+	}
+
+	photo := &tg.Photo{
+		ID:   77,
+		DCID: 3,
+		Sizes: []tg.PhotoSizeClass{
+			&tg.PhotoSize{Type: "x", Size: 1234},
+		},
+	}
+	wpPhoto := &tg.WebPage{Photo: photo}
+	mediaPhoto := &tg.MessageMediaWebPage{Webpage: wpPhoto}
+
+	if gotName := FileNameOf(mediaPhoto); gotName != "photo_3_77.jpg" {
+		t.Errorf("FileNameOf(WebPage photo) = %q, want photo_3_77.jpg", gotName)
+	}
+	if gotSize := FileSizeOf(mediaPhoto); gotSize != 1234 {
+		t.Errorf("FileSizeOf(WebPage photo) = %d, want 1234", gotSize)
 	}
 }
