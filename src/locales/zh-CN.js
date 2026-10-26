@@ -166,6 +166,7 @@ export const STRINGS = {
         select_type_more_hint: "这些网盘通常需要 JSON Token、Access Key、Bucket、WebDAV 地址，或按 rclone 文档填写完整登录参数。",
         advanced_config_badge: "需高级配置",
         advanced_config_hint: "标记为“需高级配置”的网盘依赖 rclone 导出的完整凭证或完整登录参数，未覆盖所有账号类型。",
+        btn_manager: "🗂️ 网盘管理",
     },
 
     // --- 文件浏览 ---
@@ -184,6 +185,7 @@ export const STRINGS = {
         btn_prev: "上一页",
         btn_refresh: "刷新",
         btn_retry_load: "重新加载文件列表",
+        btn_change_folder: "⚙️ 更改目录",
         btn_next: "下一页",
         btn_end: "末页",
     },

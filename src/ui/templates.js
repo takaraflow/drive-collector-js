@@ -83,7 +83,11 @@ export class UIHelper {
                 refreshData: `files_refresh_${page}`,
                 pageData: (targetPage) => `files_page_${targetPage}`,
                 labels: STRINGS.files
-            })
+            }),
+            [
+                Button.inline(STRINGS.files?.btn_change_folder || "⚙️ 更改目录", Buffer.from("remote_folder_menu")),
+                Button.inline(STRINGS.drive?.btn_manager || "🗂️ 网盘管理", Buffer.from("drive_manager_open"))
+            ]
         ];
         return { text, buttons };
     }
@@ -119,7 +123,12 @@ export class UIHelper {
                     scanned: scanResult?.total ?? 0,
                     basisNote: UIHelper._dupScanBasisNote(scanResult || {})
                 }),
-                buttons: []
+                buttons: [
+                    [
+                        Button.inline(STRINGS.drive?.btn_files || "📁 浏览文件", Buffer.from("files_page_0")),
+                        Button.inline(STRINGS.drive?.btn_manager || "🗂️ 网盘管理", Buffer.from("drive_manager_open"))
+                    ]
+                ]
             };
         }
 
@@ -169,6 +178,7 @@ export class UIHelper {
             ));
         }
         row.push(Button.inline(STRINGS.dup_scan.btn_rerun, Buffer.from('dupscan_scope_default')));
+        row.push(Button.inline(STRINGS.drive?.btn_files || "📁 浏览文件", Buffer.from("files_page_0")));
 
         return { text, buttons: [row], page: clamped, totalPages };
     }

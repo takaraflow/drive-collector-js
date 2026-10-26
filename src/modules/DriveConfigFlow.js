@@ -208,7 +208,8 @@ export class DriveConfigFlow {
             });
             
             buttons.push([
-                Button.inline(STRINGS.drive.btn_files, Buffer.from("files_page_0"))
+                Button.inline(STRINGS.drive.btn_files, Buffer.from("files_page_0")),
+                Button.inline(STRINGS.remote_folder?.btn_set_path || "⚙️ 保存目录", Buffer.from("remote_folder_menu"))
             ]);
         } else {
             message += STRINGS.drive.not_bound;
@@ -349,7 +350,7 @@ export class DriveConfigFlow {
             return STRINGS.drive.success_unbind;
         }
 
-        if (data === "drive_manager_back") {
+        if (data === "drive_manager_back" || data === "drive_manager_open") {
             await this._editDriveManager(event, userId);
             return STRINGS.drive.returned;
         }
@@ -669,11 +670,17 @@ export class DriveConfigFlow {
         const message = `${STRINGS.drive.select_type_title}\n\n${hint}${statusHint}`;
 
         const buttons = [];
-        fallbackDrives.forEach(drive => {
-            buttons.push([
-                Button.inline(this._formatDriveButtonLabel(drive), Buffer.from(`drive_bind_${drive.type}`))
-            ]);
-        });
+        for (let i = 0; i < fallbackDrives.length; i += 2) {
+            const row = [
+                Button.inline(this._formatDriveButtonLabel(fallbackDrives[i]), Buffer.from(`drive_bind_${fallbackDrives[i].type}`))
+            ];
+            if (i + 1 < fallbackDrives.length) {
+                row.push(
+                    Button.inline(this._formatDriveButtonLabel(fallbackDrives[i + 1]), Buffer.from(`drive_bind_${fallbackDrives[i + 1].type}`))
+                );
+            }
+            buttons.push(row);
+        }
 
         if (supportedDrives.length > fallbackDrives.length) {
             buttons.push([

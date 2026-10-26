@@ -186,6 +186,11 @@ export class Dispatcher {
             Button.inline(STRINGS.remote_folder.btn_set_path, Buffer.from("remote_folder_menu"))
         ]);
 
+        buttons.push([
+            Button.inline(STRINGS.system.btn_bind_drive, Buffer.from("drive_manager_open")),
+            Button.inline(STRINGS.system.btn_help, Buffer.from("help_main"))
+        ]);
+
         if (isAdmin) {
             buttons.push([
                 Button.inline(STRINGS.status.btn_user_list, Buffer.from("admin_users_open")),
@@ -368,9 +373,14 @@ export class Dispatcher {
         message += STRINGS.remote_folder.menu_hint;
 
         const buttons = [
-            [Button.inline(STRINGS.remote_folder.btn_set_path, Buffer.from("remote_folder_set"))],
-            [Button.inline(STRINGS.remote_folder.btn_reset_path, Buffer.from("remote_folder_reset_confirm"))],
-            [Button.inline(STRINGS.drive.btn_files, Buffer.from("files_page_0"))]
+            [
+                Button.inline(STRINGS.remote_folder.btn_set_path, Buffer.from("remote_folder_set")),
+                Button.inline(STRINGS.remote_folder.btn_reset_path, Buffer.from("remote_folder_reset_confirm"))
+            ],
+            [
+                Button.inline(STRINGS.drive.btn_files, Buffer.from("files_page_0")),
+                Button.inline(STRINGS.drive.btn_cancel, Buffer.from("drive_manager_open"))
+            ]
         ];
 
         return { message, buttons };
@@ -2307,14 +2317,25 @@ export class Dispatcher {
         } else if (data === "remote_folder_reset") {
             await this._setUserUploadPathInD1(userId, null);
             await safeEdit(event.userId, event.msgId, format(STRINGS.remote_folder.reset_success, { path: getDefaultRemoteFolder() }), [
-                [Button.inline(STRINGS.remote_folder.btn_set_path, Buffer.from("remote_folder_set"))],
-                [Button.inline(STRINGS.drive.btn_files, Buffer.from("files_page_0"))]
+                [
+                    Button.inline(STRINGS.remote_folder.btn_set_path, Buffer.from("remote_folder_set")),
+                    Button.inline(STRINGS.drive.btn_files, Buffer.from("files_page_0"))
+                ],
+                [
+                    Button.inline(STRINGS.drive.btn_cancel, Buffer.from("drive_manager_open"))
+                ]
             ], userId);
             await answerCallback("");
         } else if (data === "remote_folder_cancel") {
             await SessionManager.clear(userId);
             await safeEdit(event.userId, event.msgId, STRINGS.remote_folder.input_cancelled, [
-                [Button.inline(STRINGS.remote_folder.btn_set_path, Buffer.from("remote_folder_set"))]
+                [
+                    Button.inline(STRINGS.remote_folder.btn_set_path, Buffer.from("remote_folder_set")),
+                    Button.inline(STRINGS.drive.btn_files, Buffer.from("files_page_0"))
+                ],
+                [
+                    Button.inline(STRINGS.drive.btn_cancel, Buffer.from("drive_manager_open"))
+                ]
             ], userId);
             await answerCallback("");
         } else if (data === "remote_folder_menu") {

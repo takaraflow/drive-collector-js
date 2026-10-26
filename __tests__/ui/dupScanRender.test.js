@@ -79,4 +79,29 @@ describe("UIHelper.renderDupScanPage", () => {
 
         expect(text).toContain("请自行到网盘里确认后再删除");
     });
+
+    it("provides recovery navigation buttons when no duplicates are found (no dead end)", () => {
+        const { text, buttons } = UIHelper.renderDupScanPage("Mega-x", {
+            groups: [],
+            hashed: 10,
+            total: 10,
+            hashAvailable: true
+        }, 0);
+
+        expect(text).toContain("未发现重复文件");
+        expect(buttons.length).toBeGreaterThan(0);
+        const callbackData = buttons.flat().map(b => b.data.toString());
+        expect(callbackData).toContain("files_page_0");
+        expect(callbackData).toContain("drive_manager_open");
+    });
+
+    it("includes quick-nav buttons to files alongside rerun in dup list", () => {
+        const { buttons } = UIHelper.renderDupScanPage("Mega-x", hashScan([
+            { basis: "hash", algo: "md5", size: 10, paths: ["a", "b"] }
+        ]), 0);
+
+        const callbackData = buttons.flat().map(b => b.data.toString());
+        expect(callbackData).toContain("files_page_0");
+        expect(callbackData).toContain("dupscan_scope_default");
+    });
 });

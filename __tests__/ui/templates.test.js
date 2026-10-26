@@ -653,6 +653,18 @@ describe("UIHelper", () => {
             expect(result.text).toContain("...");
             expect(result.text).not.toContain("very-long-video-file-name-that-would-overflow-telegram-mobile-layout.mp4");
         });
+
+        test("should provide folder-settings and drive-manager buttons to prevent dead ends", async () => {
+            const files = [];
+            const result = await UIHelper.renderFilesPage(files, 0, 6, false, null);
+
+            expect(result.text).toContain("目录为空");
+            expect(result.buttons.length).toBe(2);
+            const callbackData = result.buttons.flat().map(b => b.data.toString());
+            expect(callbackData).toContain("remote_folder_menu");
+            expect(callbackData).toContain("drive_manager_open");
+            expect(callbackData).toContain("files_refresh_0");
+        });
     });
 
     describe("renderTaskQueue", () => {
