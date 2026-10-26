@@ -119,6 +119,7 @@ export class DriveConfigFlow {
         if (stepMeta?.optional) {
             buttons.push([Button.inline(STRINGS.drive.btn_skip || '跳过', Buffer.from('drive_bind_input_skip'))]);
         }
+        buttons.push([Button.inline(`❌ ${STRINGS.drive.btn_cancel_binding || '取消绑定'}`, Buffer.from('drive_bind_cancel'))]);
         return buttons.length > 0 ? buttons : null;
     }
 
@@ -196,13 +197,14 @@ export class DriveConfigFlow {
             });
             message += '\n';
 
-            drives.forEach((drive, index) => {
-                const driveButtons = [];
-                if (drive.id !== defaultDriveId) {
-                    driveButtons.push(Button.inline(`${index + 1} ${STRINGS.drive.btn_set_default}`, Buffer.from(`drive_set_default_${drive.id}`)));
-                }
-                driveButtons.push(Button.inline(`${index + 1} ${STRINGS.drive.btn_unbind}`, Buffer.from(`drive_unbind_confirm_${drive.id}`)));
-                buttons.push(driveButtons);
+            drives.forEach((drive) => {
+                const driveName = drive.name || '未知账号';
+                const email = driveName.split('-').slice(1).join('-') || driveName;
+                const isDefault = drive.id === defaultDriveId;
+                const statusIcon = isDefault ? '⭐' : '📁';
+                const driveType = (drive.type || '未知类型').toUpperCase();
+                const defaultTag = isDefault ? ` (${STRINGS.drive.is_default})` : '';
+                buttons.push([Button.inline(`${statusIcon} ${driveType} · ${email}${defaultTag}`, Buffer.from(`drive_manage_${drive.id}`))]);
             });
             
             buttons.push([
@@ -245,8 +247,61 @@ export class DriveConfigFlow {
      * @param {string} userId 
      * @returns {Promise<string|null>} 返回给用户的 Toast 提示
      */
+    static async _showDriveDetail(event, userId, driveId) {
+        const drive = await DriveRepository.findByUserAndId(userId, driveId);
+        if (!drive) {
+            return STRINGS.drive.not_found;
+        }
+
+        const drives = await DriveRepository.findByUserId(userId, true);
+        const defaultDrive = drives?.find(isDefaultDrive) || drives?.[0] || null;
+        const isDefault = drive.id === defaultDrive?.id;
+
+        const driveName = drive.name || '未知账号';
+        const email = driveName.split('-').slice(1).join('-') || driveName;
+        const driveType = (drive.type || '未知类型').toUpperCase();
+
+        const message = `⚙️ <b>${driveType} 网盘管理</b>\n\n` +
+            `👤 账号: <code>${escapeHTML(email)}</code>\n` +
+            `🏷️ 状态: <b>${isDefault ? `⭐ ${STRINGS.drive.is_default}` : '普通网盘'}</b>\n\n` +
+            `请选择操作：`;
+
+        const detailButtons = [];
+        if (!isDefault) {
+            detailButtons.push([Button.inline(`⭐ ${STRINGS.drive.btn_set_default}`, Buffer.from(`drive_set_default_${drive.id}`))]);
+        }
+        detailButtons.push([Button.inline(`🗑️ ${STRINGS.drive.btn_unbind}`, Buffer.from(`drive_unbind_confirm_${drive.id}`))]);
+        detailButtons.push([Button.inline(`🔙 ${STRINGS.drive.btn_cancel}`, Buffer.from("drive_manager_back"))]);
+
+        await runBotTaskWithRetry(() => client.editMessage(event.userId, {
+            message: event.msgId,
+            text: message,
+            buttons: detailButtons,
+            parseMode: "html"
+        }), userId, {}, false, 3);
+
+        return null;
+    }
+
+    /**
+     * 处理管理面板的按钮回调
+     * @param {Object} event Telegram 事件对象
+     * @param {string} userId 
+     * @returns {Promise<string|null>} 返回给用户的 Toast 提示
+     */
     static async handleCallback(event, userId) {
         const data = event.data.toString();
+
+        if (data.startsWith("drive_manage_")) {
+            const driveId = this._callbackValue(data, "drive_manage_");
+            return await this._showDriveDetail(event, userId, driveId);
+        }
+
+        if (data === "drive_bind_cancel") {
+            await SessionManager.clear(userId);
+            await this._editDriveManager(event, userId);
+            return STRINGS.drive.cancelled;
+        }
 
         if (data.startsWith("drive_set_default_")) {
             const driveId = this._callbackValue(data, "drive_set_default_");
@@ -384,6 +439,15 @@ export class DriveConfigFlow {
         const isSensitiveStep = this._isSensitiveBindingStep(provider, stepName);
 
         const driveStrings = await this._getDriveStrings(driveType);
+
+        if (source === 'message' && (event.message?.media || event.message?.document || event.message?.photo)) {
+            await runBotTask(() => client.sendMessage(peerId, {
+                message: `⚠️ <b>检测到您发送了文件</b>\n\n当前正在网盘绑定流程中。若想转存此文件，请先点击「取消绑定」退出流程后再发送。`,
+                buttons: [[Button.inline(`❌ ${STRINGS.drive.btn_cancel_binding || '取消绑定'}`, Buffer.from('drive_bind_cancel'))]],
+                parseMode: "html"
+            }), userId, { priority: PRIORITY.HIGH });
+            return true;
+        }
 
         const normalizedText = (text || "").trim();
         if (CANCEL_KEYWORDS.has(normalizedText.toLowerCase())) {

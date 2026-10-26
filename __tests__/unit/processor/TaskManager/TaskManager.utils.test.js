@@ -220,7 +220,10 @@ describe('TaskManager.utils', () => {
             expect(updateStatus).toHaveBeenCalledWith(
                 task,
                 'Success: <a href="http://link">file &lt;name&gt;</a> to /dest',
-                true
+                true,
+                null,
+                false,
+                expect.any(Array)
             );
         });
     });

@@ -10,6 +10,7 @@ import {
 import { TASK_EVENTS, TASK_STATUSES } from "../../domain/task-state-machine.js";
 import { TaskProcessingLockBusyError, isTaskProcessingLockBusyError } from "../../domain/task-queue-contract.js";
 import { isExternalUrlTask } from "../../domain/task-source.js";
+import { Button } from "telegram/tl/custom/button.js";
 
 // 获取模块日志记录器
 const getLog = () => dependencyContainer.get('logger').withModule('TaskManager.upload');
@@ -229,7 +230,15 @@ export async function uploadTask(task) {
                     : format(STRINGS.task.failed_validation, { name: fileNameHtml });
                 
                 const finalMsg = isOk ? baseText : `${baseText}\n<code>${escapeHTML(errorMsg)}</code>`;
-                await updateStatus(task, finalMsg, true);
+                const successButtons = isOk
+                    ? [
+                        [
+                            Button.inline(STRINGS.task?.btn_browse_folder || "📂 浏览该目录", Buffer.from("files_page_0")),
+                            Button.inline(STRINGS.task?.btn_change_path || "⚙️ 更改路径", Buffer.from("remote_folder_menu"))
+                        ]
+                    ]
+                    : null;
+                await updateStatus(task, finalMsg, true, null, false, successButtons);
             }
 
             // Clean up local file only on success

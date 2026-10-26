@@ -12,6 +12,7 @@ import { getInfrastructureErrorUserMessage } from "../../utils/infrastructureErr
 import { escapeHTML } from "../../utils/common.js";
 import { DriveProviderFactory } from "../../services/drives/index.js";
 import { isProtonRefreshTokenDead } from "../../domain/rclone-error.js";
+import { Button } from "telegram/tl/custom/button.js";
 export { escapeHTML };
 
 // 获取依赖项的辅助函数
@@ -210,7 +211,15 @@ export async function handleTaskCompletion(task, context, updateStatus, fileName
             ? `<a href="${fileLink}">${escapeHTML(fileName)}</a>`
             : `<code>${escapeHTML(fileName)}</code>`;
         const template = options.successTemplate || STRINGS.task.success_sec_transfer;
-        await updateStatus(task, format(template, { name: fileNameHtml, folder: actualUploadPath }), true);
+        const successButtons = options.buttons !== undefined
+            ? options.buttons
+            : [
+                [
+                    Button.inline(STRINGS.task?.btn_browse_folder || "📂 浏览该目录", Buffer.from("files_page_0")),
+                    Button.inline(STRINGS.task?.btn_change_path || "⚙️ 更改路径", Buffer.from("remote_folder_menu"))
+                ]
+            ];
+        await updateStatus(task, format(template, { name: fileNameHtml, folder: actualUploadPath }), true, null, false, successButtons);
     }
 }
 
@@ -298,4 +307,3 @@ export async function handleUploadFailure(task, context, updateStatus, uploadRes
         }), true, null, showRetry);
     }
 }
-
