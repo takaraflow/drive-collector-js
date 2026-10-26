@@ -34,7 +34,7 @@ export const escapeHTML = (str) => {
         .replace(/</g, "&" + "lt;")
         .replace(/>/g, "&" + "gt;")
         .replace(/"/g, "&" + "quot;")
-        .replace(/'/g, "&" + "#039;");
+        .replace(/'/g, "&#039;");
 };
 
 // 安全编辑消息，统一处理异常
@@ -176,13 +176,15 @@ export const getMediaInfo = (input) => {
 };
 
 // 统一更新任务状态 (带取消按钮)
-export const updateStatus = async (task, text, isFinal = false, priority = null, showRetry = false) => {
-    let buttons = null;
-    if (!isFinal) {
-        const cancelText = task.proc ? STRINGS.task.cancel_transfer_btn : STRINGS.task.cancel_task_btn;
-        buttons = [Button.inline(cancelText, Buffer.from(`cancel_confirm_${task.id}`))];
-    } else if (showRetry) {
-        buttons = [Button.inline(STRINGS.task.retry_btn, Buffer.from(`retry_confirm_${task.id}`))];
+export const updateStatus = async (task, text, isFinal = false, priority = null, showRetry = false, customButtons = null) => {
+    let buttons = customButtons || null;
+    if (!buttons) {
+        if (!isFinal) {
+            const cancelText = task.proc ? STRINGS.task.cancel_transfer_btn : STRINGS.task.cancel_task_btn;
+            buttons = [Button.inline(cancelText, Buffer.from(`cancel_confirm_${task.id}`))];
+        } else if (showRetry) {
+            buttons = [Button.inline(STRINGS.task.retry_btn, Buffer.from(`retry_confirm_${task.id}`))];
+        }
     }
     const isHtml = /<\/?(b|i|code|pre|a)(\s|>)/i.test(text);
     const options = priority ? { priority } : {};

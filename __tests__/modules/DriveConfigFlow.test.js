@@ -767,6 +767,71 @@ describe("DriveConfigFlow", () => {
         });
     });
 
+
+    describe("P0 & P1 experience enhancements", () => {
+        test("drive_manage_ should display dedicated drive detail card", async () => {
+            const driveId = "drive_card_test_123";
+            const mockDrive = { id: driveId, type: "mega", name: "Mega-test@example.com", is_default: 0 };
+            mockDriveRepository.findByUserAndId.mockResolvedValue(mockDrive);
+            mockDriveRepository.findByUserId.mockResolvedValue([
+                { id: "drive_other", is_default: 1 },
+                mockDrive
+            ]);
+
+            const event = { userId: "user123", msgId: "msg300", data: Buffer.from(`drive_manage_${driveId}`) };
+            const result = await DriveConfigFlow.handleCallback(event, "user123");
+
+            expect(result).toBeNull();
+            expect(mockClient.editMessage).toHaveBeenCalledWith("user123", expect.objectContaining({
+                message: "msg300",
+                text: expect.stringContaining("网盘管理"),
+                buttons: expect.any(Array),
+                parseMode: "html"
+            }));
+            const buttons = mockClient.editMessage.mock.calls[mockClient.editMessage.mock.calls.length - 1][1].buttons;
+            // Should contain set default, unbind, and back buttons
+            expect(buttons.length).toBe(3);
+            expect(buttons[0][0].text).toContain("设为默认");
+            expect(buttons[1][0].text).toContain("解绑");
+            expect(buttons[2][0].text).toContain("返回");
+        });
+
+        test("drive_bind_cancel should clear session and return to drive manager", async () => {
+            const event = { userId: "user123", msgId: "msg400", data: Buffer.from("drive_bind_cancel") };
+            mockDriveRepository.findByUserId.mockResolvedValue([]);
+
+            const result = await DriveConfigFlow.handleCallback(event, "user123");
+
+            expect(mockSessionManager.clear).toHaveBeenCalledWith("user123");
+            expect(mockClient.editMessage).toHaveBeenCalledWith("user123", expect.objectContaining({
+                message: "msg400",
+                text: expect.stringContaining("网盘管理中心")
+            }));
+            expect(result).toBe(STRINGS.drive.cancelled);
+        });
+
+        test("sending media while binding prompt is active should warn user and offer cancel button", async () => {
+            const event = {
+                message: {
+                    media: { photo: true },
+                    peerId: "chat123",
+                    id: "msg_photo_1"
+                }
+            };
+            const session = {
+                current_step: "MEGA:WAIT_EMAIL",
+                temp_data: "{}"
+            };
+
+            const handled = await DriveConfigFlow.handleInput(event, "user123", session);
+            expect(handled).toBe(true);
+            expect(mockClient.sendMessage).toHaveBeenCalledWith("chat123", expect.objectContaining({
+                message: expect.stringContaining("检测到您发送了文件"),
+                buttons: expect.any(Array)
+            }));
+        });
+    });
+
     describe("Edge Cases and Error Handling", () => {
         test("should handle provider handleInput failure in edge case", async () => {
             const event = {

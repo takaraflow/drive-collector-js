@@ -107,6 +107,8 @@ export const STRINGS = {
         focus_waiting: "🕒 <b>等待处理</b>: <code>{{name}}</code>",
         focus_completed: "✅ <b>已完成</b>: <code>{{name}}</code>",
         focus_failed: "❌ <b>处理失败</b>: <code>{{name}}</code>",
+        btn_browse_folder: "📂 浏览该目录",
+        btn_change_path: "⚙️ 更改路径",
     },
 
     // --- 网盘管理 ---
@@ -121,6 +123,7 @@ export const STRINGS = {
         cancel_prompt: "发送 /cancel 或输入 取消 可随时退出绑定流程。",
         skip_prompt: "Telegram 不能发送空消息。可选步骤请点「跳过」，或发送：跳过 / skip / -",
         btn_skip: "跳过",
+        btn_cancel_binding: "取消绑定",
         credential_notice: "为减少暴露，我会在提交后尝试删除这条敏感消息。请只在可信聊天中输入。",
         cancelled: "绑定流程已取消，输入 /drive 可重新开始。",
         not_found: "🚫 未找到对应网盘",
@@ -212,33 +215,6 @@ export const STRINGS = {
         btn_rerun: "重新扫描",
     },
 
-    // --- 重复文件扫描(只读,不删除) ---
-    dup_scan: {
-        title: "🔍 <b>网盘重复文件扫描</b>\n\n",
-        intro: "扫描整个网盘，找出重复的文件，<b>只列清单，不会删除任何东西</b>。\n请选择扫描范围：",
-        btn_scope_default: "当前默认网盘",
-        btn_scope_all: "扫描所有网盘",
-        btn_cancel: "🚫 停止扫描",
-        no_drive: "🚫 <b>还没有绑定网盘</b>\n\n请先发送 /drive 绑定网盘。",
-        already_running: "🕒 <b>已有扫描在进行中</b>\n\n请等待当前扫描结束，或点击它消息里的「停止扫描」。",
-        running: "🔍 <b>正在扫描重复文件</b>\n\n📂 网盘: <code>{{name}}</code>\n📄 已扫描: {{done}}/{{total}}\n⏱ 用时: {{seconds}} 秒\n\n<i>可随时点下方按钮停止</i>",
-        cancelled: "🚫 <b>扫描已停止</b>\n\n已扫描部分的结果不会被保留，重新发送 /scan_dup 可以再扫一次。",
-        failed: "❌ <b>扫描失败</b>\n\n📂 网盘: <code>{{name}}</code>\n原因: {{reason}}\n\n其他网盘仍会继续扫描。",
-        no_duplicates: "✅ <b>未发现重复文件</b>\n\n📂 网盘: <code>{{name}}</code>\n📄 扫描文件: {{scanned}} 个\n\n{{basisNote}}",
-        // 哈希不可用时必须明说,否则用户会误以为网盘是干净的
-        basis_hash: "✅ 判重依据: <b>内容哈希</b>，结果准确。",
-        basis_no_hash: "⚠️ 判重依据: <b>文件大小</b>。该网盘后端不返回内容哈希，无法做内容级判重，<b>下面同大小的文件内容可能不同</b>。",
-        basis_partial: "⚠️ 判重依据: <b>混合</b>。该网盘仅 {{hashed}}/{{scanned}} 个文件带内容哈希：带哈希的按内容判重，其余按大小归组（内容可能不同）。",
-        manual_note: "📌 清单仅供参考，<b>请自行到网盘里确认后再删除</b>。",
-        page_info: "📊 <i>第 {{current}}/{{total}} 页 | 共 {{count}} 组重复</i>",
-        group_hash: "🔁 <b>{{count}} 份相同内容</b>（每个 {{size}}，哈希 {{algo}}）",
-        group_size: "🔁 <b>{{count}} 份相同大小</b>（每个 {{size}}，内容可能不同）",
-        group_more: "    <i>…另有 {{count}} 份</i>",
-        btn_prev: "上一页",
-        btn_next: "下一页",
-        btn_rerun: "重新扫描",
-    },
-
     // --- 状态相关 ---
     status: {
         header: "📊 <b>我的状态</b>",
@@ -250,7 +226,7 @@ export const STRINGS = {
         current_file: "📄 当前任务: <code>{{name}}</code>",
         active_tasks: "⚡ 活跃任务",
         user_history: "👤 您的任务历史",
-        no_tasks: "尚无任务记录。请直接向我发送文件、图片或链接来开始转存。",
+        no_tasks: "暂无任务记录。请直接向我发送文件、图片或链接来开始转存。",
         no_active_tasks: "✅ 当前没有排队或处理中任务。请直接向我发送文件或链接来开始转存。",
         task_item: "{{index}}. {{status}} <code>{{name}}</code> ({{statusText}})",
         active_action_hint: "可直接取消当前仍在排队或处理的任务。",
@@ -312,7 +288,7 @@ export const STRINGS = {
         user_dist: "👥 <b>用户活跃分布</b> (Top 5)",
         user_row: "<code>{{index}}.</code> 👤 <code>{{userId}}</code> — {{count}} 个任务",
         no_active: "✅ 当前无活跃任务。请发送文件或链接来创建新任务。",
-        no_data: "📭 暂无任务记录。快发送文件或链接开始您的第一次转存吧！",
+        no_data: "📬 暂无任务记录。快发送文件或链接开始您的第一次转存吧！",
         error: "❌ <b>暂时无法查询任务队列</b>\n\n请重新加载；如果连续失败，请查看系统诊断。",
         status_labels: {
             queued: "🕒 排队中",
@@ -331,7 +307,7 @@ export const STRINGS = {
         btn_back: "返回",
         btn_refresh: "刷新",
         btn_retry_failed_page: "重试本页失败任务",
-        no_tasks_in_status: "📭 该状态下暂无任务。您可以发送文件或链接来创建新任务。",
+        no_tasks_in_status: "📬 该状态下暂无任务。您可以发送文件或链接来创建新任务。",
     },
 
     // --- 管理员用户列表 ---

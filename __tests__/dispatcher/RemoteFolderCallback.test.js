@@ -152,4 +152,18 @@ describe('Dispatcher remote folder callbacks', () => {
         expect(mockSafeEdit.mock.calls[0][2]).toContain('/Movies');
         expect(mockClient.invoke).toHaveBeenCalled();
     });
+
+    it('should clear session and not consume media message when media is sent during REMOTE_FOLDER_WAIT_PATH', async () => {
+        const mediaEvent = {
+            message: {
+                message: '',
+                peerId: 'chat-1',
+                media: { photo: true }
+            }
+        };
+        const session = { current_step: 'REMOTE_FOLDER_WAIT_PATH' };
+        const handled = await Dispatcher._handleRemoteFolderInput(mediaEvent, 'user-1', session);
+        expect(handled).toBe(false);
+        expect(mockSessionManager.clear).toHaveBeenCalledWith('user-1');
+    });
 });

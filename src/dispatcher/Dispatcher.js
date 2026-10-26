@@ -2161,8 +2161,16 @@ export class Dispatcher {
      * @returns {Promise<boolean>} 是否拦截了消息
      */
     static async _handleRemoteFolderInput(event, userId, session) {
-        const text = event.message.message.trim();
-        const peerId = event.message.peerId;
+        const peerId = event.message?.peerId;
+
+        if (session.current_step === "REMOTE_FOLDER_WAIT_PATH") {
+            if (event.message?.media || event.message?.document || event.message?.photo) {
+                await SessionManager.clear(userId);
+                return false;
+            }
+        }
+
+        const text = (event.message?.message || "").trim();
 
         if (session.current_step === "REMOTE_FOLDER_WAIT_PATH") {
             const normalizedText = text.toLowerCase();
