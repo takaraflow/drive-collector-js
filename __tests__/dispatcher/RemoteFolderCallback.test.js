@@ -135,6 +135,10 @@ describe('Dispatcher remote folder callbacks', () => {
         );
         expect(mockSafeEdit.mock.calls[0][2]).toContain('/Movies');
         expect(mockSafeEdit.mock.calls[0][2]).toContain('点击“设置保存目录”后发送新目录');
+        const menuButtons = mockSafeEdit.mock.calls[0][3];
+        const callbackData = menuButtons.flat().map(b => b.data.toString());
+        expect(callbackData).toContain('drive_manager_open');
+        expect(callbackData).toContain('files_page_0');
         expect(answer).toHaveBeenCalledWith('');
     });
 

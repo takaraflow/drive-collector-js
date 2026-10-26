@@ -153,6 +153,8 @@ describe('Dispatcher /status command', () => {
         const buttons = mockClient.sendMessage.mock.calls[0][1].buttons;
         expect(buttons.flat().map(button => button.data.toString())).not.toContain('diagnosis_run');
         expect(buttons.flat().map(button => button.data.toString())).toContain('cancel_confirm_t1');
+        expect(buttons.flat().map(button => button.data.toString())).toContain('drive_manager_open');
+        expect(buttons.flat().map(button => button.data.toString())).toContain('help_main');
     });
 
     it('should show admin-only system diagnostics and shortcuts in general status', async () => {

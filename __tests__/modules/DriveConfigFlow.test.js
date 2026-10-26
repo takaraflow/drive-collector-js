@@ -448,6 +448,20 @@ describe("DriveConfigFlow", () => {
             expect(labels).not.toContain("🗄️ S3 / OSS");
             expect(callbackData).toContain("drive_select_type_all");
             expect(result).toBe("请确认操作");
+
+            // Verify 2-column grid layout for drive types to optimize mobile vertical space
+            const driveRows = payload.buttons.slice(0, -2);
+            expect(driveRows.some(row => row.length === 2)).toBe(true);
+        });
+
+        test("should handle drive_manager_open callback to return to drive manager", async () => {
+            const event = { userId: "user123", msgId: "msg100", data: Buffer.from("drive_manager_open") };
+            mockDriveRepository.findByUserId.mockResolvedValue([]);
+
+            const result = await DriveConfigFlow.handleCallback(event, "user456");
+
+            expect(mockClient.editMessage).toHaveBeenCalled();
+            expect(result).toBe("已返回");
         });
 
         test("should reveal advanced drive choices only after choosing more drives", async () => {
