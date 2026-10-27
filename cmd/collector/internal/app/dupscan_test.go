@@ -41,7 +41,7 @@ func TestGroupDuplicatesByHash(t *testing.T) {
 }
 
 // TestGroupDuplicatesFallsBackToSize —— 后端不给哈希时必须降级到按大小,
-// 且如实说「可能内容不同」,不能谎称网盘干净。
+// 且如实说「内容可能不同」,不能谎称网盘干净。
 func TestGroupDuplicatesFallsBackToSize(t *testing.T) {
 	got := groupDuplicates([]rclone.FileEntry{
 		{Path: "a.bin", Size: 100},
@@ -128,11 +128,11 @@ func TestRenderDupScanPageClamps(t *testing.T) {
 // TestRenderDupScanPageFoldsLongGroups —— 一组几百个路径会把消息撑爆,
 // 超过 6 条必须折叠成「另有 N 份」。
 func TestRenderDupScanPageFoldsLongGroups(t *testing.T) {
-	entries := make([]rclone.FileEntry, 0, 10)
+	ent := make([]rclone.FileEntry, 0, 10)
 	for i := 0; i < 10; i++ {
-		entries = append(entries, rclone.FileEntry{Path: string(rune('a'+i)) + ".bin", Size: 10})
+		ent = append(ent, rclone.FileEntry{Path: string(rune('a'+i)) + ".bin", Size: 10})
 	}
-	text, _ := renderDupScanPage("mega", groupDuplicates(entries), 0)
+	text, _ := renderDupScanPage("mega", groupDuplicates(ent), 0)
 
 	if !strings.Contains(text, "另有 4 份") {
 		t.Errorf("超出 6 条应折叠,得到:\n%s", text)
@@ -154,6 +154,40 @@ func TestRenderDupScanPageNoDuplicates(t *testing.T) {
 	}
 	if len(buttons) != 0 {
 		t.Errorf("没有重复就没有翻页按钮,得到 %+v", buttons)
+	}
+}
+
+// TestFormatDupSize 验证去重扫描大小展示:包含精确字节数与千分位格式化。
+func TestFormatDupSize(t *testing.T) {
+	cases := []struct {
+		in   int64
+		want string
+	}{
+		{0, "0 字节"},
+		{500, "500 字节"},
+		{1023, "1023 字节"},
+		{1024, "1.0 KB (1,024 字节)"},
+		{1572864, "1.5 MB (1,572,864 字节)"},
+		{1073741824, "1.0 GB (1,073,741,824 字节)"},
+	}
+	for _, tc := range cases {
+		if got := formatDupSize(tc.in); got != tc.want {
+			t.Errorf("formatDupSize(%d) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+
+	// 验证在 renderDupScanPage 中渲染
+	res := dupScanResult{
+		Groups: []dupGroup{
+			{Basis: "hash", Algo: "md5", Size: 1572864, Paths: []string{"a.mp4", "b.mp4"}},
+		},
+		Hashed:        2,
+		Total:         2,
+		HashAvailable: true,
+	}
+	text, _ := renderDupScanPage("mega", res, 0)
+	if !strings.Contains(text, "1.5 MB (1,572,864 字节)") {
+		t.Errorf("页面中应展示精确字节数,得到:\n%s", text)
 	}
 }
 

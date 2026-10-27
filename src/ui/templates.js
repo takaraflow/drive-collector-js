@@ -7,9 +7,21 @@ import { CloudTool } from "../services/rclone.js";
 import { resolveRcloneFailureMetadata } from "../utils/rcloneErrorMessage.js";
 
 /**
+ * 格式化去重扫描结果中的文件大小：带上精确字节数，消除「是否被约分」的疑虑。
+ */
+export function formatDupSize(bytes) {
+    const num = Number(bytes) || 0;
+    if (num < 1024) {
+        return `${num} 字节`;
+    }
+    return `${formatBytes(num)} (${num.toLocaleString('en-US')} 字节)`;
+}
+
+/**
  * --- UI 模板工具库 (UIHelper) ---
  */
 export class UIHelper {
+    static formatDupSize = formatDupSize;
     static _taskFailureDisplayMessage(task) {
         const message = task?.error_msg || task?.user_message || '';
         if (!message) return '';
@@ -133,15 +145,16 @@ export class UIHelper {
         }
 
         const lines = slice.map(group => {
+            const sizeStr = formatDupSize(group.size || 0);
             const header = group.basis === 'hash'
                 ? format(STRINGS.dup_scan.group_hash, {
                     count: group.paths.length,
-                    size: formatBytes(group.size || 0),
+                    size: sizeStr,
                     algo: escapeHTML(group.algo || '')
                 })
                 : format(STRINGS.dup_scan.group_size, {
                     count: group.paths.length,
-                    size: formatBytes(group.size || 0)
+                    size: sizeStr
                 });
 
             // 单组最多列 6 条路径,剩下的折叠成"另有 N 份" —— 长路径会让消息超限
