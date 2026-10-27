@@ -186,6 +186,38 @@ func dupPath(f rclone.FileEntry) string {
 // dupScanTitle 与 JS STRINGS.dup_scan.title 一致。
 const dupScanTitle = "🔍 <b>网盘重复文件扫描</b>\n\n"
 
+// formatExactBytes 为字节数添加千分位逗号。
+func formatExactBytes(b int64) string {
+	in := strconv.FormatInt(b, 10)
+	n := len(in)
+	if n <= 3 {
+		return in
+	}
+	var sb strings.Builder
+	rem := n % 3
+	if rem > 0 {
+		sb.WriteString(in[:rem])
+	}
+	for i := rem; i < n; i += 3 {
+		if sb.Len() > 0 {
+			sb.WriteByte(',')
+		}
+		sb.WriteString(in[i : i+3])
+	}
+	return sb.String()
+}
+
+// formatDupSize 渲染去重清单里的文件大小:带上精确字节数,消除「是否被约分」的疑虑。
+func formatDupSize(b int64) string {
+	if b < 0 {
+		b = 0
+	}
+	if b < 1024 {
+		return fmt.Sprintf("%d 字节", b)
+	}
+	return fmt.Sprintf("%s (%s 字节)", formatSize(b), formatExactBytes(b))
+}
+
 // renderDupScanPage 渲染单页重复文件清单(纯函数,可测)。
 func renderDupScanPage(driveName string, r dupScanResult, page int) (string, [][]tgclient.Button) {
 	groups := r.Groups
@@ -212,10 +244,10 @@ func renderDupScanPage(driveName string, r dupScanResult, page int) (string, [][
 		var header string
 		if g.Basis == "hash" {
 			header = fmt.Sprintf("🔁 <b>%d 份相同内容</b>（每个 %s，哈希 %s）",
-				len(g.Paths), formatSize(g.Size), escapeHTMLText(g.Algo))
+				len(g.Paths), formatDupSize(g.Size), escapeHTMLText(g.Algo))
 		} else {
 			header = fmt.Sprintf("🔁 <b>%d 份相同大小</b>（每个 %s，内容可能不同）",
-				len(g.Paths), formatSize(g.Size))
+				len(g.Paths), formatDupSize(g.Size))
 		}
 		shown := make([]string, 0, dupScanMaxShownPaths+1)
 		for _, p := range g.Paths[:min(dupScanMaxShownPaths, len(g.Paths))] {

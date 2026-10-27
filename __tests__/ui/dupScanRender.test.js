@@ -104,4 +104,21 @@ describe("UIHelper.renderDupScanPage", () => {
         expect(callbackData).toContain("files_page_0");
         expect(callbackData).toContain("dupscan_scope_default");
     });
+
+    it("displays exact byte count alongside human-readable size", () => {
+        expect(UIHelper.formatDupSize(0)).toBe("0 字节");
+        expect(UIHelper.formatDupSize(500)).toBe("500 字节");
+        expect(UIHelper.formatDupSize(1023)).toBe("1023 字节");
+        expect(UIHelper.formatDupSize(1024)).toBe("1 KB (1,024 字节)");
+        expect(UIHelper.formatDupSize(1572864)).toBe("1.5 MB (1,572,864 字节)");
+        expect(UIHelper.formatDupSize(1073741824)).toBe("1 GB (1,073,741,824 字节)");
+
+        const { text } = UIHelper.renderDupScanPage("Mega-x", hashScan([
+            { basis: "hash", algo: "md5", size: 1572864, paths: ["a", "b"] },
+            { basis: "size", algo: null, size: 500, paths: ["c", "d"] }
+        ]), 0);
+
+        expect(text).toContain("1.5 MB (1,572,864 字节)");
+        expect(text).toContain("500 字节");
+    });
 });
