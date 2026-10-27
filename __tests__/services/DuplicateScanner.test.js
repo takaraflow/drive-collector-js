@@ -161,6 +161,13 @@ describe('resolveDrives', () => {
 
         expect(await resolveDrives('u1', 'all')).toHaveLength(2);
     });
+
+    it('returns specific drive for drive:<id> scope', async () => {
+        const drive = { id: 'd2', name: 'Mega-2' };
+        mockDriveRepository.findByUserAndId = vi.fn().mockResolvedValue(drive);
+
+        expect(await resolveDrives('u1', 'drive:d2')).toEqual([drive]);
+    });
 });
 
 describe('scan state (Redis)', () => {

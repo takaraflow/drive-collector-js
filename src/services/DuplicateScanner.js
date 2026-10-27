@@ -129,6 +129,14 @@ export async function resolveDrives(userId, scope) {
         const drive = await DriveRepository.getDefaultDrive(userId);
         return drive ? [drive] : [];
     }
+    if (typeof scope === 'string' && scope.startsWith('drive:')) {
+        const driveId = scope.slice('drive:'.length);
+        const drive = await DriveRepository.findByUserAndId(userId, driveId);
+        if (drive) return [drive];
+        const all = await DriveRepository.findByUserId(userId);
+        const matched = (all || []).find(d => String(d.id) === String(driveId));
+        return matched ? [matched] : [];
+    }
     const drives = await DriveRepository.findByUserId(userId);
     return Array.isArray(drives) ? drives : [];
 }

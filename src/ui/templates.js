@@ -166,7 +166,7 @@ export class UIHelper {
         });
 
         const text = [
-            format(STRINGS.dup_scan.title, {}),
+            format(STRINGS.dup_scan.title, {}) + `📂 网盘: <code>${escapeHTML(driveName)}</code>`,
             lines.join('\n\n'),
             format(STRINGS.dup_scan.page_info, {
                 current: clamped + 1,
