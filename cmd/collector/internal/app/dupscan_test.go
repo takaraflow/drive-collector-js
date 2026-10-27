@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/youngsx/drive-collector/cmd/collector/internal/drive"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/rclone"
 )
 
@@ -189,6 +190,9 @@ func TestFormatDupSize(t *testing.T) {
 	if !strings.Contains(text, "1.5 MB (1,572,864 字节)") {
 		t.Errorf("页面中应展示精确字节数,得到:\n%s", text)
 	}
+	if !strings.Contains(text, "📂 网盘: <code>mega</code>") {
+		t.Errorf("页面中应展示网盘名称,得到:\n%s", text)
+	}
 }
 
 // TestScanDriveScansDriveRoot —— 扫的是网盘根,不是用户那个子目录。
@@ -209,5 +213,34 @@ func TestScanDriveScansDriveRoot(t *testing.T) {
 	}
 	if len(res.Groups) != 1 {
 		t.Errorf("应归出一组重复,得到 %+v", res.Groups)
+	}
+}
+
+// TestResolveScanDrives 验证按网盘单独扫描与全盘扫描的范围解析。
+func TestResolveScanDrives(t *testing.T) {
+	d1 := drive.Drive{ID: "d1", UserID: "u1", Name: "Mega-1", IsDefault: 1}
+	d2 := drive.Drive{ID: "d2", UserID: "u1", Name: "Mega-2", IsDefault: 0}
+	fd := &fakeDrives{
+		drive: &d1,
+		all:   []drive.Drive{d1, d2},
+	}
+	a := newFilesApp(&fakeRclone{}, fd)
+
+	// 1. scope: all
+	allDrives, err := a.resolveScanDrives(context.Background(), "u1", "dupscan_scope_all")
+	if err != nil || len(allDrives) != 2 {
+		t.Errorf("dupscan_scope_all 应返回全部 2 个网盘, err=%v, drives=%+v", err, allDrives)
+	}
+
+	// 2. scope: specific drive d2
+	singleDrive, err := a.resolveScanDrives(context.Background(), "u1", "dupscan_scope_drive_d2")
+	if err != nil || len(singleDrive) != 1 || singleDrive[0].ID != "d2" {
+		t.Errorf("dupscan_scope_drive_d2 应返回 d2, err=%v, drives=%+v", err, singleDrive)
+	}
+
+	// 3. scope: default
+	defDrive, err := a.resolveScanDrives(context.Background(), "u1", "dupscan_scope_default")
+	if err != nil || len(defDrive) != 1 || defDrive[0].ID != "d1" {
+		t.Errorf("dupscan_scope_default 应返回默认网盘 d1, err=%v, drives=%+v", err, defDrive)
 	}
 }

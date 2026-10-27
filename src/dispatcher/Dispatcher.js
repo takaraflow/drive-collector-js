@@ -1279,11 +1279,26 @@ export class Dispatcher {
 
     // ---- 重复文件扫描(只读) ----
 
-    static _getDupScanScopeButtons() {
-        return [[
-            Button.inline(STRINGS.dup_scan.btn_scope_default, Buffer.from("dupscan_scope_default")),
-            Button.inline(STRINGS.dup_scan.btn_scope_all, Buffer.from("dupscan_scope_all"))
-        ]];
+    static _getDupScanScopeButtons(drives = []) {
+        if (!Array.isArray(drives) || drives.length === 0) {
+            return [[
+                Button.inline(STRINGS.dup_scan.btn_scope_default, Buffer.from("dupscan_scope_default")),
+                Button.inline(STRINGS.dup_scan.btn_scope_all, Buffer.from("dupscan_scope_all"))
+            ]];
+        }
+
+        const buttons = [];
+        const defaultDrive = drives.find(d => d.is_default) || drives[0];
+
+        for (const drive of drives) {
+            const isDef = defaultDrive && String(drive.id) === String(defaultDrive.id);
+            const name = drive.name || drive.type || '网盘';
+            const label = isDef ? `📁 ${name} (默认)` : `📁 ${name}`;
+            buttons.push([Button.inline(label, Buffer.from(`dupscan_scope_drive_${drive.id}`))]);
+        }
+
+        buttons.push([Button.inline(STRINGS.dup_scan.btn_scope_all || "扫描所有网盘", Buffer.from("dupscan_scope_all"))]);
+        return buttons;
     }
 
     static _getDupScanCancelButtons() {
@@ -1307,7 +1322,7 @@ export class Dispatcher {
 
         return await runBotTaskWithRetry(() => client.sendMessage(target, {
             message: format(STRINGS.dup_scan.title, {}) + STRINGS.dup_scan.intro,
-            buttons: this._getDupScanScopeButtons(),
+            buttons: this._getDupScanScopeButtons(drives),
             parseMode: "html"
         }), userId, { priority: PRIORITY.UI }, false, 3);
     }
@@ -1333,7 +1348,7 @@ export class Dispatcher {
             return await answer();
         }
 
-        if (data === "dupscan_scope_default" || data === "dupscan_scope_all") {
+        if (data === "dupscan_scope_default" || data === "dupscan_scope_all" || data.startsWith("dupscan_scope_drive_")) {
             // 同一用户只允许一个扫描:两个扫描是两个 msgId,safeEdit 的去抖互不保护
             const existing = await readScanState(userId);
             if (existing && existing.status === "running") {
@@ -1341,7 +1356,15 @@ export class Dispatcher {
                 return await answer();
             }
 
-            const scope = data === "dupscan_scope_all" ? "all" : "default";
+            let scope;
+            if (data === "dupscan_scope_all") {
+                scope = "all";
+            } else if (data === "dupscan_scope_default") {
+                scope = "default";
+            } else {
+                const driveId = data.slice("dupscan_scope_drive_".length);
+                scope = `drive:${driveId}`;
+            }
             const drives = await resolveDrives(userId, scope);
             if (!drives || drives.length === 0) {
                 await safeEdit(event.userId, event.msgId, STRINGS.dup_scan.no_drive, this._getNoDriveButtons(), userId);

@@ -85,8 +85,8 @@ describe('Dispatcher /scan_dup', () => {
         expect(target).toBe('chat1');
         expect(payload.message).toContain('不会删除');
 
-        const buttonData = payload.buttons[0].map(b => b.data.toString());
-        expect(buttonData).toEqual(['dupscan_scope_default', 'dupscan_scope_all']);
+        const buttonData = payload.buttons.flat().map(b => b.data.toString());
+        expect(buttonData).toEqual(['dupscan_scope_drive_d1', 'dupscan_scope_all']);
     });
 
     it('refuses to start a second scan for the same user', async () => {
@@ -184,6 +184,20 @@ describe('Dispatcher /scan_dup', () => {
         );
 
         expect(mockUIHelper.renderDupScanPage).not.toHaveBeenCalled();
+        expect(answer).toHaveBeenCalled();
+    });
+    it('scans an individual drive when chosen', async () => {
+        mockScanner.scanDrive.mockResolvedValue({
+            ok: true,
+            result: { groups: [], hashed: 0, total: 0, hashAvailable: false }
+        });
+        const answer = vi.fn();
+
+        await Dispatcher._handleDupScanCallback(
+            { userId: 'user1', msgId: 7 }, 'dupscan_scope_drive_d1', 'user1', answer
+        );
+
+        expect(mockScanner.resolveDrives).toHaveBeenCalledWith('user1', 'drive:d1');
         expect(answer).toHaveBeenCalled();
     });
 });

@@ -120,5 +120,6 @@ describe("UIHelper.renderDupScanPage", () => {
 
         expect(text).toContain("1.5 MB (1,572,864 字节)");
         expect(text).toContain("500 字节");
+        expect(text).toContain("📂 网盘: <code>Mega-x</code>");
     });
 });

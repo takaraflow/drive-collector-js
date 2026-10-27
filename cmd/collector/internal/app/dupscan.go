@@ -260,7 +260,7 @@ func renderDupScanPage(driveName string, r dupScanResult, page int) (string, [][
 	}
 
 	text := strings.Join([]string{
-		dupScanTitle,
+		dupScanTitle + fmt.Sprintf("📂 网盘: <code>%s</code>", escapeHTMLText(driveName)),
 		strings.Join(lines, "\n\n"),
 		fmt.Sprintf("📊 <i>第 %d/%d 页 | 共 %d 组重复</i>", page+1, totalPages, len(groups)),
 		dupScanBasisNote(r),
@@ -348,12 +348,25 @@ func (a *App) handleScanDupCommand(ctx context.Context, msg messageInfo) error {
 		return a.tg.SendMessage(ctx, msg.ChatID,
 			"🚫 <b>还没有绑定网盘</b>\n\n请先发送 /drive 绑定网盘。")
 	}
+	var rows [][]tgclient.Button
+	for _, d := range drives {
+		label := fmt.Sprintf("📁 %s", driveLabel(d))
+		if d.IsDefault == 1 {
+			label += " (默认)"
+		}
+		rows = append(rows, []tgclient.Button{{
+			Text: label,
+			Data: fmt.Sprintf("dupscan_scope_drive_%s", d.ID),
+		}})
+	}
+	rows = append(rows, []tgclient.Button{{
+		Text: "🌐 扫描所有网盘",
+		Data: "dupscan_scope_all",
+	}})
+
 	return a.tg.SendWithButtons(ctx, msg.ChatID,
 		dupScanTitle+"扫描整个网盘，找出重复的文件，<b>只列清单，不会删除任何东西</b>。\n请选择扫描范围：",
-		[][]tgclient.Button{{
-			{Text: "当前默认网盘", Data: "dupscan_scope_default"},
-			{Text: "扫描所有网盘", Data: "dupscan_scope_all"},
-		}})
+		rows)
 }
 
 // handleDupScanCallback 处理范围选择 / 取消 / 翻页。
@@ -394,12 +407,12 @@ func (a *App) handleDupScanCallback(ctx context.Context, cb tgclient.CallbackCon
 		answer("", false)
 		return nil
 
-	case data == "dupscan_scope_default", data == "dupscan_scope_all":
+	case data == "dupscan_scope_default", data == "dupscan_scope_all", strings.HasPrefix(data, "dupscan_scope_drive_"):
 		// 同一用户只允许一个扫描:两个扫描是两个 msgId,互相不保护。
 		if st := a.readDupScanState(ctx, userID); st != nil && st.Status == "running" {
 			return a.editScanText(ctx, cb, "🕒 <b>已有扫描在进行中</b>\n\n请等待当前扫描结束，或点击它消息里的「停止扫描」。", nil)
 		}
-		drives, err := a.resolveScanDrives(ctx, userID, data == "dupscan_scope_all")
+		drives, err := a.resolveScanDrives(ctx, userID, data)
 		if err != nil {
 			a.log.Error("解析扫描范围失败", "err", err)
 			return a.editScanText(ctx, cb, "❌ 查询网盘列表失败,请稍后重试。", nil)
@@ -433,9 +446,27 @@ func (a *App) editScanText(ctx context.Context, cb tgclient.CallbackContext, tex
 }
 
 // resolveScanDrives 按范围选出要扫的网盘。
-func (a *App) resolveScanDrives(ctx context.Context, userID string, all bool) ([]drive.Drive, error) {
-	if all {
+func (a *App) resolveScanDrives(ctx context.Context, userID string, scope string) ([]drive.Drive, error) {
+	if scope == "dupscan_scope_all" {
 		return a.drives.DrivesByUser(ctx, userID)
+	}
+	if strings.HasPrefix(scope, "dupscan_scope_drive_") {
+		driveID := strings.TrimPrefix(scope, "dupscan_scope_drive_")
+		d, err := a.drives.DriveByID(ctx, driveID)
+		if err == nil && d != nil && d.ID == driveID && (d.UserID == userID || d.UserID == "") {
+			return []drive.Drive{*d}, nil
+		}
+		// 容错: 在用户的网盘列表中按 ID 匹配
+		userDrives, uerr := a.drives.DrivesByUser(ctx, userID)
+		if uerr != nil {
+			return nil, uerr
+		}
+		for _, ud := range userDrives {
+			if ud.ID == driveID {
+				return []drive.Drive{ud}, nil
+			}
+		}
+		return nil, nil
 	}
 	d, err := a.drives.DefaultDrive(ctx, userID)
 	if err != nil {
