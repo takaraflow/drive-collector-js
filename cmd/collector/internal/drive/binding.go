@@ -194,7 +194,7 @@ func HandleMegaStep(ctx context.Context, runner *rclone.Runner, step, input stri
 		// 真正的 rclone 验证在调用方(app 层)做 —— 这里只负责组装。
 		return BindResult{
 			Success:   true,
-			Message:   "✅ <b>绑定成功！</b>\n\n账号: <code>" + data["user"] + "</code>\n\n现在可以直接发送文件或链接开始转存。",
+			Message:   "✅ <b>绑定成功！</b>\n\n账号: <code>" + escapeHTML(data["user"]) + "</code>\n\n现在可以直接发送文件或链接开始转存。",
 			Data:      map[string]string{},
 			Config:    &cfg,
 			DriveName: "Mega-" + data["user"],
@@ -330,7 +330,7 @@ func finalizeProton(ctx context.Context, rt ProtonRuntime, data map[string]strin
 		}
 	}
 
-	msg := "✅ <b>Proton Drive 绑定成功！</b>\n\n账号: <code>" + username + "</code>\n\n"
+	msg := "✅ <b>Proton Drive 绑定成功！</b>\n\n账号: <code>" + escapeHTML(username) + "</code>\n\n"
 	if protonSessionComplete(session) {
 		msg += "登录会话已保存，后续转存不需要再输入 2FA 验证码。\n"
 	} else {
@@ -364,7 +364,7 @@ func protonFailMessage(reason, details string) string {
 		return "⚠️ <b>登录成功，但未能保存长期会话</b>\n\n为避免后续转存再次要求 2FA，请重试绑定。\n若持续失败，请换用其他网盘。"
 	}
 	if details != "" {
-		return "⚠️ <b>Proton Drive 登录或配置验证失败</b>\n\n请检查用户名、密码，以及 2FA 验证码是否正确。\n" + details
+		return "⚠️ <b>Proton Drive 登录或配置验证失败</b>\n\n请检查用户名、密码，以及 2FA 验证码是否正确。\n" + escapeHTML(details)
 	}
 	return "⚠️ <b>Proton Drive 登录或配置验证失败</b>\n\n请检查用户名、密码，以及 2FA 验证码是否正确。"
 }
@@ -439,7 +439,7 @@ func HandleWebDAVStep(ctx context.Context, runner *rclone.Runner, step, input st
 		account := data["user"]
 		return BindResult{
 			Success:   true,
-			Message:   "✅ <b>WebDAV 绑定成功！</b>\n\n账号: <code>" + account + "</code>\n服务器: <code>" + data["url"] + "</code>\n\n现在可以发送文件或链接开始转存。",
+			Message:   "✅ <b>WebDAV 绑定成功！</b>\n\n账号: <code>" + escapeHTML(account) + "</code>\n服务器: <code>" + escapeHTML(data["url"]) + "</code>\n\n现在可以发送文件或链接开始转存。",
 			Data:      map[string]string{},
 			Config:    &cfg,
 			DriveName: "WebDAV-" + account,
@@ -525,7 +525,7 @@ func HandleOSSStep(ctx context.Context, runner *rclone.Runner, step, input strin
 		bucket := data["bucket"]
 		return BindResult{
 			Success:   true,
-			Message:   "✅ <b>S3 / OSS 绑定成功！</b>\n\nBucket: <code>" + bucket + "</code>\nEndpoint: <code>" + data["endpoint"] + "</code>\n\n现在可以发送文件或链接开始转存。",
+			Message:   "✅ <b>S3 / OSS 绑定成功！</b>\n\nBucket: <code>" + escapeHTML(bucket) + "</code>\nEndpoint: <code>" + escapeHTML(data["endpoint"]) + "</code>\n\n现在可以发送文件或链接开始转存。",
 			Data:      map[string]string{},
 			Config:    &cfg,
 			DriveName: "OSS-" + bucket,
@@ -585,7 +585,7 @@ func HandlePikPakStep(ctx context.Context, runner *rclone.Runner, step, input st
 		account := data["user"]
 		return BindResult{
 			Success:   true,
-			Message:   "✅ <b>PikPak 绑定成功！</b>\n\n账号: <code>" + account + "</code>\n\n现在可以直接发送文件或链接开始转存。",
+			Message:   "✅ <b>PikPak 绑定成功！</b>\n\n账号: <code>" + escapeHTML(account) + "</code>\n\n现在可以直接发送文件或链接开始转存。",
 			Data:      map[string]string{},
 			Config:    &cfg,
 			DriveName: "PikPak-" + account,
@@ -634,7 +634,7 @@ func HandleFilenStep(ctx context.Context, runner *rclone.Runner, client FilenCli
 				Success:       false,
 				Failed:        true,
 				FailureReason: "LOGIN_FAILED",
-				Message:       "❌ <b>Filen 登录失败</b>\n\n原因：" + err.Error() + "\n\n请检查邮箱与密码后重试。",
+				Message:       "❌ <b>Filen 登录失败</b>\n\n原因：" + escapeHTML(err.Error()) + "\n\n请检查邮箱与密码后重试。",
 			}
 		}
 
@@ -666,7 +666,7 @@ func HandleFilenStep(ctx context.Context, runner *rclone.Runner, client FilenCli
 				Success:       false,
 				Failed:        true,
 				FailureReason: "2FA_FAILED",
-				Message:       "❌ <b>2FA 验证失败</b>\n\n原因：" + err.Error() + "\n\n动态验证码可能已过期，请重试。",
+				Message:       "❌ <b>2FA 验证失败</b>\n\n原因：" + escapeHTML(err.Error()) + "\n\n动态验证码可能已过期，请重试。",
 			}
 		}
 
@@ -700,9 +700,14 @@ func finalizeFilen(ctx context.Context, runner *rclone.Runner, email, pass, apiK
 
 	return BindResult{
 		Success:   true,
-		Message:   "✅ <b>Filen 绑定成功！</b>\n\n账号: <code>" + email + "</code>\n密钥: 已自动派生并安全保存\n\n现在可以直接发送文件或链接开始转存。",
+		Message:   "✅ <b>Filen 绑定成功！</b>\n\n账号: <code>" + escapeHTML(email) + "</code>\n密钥: 已自动派生并安全保存\n\n现在可以直接发送文件或链接开始转存。",
 		Data:      map[string]string{},
 		Config:    &cfg,
 		DriveName: "Filen-" + email,
 	}
+}
+
+func escapeHTML(s string) string {
+	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
+	return r.Replace(s)
 }

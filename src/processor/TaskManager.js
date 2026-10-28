@@ -767,7 +767,8 @@ export class TaskManager {
             try {
                 await client.editMessage(target, {
                     message: statusMsg.id,
-                    text: STRINGS.task.create_failed
+                    text: STRINGS.task.create_failed,
+                    parseMode: "html"
                 });
             } catch (editError) {
                 log.warn("Failed to update error message", { error: editError.message });
@@ -833,7 +834,8 @@ export class TaskManager {
             try {
                 await client.editMessage(target, {
                     message: statusMsg.id,
-                    text: STRINGS.task.create_failed
+                    text: STRINGS.task.create_failed,
+                    parseMode: "html"
                 });
             } catch (editError) {
                 log.warn("Failed to update external URL error message", { error: editError.message });
@@ -922,7 +924,8 @@ export class TaskManager {
             try {
                 await client.editMessage(target, {
                     message: statusMsg.id,
-                    text: STRINGS.task.create_failed
+                    text: STRINGS.task.create_failed,
+                    parseMode: "html"
                 });
             } catch (editError) {
                 log.warn("Failed to update batch error message", { error: editError.message });
