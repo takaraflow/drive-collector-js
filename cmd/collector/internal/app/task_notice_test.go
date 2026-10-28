@@ -123,6 +123,24 @@ func TestNotifyOutcomeReportsFailure(t *testing.T) {
 	}
 }
 
+// TestNotifyOutcomeClassifiedError 验证分类友好的网盘错误展示。
+func TestNotifyOutcomeClassifiedError(t *testing.T) {
+	task := noticeTask("failed", "rclone: quota exceeded on remote: drive full")
+	notices := &fakeNotices{}
+	a, _ := newTestApp(t, &fakeDL{content: "x"}, &fakeRepo{byID: &task}, boundDrive())
+	a.notices = notices
+
+	a.notifyOutcome(context.Background(), task.ID, true)
+
+	got := strings.Join(notices.edits, "\n")
+	if !strings.Contains(got, "空间不足") {
+		t.Errorf("期望友好提示「空间不足」,实际输出: %q", got)
+	}
+	if len(notices.editBtns) == 0 || len(notices.editBtns[0][0]) == 0 {
+		t.Errorf("容量满时仍应提供重试按钮供清理后重试")
+	}
+}
+
 // TestNotifyOutcomeSilentWhenBlocked 只是被状态机挡下不算失败。
 //
 // 用户已取消 / 已在处理中都会回 Success=false,但那是「这次没轮到你」,

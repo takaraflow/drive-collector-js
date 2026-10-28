@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/youngsx/drive-collector/cmd/collector/internal/rclone"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/store"
 	tgclient "github.com/youngsx/drive-collector/cmd/collector/internal/telegram"
 )
@@ -27,7 +28,7 @@ const (
 	noticeCaptured    = "🚀 <b>已捕获文件任务</b>\n正在排队处理..."
 	noticeDownloading = "📥 正在下载资源..."
 	noticeUploading   = "📤 <b>资源拉取完成，正在启动转存...</b>"
-	noticeSuccess     = "✅ <b>文件转存成功</b>\n\n📄 名称: <code>%s</code>\n📂 目录: <code>%s</code>"
+	noticeSuccess     = "✅ <b>文件转存成功</b>\n\n📄 名称: <code>%s</code>\n📁 目录: <code>%s</code>"
 	noticeUploadFail  = "❌ <b>转存失败</b>\n\n原因: <code>%s</code>\n你可以重试，或重新发送文件。"
 	noticeFail        = "❌ <b>处理失败</b>\n\n%s"
 	noticeCancelled   = "🚫 任务已取消。"
@@ -58,6 +59,33 @@ func (a *App) postNotice(ctx context.Context, chatID int64, taskID string) int {
 		return 0
 	}
 	return msgID
+}
+
+// formatUploadFailText 结合网盘错误分类生成用户友好提示和操作按钮。
+func formatUploadFailText(err error, taskID string) (string, [][]tgclient.Button) {
+	if err == nil {
+		return fmt.Sprintf(noticeUploadFail, "未知错误"), [][]tgclient.Button{
+			{{Text: noticeRetryBtn, Data: "retry_confirm_" + taskID}},
+		}
+	}
+	rawMsg := err.Error()
+	cls := rclone.ClassifyError(rawMsg)
+	reason := escapeHTMLText(noticeReason(err))
+
+	var text string
+	if cls.UserMessage != "" {
+		text = fmt.Sprintf("❌ <b>转存失败</b>\n\n%s\n\n详情: <code>%s</code>", cls.UserMessage, reason)
+	} else {
+		text = fmt.Sprintf(noticeUploadFail, reason)
+	}
+
+	var buttons [][]tgclient.Button
+	if cls.UserRetryable {
+		buttons = append(buttons, []tgclient.Button{
+			{Text: noticeRetryBtn, Data: "retry_confirm_" + taskID},
+		})
+	}
+	return text, buttons
 }
 
 // notify 把任务状态写回那一条消息。
@@ -119,7 +147,7 @@ func noticeChatID(t store.Task) (int64, bool) {
 	return 0, false
 }
 
-// noticeReason 把错误压成一行能塞进消息的短文本。
+// noticeReason 把错误压缩成一行能塞进消息的短文本。
 //
 // rclone 的失败信息常带多行日志和引号,直接进 <code> 会把版式冲垮,
 // 也会把内部路径暴露成一屏噪音。

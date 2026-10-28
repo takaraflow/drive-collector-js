@@ -396,12 +396,9 @@ func (a *App) notifyOutcome(ctx context.Context, taskID string, uploadPhase bool
 	case contract.StatusFailed:
 		reason := escapeHTMLText(noticeReason(errors.New(t.ErrorMsg.String)))
 		text := fmt.Sprintf(noticeFail, reason)
-		buttons := [][]tgclient.Button{}
+		var buttons [][]tgclient.Button
 		if uploadPhase {
-			text = fmt.Sprintf(noticeUploadFail, reason)
-			buttons = append(buttons, []tgclient.Button{
-				{Text: noticeRetryBtn, Data: "retry_confirm_" + taskID},
-			})
+			text, buttons = formatUploadFailText(errors.New(t.ErrorMsg.String), taskID)
 		}
 		a.notify(ctx, t, text, buttons)
 	}

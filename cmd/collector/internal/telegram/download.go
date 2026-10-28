@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gotd/td/tg"
@@ -70,10 +71,61 @@ func (c *Client) DownloadStream(ctx context.Context, chatID, msgID int64, w io.W
 	return nil
 }
 
+const (
+	DefaultSmallChunkSize = 128 * 1024
+	DefaultLargeChunkSize = 512 * 1024
+	LargeFileThreshold    = 100 * 1024 * 1024
+	DefaultStagingTTL     = 24 * time.Hour
+	PartSuffix            = ".part"
+)
+
+// ResolveChunkSize 根据文件总大小确定分块对齐尺寸。
+func ResolveChunkSize(totalSize int64) int64 {
+	if totalSize > LargeFileThreshold {
+		return DefaultLargeChunkSize
+	}
+	return DefaultSmallChunkSize
+}
+
+// CleanupStalePartFiles 机会式清理指定目录下超过 TTL 的 .part 暂存半成品文件。
+func CleanupStalePartFiles(dir string, ttl time.Duration) (int, error) {
+	if dir == "" {
+		return 0, nil
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	now := time.Now()
+	removed := 0
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), PartSuffix) {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		if now.Sub(info.ModTime()) > ttl {
+			if err := os.Remove(filepath.Join(dir, entry.Name())); err == nil {
+				removed++
+			}
+		}
+	}
+	return removed, nil
+}
+
 func (c *Client) DownloadTo(ctx context.Context, chatID, msgID int64, destPath string, progress ProgressFunc) error {
-	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
+	dir := filepath.Dir(destPath)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("telegram: 创建下载目录失败: %w", err)
 	}
+
+	// 机会式清理过期 .part 暂存文件
+	_, _ = CleanupStalePartFiles(dir, DefaultStagingTTL)
 
 	msg, err := c.fetchMessage(ctx, chatID, msgID)
 	if err != nil {
@@ -89,19 +141,23 @@ func (c *Client) DownloadTo(ctx context.Context, chatID, msgID int64, destPath s
 		return err
 	}
 
-	// 先下到临时文件,成功后再 rename —— 直接写目标路径时,
-	// 中途失败会留下半截文件,而后续流程会把它当成有效文件上传,
-	// 用户拿到的是损坏的文件。
-	tmp, err := os.CreateTemp(filepath.Dir(destPath), ".dl-*")
-	if err != nil {
-		return fmt.Errorf("telegram: 创建临时文件失败: %w", err)
+	partPath := destPath + PartSuffix
+	_ = ResolveChunkSize(loc.TotalSize)
+
+	if fi, err := os.Stat(partPath); err == nil {
+		size := fi.Size()
+		if loc.TotalSize > 0 && size == loc.TotalSize {
+			// .part 恰好等于目标大小，直接原子重命名完成
+			return os.Rename(partPath, destPath)
+		}
 	}
-	tmpPath := tmp.Name()
-	defer func() {
-		tmp.Close()
-		// rename 成功后这里删的是已经不存在的路径,无害。
-		_ = os.Remove(tmpPath)
-	}()
+
+	// 写入 .part 暂存文件（先写 .part，成功后原子 rename，避免半截脏文件留在目标路径）
+	partFile, err := os.OpenFile(partPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("telegram: 创建暂存 .part 文件失败: %w", err)
+	}
+	defer partFile.Close()
 
 	// 传输空闲看门狗：如果超过 DownloadIdleTimeout 无任何数据写入，主动取消，防止连接半开挂起。
 	idleCtx, cancelIdle := context.WithCancel(ctx)
@@ -117,8 +173,9 @@ func (c *Client) DownloadTo(ctx context.Context, chatID, msgID int64, destPath s
 	}
 
 	writer := &progressWriter{
-		w:          tmp,
+		w:          partFile,
 		total:      loc.TotalSize,
+		written:    0,
 		progress:   progress,
 		onActivity: resetIdle,
 	}
@@ -132,10 +189,18 @@ func (c *Client) DownloadTo(ctx context.Context, chatID, msgID int64, destPath s
 	if err := writer.Close(); err != nil {
 		return fmt.Errorf("telegram: 写盘失败: %w", err)
 	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("telegram: 关闭临时文件失败: %w", err)
+	if err := partFile.Close(); err != nil {
+		return fmt.Errorf("telegram: 关闭暂存文件失败: %w", err)
 	}
-	if err := os.Rename(tmpPath, destPath); err != nil {
+
+	// 校验下载完整性
+	if loc.TotalSize > 0 {
+		if fi, err := os.Stat(partPath); err == nil && fi.Size() != loc.TotalSize {
+			return fmt.Errorf("telegram: 下载不完整: 实际(%d) != 预期(%d)", fi.Size(), loc.TotalSize)
+		}
+	}
+
+	if err := os.Rename(partPath, destPath); err != nil {
 		return fmt.Errorf("telegram: 落盘到目标路径失败: %w", err)
 	}
 	return nil

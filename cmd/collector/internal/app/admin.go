@@ -26,6 +26,7 @@ import (
 	"github.com/youngsx/drive-collector/cmd/collector/internal/auth"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/contract"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/d1"
+	"github.com/youngsx/drive-collector/cmd/collector/internal/memorymonitor"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/rclone"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/store"
 	tgclient "github.com/youngsx/drive-collector/cmd/collector/internal/telegram"
@@ -666,6 +667,10 @@ func (a *App) diagnosisReport(ctx context.Context) string {
 	runtime.ReadMemStats(&ms)
 	fmt.Fprintf(&b, "<code>内存: %s</code>\n", formatSize(int64(ms.Sys)))
 	fmt.Fprintf(&b, "<code>Go堆: %s</code>\n", formatSize(int64(ms.HeapAlloc)))
+	if limit := memorymonitor.ReadContainerMemoryLimitBytes(); limit > 0 {
+		ratio := float64(ms.Alloc) / float64(limit)
+		fmt.Fprintf(&b, "<code>限额: %s (%.1f%%)</code>\n", formatSize(limit), ratio*100)
+	}
 	fmt.Fprintf(&b, "<code>运行: %s</code>\n", formatUptime(time.Since(startedAt)))
 	b.WriteString("━━━━━━━━━━━━━━━━━━━\n")
 

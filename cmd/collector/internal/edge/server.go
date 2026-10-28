@@ -6,13 +6,13 @@
 //
 // 路由边界(QSTASH_PATH_TEMPLATE = /api/v2/tasks/${topic}):
 //
-//	/api/v2/tasks/*       本节点:验签 → 解析 → 转发 leader
+//	/api/v2/tasks/*       本节点:验签 → 解析 → 转发 leader (或处理 /tasks/:taskId/retry)
 //	/health /healthz      本节点 —— 平台探针必须能打到它,否则容器
 //	                       被判定不健康并无限重启,而探针失败时
 //	                       容器来不及打印任何有用日志
 //	/version              本节点 —— 确认线上跑的是哪个版本
 //	/api/v2/stream/*      不接管 —— 跨实例 chunk 中转协议仍在 Node
-//	/api/v2/config/refresh 不接管
+//	/api/v2/config/refresh 本节点 —— 接收配置刷新通知并触发热载
 package edge
 
 import (
@@ -49,6 +49,13 @@ type Config struct {
 	Mode string
 	// Outbound 是转发用客户端。nil 时用带超时的默认客户端。
 	Outbound *http.Client
+
+	// InstanceSecret 用于 /api/v2/config/refresh 与 /api/v2/tasks/:taskId/retry 的鉴权。
+	InstanceSecret string
+	// TaskRetrier 处理手动任务重试（若为 leader 或单机运行）。
+	TaskRetrier func(ctx context.Context, taskID string) (bool, error)
+	// OnConfigRefresh 处理配置刷新通知。
+	OnConfigRefresh func(ctx context.Context) error
 }
 
 // Server 是边缘 HTTP 服务。
@@ -80,14 +87,14 @@ func New(cfg Config) *Server {
 
 func (s *Server) routes() {
 	// 健康与版本端点 —— 与 Node 侧路径逐字一致。
-	//
-	// 不能省:平台探针(Northflank / fly.io)打的就是 /health 和
-	// /healthz。缺了它们,容器会被判定不健康并无限重启 ——
-	// 而且探针失败时容器根本来不及打印任何有用日志。
 	s.mux.HandleFunc("/health", s.handleHealth)
 	s.mux.HandleFunc("/healthz", s.handleHealth)
 	s.mux.HandleFunc("/version", s.handleVersion)
 
+	// 配置刷新通知端点
+	s.mux.HandleFunc("/api/v2/config/refresh", s.handleConfigRefresh)
+
+	// 任务相关端点 (/api/v2/tasks/* 包括 /retry 与 qstash webhooks)
 	s.mux.HandleFunc("/api/v2/tasks/", s.handleTask)
 
 	// 其余路径一律 404,不静默接管 —— 静默接管会让「本该走 Node 的
@@ -102,10 +109,6 @@ func (s *Server) routes() {
 }
 
 // handleHealth 存活探针。
-//
-// 只回答「进程还活着」,不查依赖 —— Redis/D1 挂了进程还在,
-// 探针不该因为那个重启它。依赖健康由 /ready 之类表达,而 Node 侧
-// 也没把两者分开。
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{
@@ -139,7 +142,6 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// modeOf 报告当前运行模式 —— /version 能一眼看出这个实例是 edge 还是 worker。
 func modeOf(cfg Config) string {
 	if cfg.Mode != "" {
 		return cfg.Mode
@@ -147,7 +149,37 @@ func modeOf(cfg Config) string {
 	return "edge"
 }
 
-// handleTask 处理 /api/v2/tasks/{topic}。
+// handleConfigRefresh 接收配置刷新通知 (Webhook)。
+func (s *Server) handleConfigRefresh(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{
+			"success": false, "message": "method not allowed",
+		})
+		return
+	}
+
+	if s.cfg.InstanceSecret != "" && r.Header.Get("x-instance-secret") != s.cfg.InstanceSecret {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{
+			"success": false, "message": "Unauthorized",
+		})
+		return
+	}
+
+	if s.cfg.OnConfigRefresh != nil {
+		if err := s.cfg.OnConfigRefresh(r.Context()); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{
+				"success": false, "message": err.Error(),
+			})
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success": true, "message": "Configuration reloaded",
+	})
+}
+
+// handleTask 处理 /api/v2/tasks/*。区分重试接口与 QStash webhook。
 func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{
@@ -156,6 +188,13 @@ func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 1. 如果是任务重试接口 /api/v2/tasks/{taskId}/retry
+	if strings.HasSuffix(r.URL.Path, "/retry") {
+		s.handleTaskRetry(w, r)
+		return
+	}
+
+	// 2. QStash 任务队列 webhook
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, MaxBodyBytes))
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
@@ -164,8 +203,6 @@ func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 签名里的 sub 必须是完整 URL(含 query),所以从原始请求重建,
-	// 不能用 r.URL.String() —— 它不含 scheme 和 host。
 	if err := s.verify(r, body); err != nil {
 		s.cfg.Log.Warn("qstash signature rejected",
 			"path", r.URL.Path, "err", err)
@@ -177,7 +214,6 @@ func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
 
 	var doc map[string]any
 	if err := json.Unmarshal(body, &doc); err != nil {
-		// 与 JS 侧 Invalid JSON → 400 对齐。
 		writeJSON(w, http.StatusBadRequest, map[string]any{
 			"success": false, "message": "Invalid JSON",
 		})
@@ -192,21 +228,73 @@ func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
 		"triggerSource", payload.Meta.TriggerSource,
 		"instanceId", payload.Meta.InstanceID)
 
-	// system-events 不需要 leader:它是本实例的媒体组 flush 事件,
-	// 和 Telegram 锁无关。放行给 Node 处理即可。
-	//
-	// 其余 topic(download/upload/batch)必须找到 leader 才能处理 ——
-	// MTProto 长连接只在持锁实例上,发错实例等于把任务丢进黑洞。
 	base, err := s.cfg.Leader.BaseURL(r.Context())
 	if !strings.HasSuffix(r.URL.Path, "/system-events") && (err != nil || base == "") {
-		// 与 JS 侧 isNotTelegramLeaderResult 契约一致:找不到 leader 就
-		// 回 503,让 QStash 稍后重试,而不是悄悄丢弃。
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
 			"success": false, "message": "Not Leader",
 		})
 		return
 	}
 	s.forwardTo(w, r, base, body)
+}
+
+func (s *Server) handleTaskRetry(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.InstanceSecret != "" && r.Header.Get("x-instance-secret") != s.cfg.InstanceSecret {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{
+			"success": false, "message": "Unauthorized",
+		})
+		return
+	}
+
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(parts) < 4 || parts[len(parts)-1] != "retry" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"success": false, "message": "invalid retry path",
+		})
+		return
+	}
+	taskID := parts[len(parts)-2]
+	if taskID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"success": false, "message": "missing taskId",
+		})
+		return
+	}
+
+	// 若本节点已提供 TaskRetrier，直接在当前节点重试
+	if s.cfg.TaskRetrier != nil {
+		ok, err := s.cfg.TaskRetrier(r.Context(), taskID)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{
+				"success": false, "message": err.Error(), "taskId": taskID,
+			})
+			return
+		}
+		if !ok {
+			writeJSON(w, http.StatusNotFound, map[string]any{
+				"success": false, "message": "task not found", "taskId": taskID,
+			})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"success": true, "message": "Task queued for retry", "taskId": taskID,
+		})
+		return
+	}
+
+	// 否则若未被转发过，转发给 Telegram Leader
+	if s.cfg.Leader != nil && r.Header.Get("X-Forwarded-By-Instance") == "" {
+		base, err := s.cfg.Leader.BaseURL(r.Context())
+		if err == nil && base != "" {
+			body, _ := io.ReadAll(http.MaxBytesReader(w, r.Body, MaxBodyBytes))
+			s.forwardTo(w, r, base, body)
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+		"success": false, "message": "No retrier available and not leader",
+	})
 }
 
 func (s *Server) verify(r *http.Request, body []byte) error {
@@ -223,7 +311,6 @@ func (s *Server) verify(r *http.Request, body []byte) error {
 	return s.cfg.Receiver.Verify(sig, body, fullURL(r))
 }
 
-// fullURL 重建签名所对应的完整 URL。
 func fullURL(r *http.Request) string {
 	scheme := "http"
 	if r.TLS != nil {
@@ -240,8 +327,6 @@ func fullURL(r *http.Request) string {
 	return u
 }
 
-// forwardTo 把请求原样转给指定 base —— body 必须逐字节保持,否则
-// 签名哈希不匹配,Node 侧会拒。
 func (s *Server) forwardTo(w http.ResponseWriter, r *http.Request, base string, body []byte) {
 	ctx, cancel := context.WithTimeout(r.Context(), leader.Timeout)
 	defer cancel()
@@ -264,12 +349,14 @@ func (s *Server) forwardTo(w http.ResponseWriter, r *http.Request, base string, 
 	if mid := r.Header.Get("Upstash-Message-Id"); mid != "" {
 		req.Header.Set("Upstash-Message-Id", mid)
 	}
+	if sec := r.Header.Get("x-instance-secret"); sec != "" {
+		req.Header.Set("x-instance-secret", sec)
+	}
 	req.Header.Set("X-Forwarded-By-Instance", s.cfg.InstanceID)
 
 	resp, err := s.client.Do(req)
 	if err != nil {
 		s.cfg.Log.Error("forward failed", "path", r.URL.Path, "err", err)
-		// 转发失败必须让 QStash 重试,所以返回 5xx 而不是 200。
 		writeJSON(w, http.StatusBadGateway, map[string]any{
 			"success": false, "message": "upstream unreachable",
 		})

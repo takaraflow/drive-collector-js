@@ -37,13 +37,36 @@ type styledSender interface {
 //
 // 降级是刻意的:gotd 的 StyledText 先解析后发送,解析失败时服务端根本
 // 什么都没收到,退回纯文本重发不会重复。宁可让用户看见裸标签,也不能让
-// 状态消息凭空消失 —— 任务卡在「上传中」而没有任何提示,比丑糟得多。
+// 状态消息凭空消失 —— 任务卡在「上传中」而没有任何提示,比丑陋得多。
 // 动态内容(任务名、报错)都已过 escapeHTMLText,正常不会走到这条分支。
+// 若配置了 flood 限流保护，所有调用会自动享受 FloodWait 指数退避重试与冷静期守护。
 func (c *Client) sendOrEdit(ctx context.Context, s styledSender, text string) (tg.UpdatesClass, error) {
-	upd, err := s.StyledText(ctx, styledText(text))
-	if err == nil {
+	var upd tg.UpdatesClass
+
+	action := func() error {
+		u, err := s.StyledText(ctx, styledText(text))
+		if err == nil {
+			upd = u
+			return nil
+		}
+		c.log.Warn("HTML 解析失败,退回纯文本", "err", err)
+		u, err = s.Text(ctx, text)
+		if err != nil {
+			return err
+		}
+		upd = u
+		return nil
+	}
+
+	if c.flood != nil {
+		if err := c.flood.ExecuteWithRetry(ctx, action); err != nil {
+			return nil, err
+		}
 		return upd, nil
 	}
-	c.log.Warn("HTML 解析失败,退回纯文本", "err", err)
-	return s.Text(ctx, text)
+
+	if err := action(); err != nil {
+		return nil, err
+	}
+	return upd, nil
 }

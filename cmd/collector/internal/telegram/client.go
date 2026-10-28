@@ -84,6 +84,7 @@ type Client struct {
 	// sender 是 gotd 的发送层封装(样式、键盘、RandomID、错误包装都由它管)。
 	// NewSender 会分配 uploader 和 resolver,所以建一次就存着,别每次发送都造。
 	sender *message.Sender
+	flood  *FloodProtector
 }
 
 // New 构造客户端。此时不连接。
@@ -107,6 +108,7 @@ func New(cfg Config) (*Client, error) {
 		log:       cfg.Log,
 		readyOnce: make(chan struct{}),
 		peers:     newPeerCache(),
+		flood:     NewFloodProtector(5),
 	}
 	c.tg = telegram.NewClient(cfg.APIID, cfg.APIHash, telegram.Options{
 		SessionStorage: storage,
