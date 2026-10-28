@@ -48,8 +48,8 @@ export class UIHelper {
         // 如果提供了文件名，显示简洁版本
         const displayName = fileName ? escapeHTML(this._shortenFileName(fileName, 25)) : '';
         const fileInfo = fileName ? `\n📄 ${displayName}` : '';
-        
-        return `⏳ <b>${actionName}...</b>${fileInfo}\n\n` + `<code>[${bar}]</code> ${percentage}% (${formatBytes(current)}/${formatBytes(total)})`;
+        const cleanAction = String(actionName || '').replace(/<\/?b>/gi, '').replace(/\.{2,}$/, '');
+        return `⏳ <b>${cleanAction}...</b>${fileInfo}\n\n` + `<code>[${bar}]</code> ${percentage}% (${formatBytes(current)}/${formatBytes(total)})`;
     }
 
     /**

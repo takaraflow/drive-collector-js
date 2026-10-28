@@ -3,6 +3,7 @@ package telegram
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/gotd/td/telegram/message/markup"
 	"github.com/gotd/td/tg"
@@ -128,7 +129,7 @@ func (c *Client) AnswerCallback(ctx context.Context, callbackID int64, text stri
 	// "unexpected id 0x997275b5"(boolTrue)——按钮点了永远转圈。
 	if _, err := c.tg.API().MessagesSetBotCallbackAnswer(ctx, &tg.MessagesSetBotCallbackAnswerRequest{
 		QueryID: callbackID,
-		Message: text,
+		Message: stripHTML(text),
 		Alert:   alert,
 	}); err != nil {
 		return fmt.Errorf("telegram: 回应按钮失败: %w", err)
@@ -152,4 +153,23 @@ func CallbackData(u Update) (callbackID int64, data string, ok bool) {
 type Logger interface {
 	Info(msg string, args ...any)
 	Warn(msg string, args ...any)
+}
+
+func stripHTML(s string) string {
+	var b strings.Builder
+	inTag := false
+	for _, r := range s {
+		if r == '<' {
+			inTag = true
+			continue
+		}
+		if r == '>' {
+			inTag = false
+			continue
+		}
+		if !inTag {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }

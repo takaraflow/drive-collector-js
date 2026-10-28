@@ -403,7 +403,7 @@ describe('common utils', () => {
                 message: 789,
                 text: 'Downloading...',
                 buttons: [expect.objectContaining({ text: 'cancel_task', data: 'cancel_confirm_task-1' })],
-                parseMode: 'markdown'
+                parseMode: 'html'
             });
         });
 
@@ -425,7 +425,7 @@ describe('common utils', () => {
                 message: 789,
                 text: 'Uploading...',
                 buttons: [expect.objectContaining({ text: 'cancel_transfer', data: 'cancel_confirm_task-2' })],
-                parseMode: 'markdown'
+                parseMode: 'html'
             });
         });
 
@@ -446,7 +446,7 @@ describe('common utils', () => {
                 message: 789,
                 text: 'Failed!',
                 buttons: [expect.objectContaining({ text: 'retry', data: 'retry_confirm_task-3' })],
-                parseMode: 'markdown'
+                parseMode: 'html'
             });
         });
 
@@ -466,7 +466,7 @@ describe('common utils', () => {
                 message: 789,
                 text: 'Completed!',
                 buttons: null,
-                parseMode: 'markdown'
+                parseMode: 'html'
             });
         });
 
@@ -485,12 +485,12 @@ describe('common utils', () => {
                 message: 789,
                 text: 'Failed!',
                 buttons: [expect.objectContaining({ text: 'retry', data: 'retry_confirm_task-4' })],
-                parseMode: 'markdown'
+                parseMode: 'html'
             });
             expect(mockClient.sendMessage).toHaveBeenCalledWith(123456, {
                 message: 'Failed!',
                 buttons: [expect.objectContaining({ text: 'retry', data: 'retry_confirm_task-4' })],
-                parseMode: 'markdown'
+                parseMode: 'html'
             });
         });
 

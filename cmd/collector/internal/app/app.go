@@ -768,7 +768,7 @@ func (a *App) handleDriveCommand(ctx context.Context, msg messageInfo) error {
 				icon = "⭐️"
 			}
 			email := driveDisplayAccount(d)
-			text += fmt.Sprintf("\n%d. %s <b>%s</b> - %s", i+1, icon, strings.ToUpper(d.Type), email)
+			text += fmt.Sprintf("\n%d. %s <b>%s</b> - %s", i+1, icon, strings.ToUpper(d.Type), escapeHTMLText(email))
 			if d.IsDefault == 1 {
 				text += " (默认)"
 			}
@@ -971,7 +971,7 @@ func (a *App) editDriveManager(ctx context.Context, cb tgclient.CallbackContext)
 				icon = "⭐️"
 			}
 			text += fmt.Sprintf("\n%d. %s <b>%s</b> - %s", i+1, icon,
-				strings.ToUpper(d.Type), driveDisplayAccount(d))
+				strings.ToUpper(d.Type), escapeHTMLText(driveDisplayAccount(d)))
 			if d.IsDefault == 1 {
 				text += " (默认)"
 			}

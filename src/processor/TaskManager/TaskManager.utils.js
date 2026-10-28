@@ -219,7 +219,7 @@ export async function handleTaskCompletion(task, context, updateStatus, fileName
                     Button.inline(STRINGS.task?.btn_change_path || "⚙️ 更改路径", Buffer.from("remote_folder_menu"))
                 ]
             ];
-        await updateStatus(task, format(template, { name: fileNameHtml, folder: actualUploadPath }), true, null, false, successButtons);
+        await updateStatus(task, format(template, { name: fileNameHtml, folder: escapeHTML(actualUploadPath) }), true, null, false, successButtons);
     }
 }
 

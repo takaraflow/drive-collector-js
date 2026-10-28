@@ -53,7 +53,7 @@ func (a *App) handleSocialMediaMessage(ctx context.Context, msg messageInfo) boo
 			if err != nil {
 				errMsg = err.Error()
 			}
-			_ = a.notifier.SendMessage(ctx, msg.ChatID, fmt.Sprintf("❌ <b>社媒解析失败</b>\n\n链接: %s\n原因: %s", rawURL, errMsg))
+			_ = a.notifier.SendMessage(ctx, msg.ChatID, fmt.Sprintf("❌ <b>社媒解析失败</b>\n\n链接: %s\n原因: %s", escapeHTMLText(rawURL), escapeHTMLText(errMsg)))
 			continue
 		}
 

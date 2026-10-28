@@ -226,7 +226,7 @@ export async function uploadTask(task) {
                     ? `<a href="${fileLink}">${escapeHTML(info.name)}</a>`
                     : `<code>${escapeHTML(info.name)}</code>`;
                 const baseText = isOk
-                    ? format(STRINGS.task.success, { name: fileNameHtml, folder: config.remoteFolder })
+                    ? format(STRINGS.task.success, { name: fileNameHtml, folder: escapeHTML(config.remoteFolder) })
                     : format(STRINGS.task.failed_validation, { name: fileNameHtml });
                 
                 const finalMsg = isOk ? baseText : `${baseText}\n<code>${escapeHTML(errorMsg)}</code>`;

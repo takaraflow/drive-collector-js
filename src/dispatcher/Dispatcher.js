@@ -369,7 +369,7 @@ export class Dispatcher {
 
         let message = format(STRINGS.remote_folder.menu_title, {});
         const pathInfo = displayPath + (isCustomPath ? " (自定义)" : " (默认)");
-        message += format(STRINGS.remote_folder.show_current, { path: pathInfo }) + '\n\n';
+        message += format(STRINGS.remote_folder.show_current, { path: escapeHTML(pathInfo) }) + '\n\n';
         message += STRINGS.remote_folder.menu_hint;
 
         const buttons = [
@@ -535,16 +535,20 @@ export class Dispatcher {
      */
     static async _handleCallback(event, { userId }) {
         const data = event.data.toString();
-        const answer = (msg = "") => runBotTaskWithRetry(() => client.invoke(new Api.messages.SetBotCallbackAnswer({
-            queryId: event.queryId,
-            message: msg
-        })).catch((error) => {
-            log.warn('Failed to send callback answer', {
-                userId,
+        const answer = (msg = "", alert = false) => {
+            const cleanMsg = typeof msg === "string" ? msg.replace(/<[^>]+>/g, "").trim() : (msg || "");
+            return runBotTaskWithRetry(() => client.invoke(new Api.messages.SetBotCallbackAnswer({
                 queryId: event.queryId,
-                error: error.message
-            });
-        }), userId, {}, false, 3);
+                message: cleanMsg,
+                alert
+            })).catch((error) => {
+                log.warn('Failed to send callback answer', {
+                    userId,
+                    queryId: event.queryId,
+                    error: error.message
+                });
+            }), userId, {}, false, 3);
+        };
 
         try {
             if (data === "noop") return await answer();
@@ -2168,7 +2172,7 @@ export class Dispatcher {
             }
 
             return await runBotTaskWithRetry(() => client.sendMessage(target, {
-                message: format(STRINGS.remote_folder.set_success, { path: pathArg }),
+                message: format(STRINGS.remote_folder.set_success, { path: escapeHTML(pathArg) }),
                 buttons: [
                     [Button.inline(STRINGS.drive.btn_files, Buffer.from("files_page_0"))],
                     [Button.inline(STRINGS.remote_folder.btn_set_path, Buffer.from("remote_folder_set"))]
@@ -2254,7 +2258,7 @@ export class Dispatcher {
 
                 await SessionManager.clear(userId);
                 await runBotTaskWithRetry(() => client.sendMessage(peerId, {
-                    message: format(STRINGS.remote_folder.set_success, { path: text }),
+                    message: format(STRINGS.remote_folder.set_success, { path: escapeHTML(text) }),
                     buttons: [
                         [Button.inline(STRINGS.drive.btn_files, Buffer.from("files_page_0"))],
                         [Button.inline(STRINGS.remote_folder.btn_set_path, Buffer.from("remote_folder_set"))]

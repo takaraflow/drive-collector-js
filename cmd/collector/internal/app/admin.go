@@ -793,7 +793,7 @@ func (a *App) handleModeSwitchCallback(ctx context.Context, cb tgclient.Callback
 	mode := store.NormalizeAccessMode(strings.TrimPrefix(data, "mode_switch_execute_"))
 	if err := a.admin.SetSetting(ctx, store.AccessModeKey, mode); err != nil {
 		a.log.Error("切换访问模式失败", "mode", mode, "err", err)
-		answer("❌ <b>管理操作未完成</b>", true)
+		answer("❌ 管理操作未完成，请重试。", true)
 		return nil
 	}
 	a.invalidateAccessModeCache()

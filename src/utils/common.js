@@ -186,9 +186,8 @@ export const updateStatus = async (task, text, isFinal = false, priority = null,
             buttons = [Button.inline(STRINGS.task.retry_btn, Buffer.from(`retry_confirm_${task.id}`))];
         }
     }
-    const isHtml = /<\/?(b|i|code|pre|a)(\s|>)/i.test(text);
     const options = priority ? { priority } : {};
-    const parseMode = isHtml ? 'html' : 'markdown';
+    const parseMode = 'html';
     const edited = await safeEdit(task.chatId, task.msgId, text, buttons, task.userId, parseMode, options);
     if (!edited && isFinal) {
         return await safeSendStatusMessage(task.chatId, text, buttons, task.userId, parseMode, options);
