@@ -398,10 +398,9 @@ func TestFlushRetriesWhenLockHeld(t *testing.T) {
 
 	// 释放残锁,重试必须能把组刷出去 —— 自愈路径真的通。
 	_ = mr.Del(b.lockKey(gid))
-	if !waitFor(t, 5*time.Second, func() bool { return col.total() == 1 }) {
-		t.Error("残锁释放后重试未把组刷出")
-	}
-	if mr.Exists(b.bufferKey(gid)) {
-		t.Error("重试刷出后组未清掉")
+	if !waitFor(t, 5*time.Second, func() bool {
+		return col.total() == 1 && !mr.Exists(b.bufferKey(gid))
+	}) {
+		t.Error("残锁释放后重试未把组刷出或组未清掉")
 	}
 }
