@@ -51,7 +51,7 @@ func (a *App) bindStart(ctx context.Context, chatID int64, userID, typeStr strin
 		prompt = "📧 <b>请输入您的 Mega 登录邮箱</b>：\n\n发送 /cancel 或输入 取消 可随时退出绑定流程。"
 	case drive.TypeProton:
 		prompt = "👤 <b>请输入 Proton 账号用户名</b>\n\n通常是邮箱，例如 <code>you@proton.me</code>。\n\n发送 /cancel 或输入 取消 可随时退出绑定流程。" +
-			"\n\n🔒 提示:涉及密码的输入在提交后会被立即删除。"
+			"\n\n🔐 提示:涉及密码的输入在提交后会被立即删除。"
 	case drive.TypeWebDAV:
 		prompt = "🌐 <b>请输入 WebDAV 服务器地址</b>（以 http:// 或 https:// 开头）：\n\n例如：<code>https://dav.example.com/dav/</code>\n\n发送 /cancel 或输入 取消 可随时退出绑定流程。"
 	case drive.TypeOSS:
@@ -59,7 +59,7 @@ func (a *App) bindStart(ctx context.Context, chatID int64, userID, typeStr strin
 	case drive.TypePikPak:
 		prompt = "⚡ <b>请输入 PikPak 账号/邮箱</b>：\n\n发送 /cancel 或输入 取消 可随时退出绑定流程。"
 	case drive.TypeFilen:
-		prompt = "🔒 <b>请输入 Filen 账号邮箱</b>：\n\n发送 /cancel 或输入 取消 可随时退出绑定流程。"
+		prompt = "🔐 <b>请输入 Filen 账号邮箱</b>：\n\n发送 /cancel 或输入 取消 可随时退出绑定流程。"
 	case drive.TypePCloud:
 		prompt = "☁️ <b>请输入 pCloud 账号邮箱</b>：\n\n发送 /cancel 或输入 取消 可随时退出绑定流程。"
 	}
@@ -119,6 +119,7 @@ func (a *App) handleBindInput(ctx context.Context, msg messageInfo, text string)
 	}
 
 	if res.Failed {
+		a.log.Warn("网盘绑定步骤失败", "driveType", driveType, "step", step, "reason", res.FailureReason, "userId", userID)
 		_ = a.bindSessions.Clear(ctx, userID)
 	}
 	if !res.Success {

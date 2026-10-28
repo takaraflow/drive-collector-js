@@ -60,12 +60,17 @@ type filenLoginResp struct {
 
 // DeriveFilenPassword 计算 Filen 客户端端到端派生密码哈希：
 // 1. PBKDF2(HMAC-SHA512, iterations=200000, keyLen=64 bytes)
-// 2. 取派生结果前 32 字节 (64 位 hex) 作为中间认证密钥
-// 3. 对中间密钥再次进行 SHA512 计算，得到最终 API 密码 hex
+// 2. 将派生结果编码为 128 位十六进制字符串
+//    - 前 64 位为 Master Key（客户端端到端加解密密钥，留在本地）
+//    - 后 64 位为中间认证密钥（用于提交认证）
+// 3. 对中间认证密钥（后 64 位）进行 SHA512 计算，得到最终 API 密码 hex
 func DeriveFilenPassword(password, salt string) string {
 	derived := pbkdf2.Key([]byte(password), []byte(salt), 200000, 64, sha512.New)
 	derivedHex := hex.EncodeToString(derived)
-	interKey := derivedHex[:64]
+	if len(derivedHex) < 128 {
+		return ""
+	}
+	interKey := derivedHex[64:]
 	finalSum := sha512.Sum512([]byte(interKey))
 	return hex.EncodeToString(finalSum[:])
 }
@@ -123,11 +128,16 @@ func (c *HTTPFilenClient) Login(ctx context.Context, email, password, twoFactorC
 		code = strings.TrimSpace(twoFactorCode)
 	}
 
+	authVer := infoResp.Data.AuthVersion
+	if authVer == 0 {
+		authVer = 2
+	}
+
 	loginPayload := map[string]any{
 		"email":         email,
 		"password":      derivedPassword,
 		"twoFactorCode": code,
-		"authVersion":   2,
+		"authVersion":   authVer,
 	}
 	loginBytes, _ := json.Marshal(loginPayload)
 	loginReq, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/v3/login", bytes.NewReader(loginBytes))
@@ -155,7 +165,7 @@ func (c *HTTPFilenClient) Login(ctx context.Context, email, password, twoFactorC
 
 	if !lResp.Status {
 		upperMsg := strings.ToUpper(lResp.Message + " " + lResp.Code)
-		if strings.Contains(upperMsg, "2FA") || strings.Contains(upperMsg, "TWO_FACTOR") {
+		if strings.Contains(upperMsg, "2FA") || strings.Contains(upperMsg, "TWO_FACTOR") || strings.Contains(upperMsg, "ENTER_2FA") {
 			return "", true, nil
 		}
 		errMsg := lResp.Message
