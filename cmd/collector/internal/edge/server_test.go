@@ -7,7 +7,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/youngsx/drive-collector/cmd/collector/internal/leader"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/qstash"
@@ -204,7 +207,7 @@ func TestNonTaskPathsNotHandled(t *testing.T) {
 	}
 
 	// 这些仍由 Node 处理,本节点不接管。
-	for _, p := range []string{"/api/v2/stream/x", "/api/v2/config/refresh"} {
+	for _, p := range []string{"/api/v2/stream/x"} {
 		t.Run(p, func(t *testing.T) {
 			rec := do(t, s, signedRequest(t, "POST", p, []byte(taskBody), testKey))
 			if rec.Code != http.StatusNotFound {
@@ -346,5 +349,190 @@ func TestVersionReportsBuildIdentity(t *testing.T) {
 	// mode 让人一眼看出这是 edge 还是 worker 实例
 	if body["mode"] == nil {
 		t.Error("响应里应有 mode 字段")
+	}
+}
+
+func TestTaskRetryEndpoint(t *testing.T) {
+	t.Run("Unauthorized when secret mismatches", func(t *testing.T) {
+		cfg := Config{
+			InstanceSecret: "secret-123",
+			Log:            discardLogger(),
+		}
+		s := New(cfg)
+		r := httptest.NewRequest("POST", "/api/v2/tasks/task-abc/retry", nil)
+		r.Header.Set("x-instance-secret", "wrong-secret")
+		rec := do(t, s, r)
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("status = %d, want 401", rec.Code)
+		}
+	})
+
+	t.Run("Retries via TaskRetrier", func(t *testing.T) {
+		var retriedID string
+		cfg := Config{
+			InstanceSecret: "secret-123",
+			Log:            discardLogger(),
+			TaskRetrier: func(ctx context.Context, taskID string) (bool, error) {
+				retriedID = taskID
+				return true, nil
+			},
+		}
+		s := New(cfg)
+		r := httptest.NewRequest("POST", "/api/v2/tasks/task-xyz/retry", nil)
+		r.Header.Set("x-instance-secret", "secret-123")
+		rec := do(t, s, r)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rec.Code)
+		}
+		if retriedID != "task-xyz" {
+			t.Errorf("retried task ID = %q, want task-xyz", retriedID)
+		}
+	})
+
+	t.Run("Returns 404 when task not found", func(t *testing.T) {
+		cfg := Config{
+			InstanceSecret: "secret-123",
+			Log:            discardLogger(),
+			TaskRetrier: func(ctx context.Context, taskID string) (bool, error) {
+				return false, nil
+			},
+		}
+		s := New(cfg)
+		r := httptest.NewRequest("POST", "/api/v2/tasks/notfound/retry", nil)
+		r.Header.Set("x-instance-secret", "secret-123")
+		rec := do(t, s, r)
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("status = %d, want 404", rec.Code)
+		}
+	})
+}
+
+func TestConfigRefreshEndpoint(t *testing.T) {
+	t.Run("Unauthorized when secret mismatches", func(t *testing.T) {
+		cfg := Config{
+			InstanceSecret: "secret-123",
+			Log:            discardLogger(),
+		}
+		s := New(cfg)
+		r := httptest.NewRequest("POST", "/api/v2/config/refresh", nil)
+		r.Header.Set("x-instance-secret", "wrong-secret")
+		rec := do(t, s, r)
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("status = %d, want 401", rec.Code)
+		}
+	})
+
+	t.Run("Triggers OnConfigRefresh successfully", func(t *testing.T) {
+		called := false
+		cfg := Config{
+			InstanceSecret: "secret-123",
+			Log:            discardLogger(),
+			OnConfigRefresh: func(ctx context.Context) error {
+				called = true
+				return nil
+			},
+		}
+		s := New(cfg)
+		r := httptest.NewRequest("POST", "/api/v2/config/refresh", nil)
+		r.Header.Set("x-instance-secret", "secret-123")
+		rec := do(t, s, r)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rec.Code)
+		}
+		if !called {
+			t.Errorf("OnConfigRefresh was not called")
+		}
+	})
+}
+
+func TestDistributedEdge_ForwardingLoopPrevention(t *testing.T) {
+	cfg := Config{
+		InstanceID:     "edge-node-1",
+		InstanceSecret: "secret-123",
+		Log:            discardLogger(),
+		Leader: &leader.Resolver{
+			LockGetter: func(ctx context.Context, key string) ([]byte, error) {
+				return []byte(`{"instanceId":"other-leader"}`), nil
+			},
+			ActiveLister: func(ctx context.Context) ([]leader.Instance, error) {
+				return []leader.Instance{{ID: "other-leader", DirectURL: "http://127.0.0.1:9999"}}, nil
+			},
+		},
+	}
+	s := New(cfg)
+
+	r := httptest.NewRequest("POST", "/api/v2/tasks/task-abc/retry", nil)
+	r.Header.Set("x-instance-secret", "secret-123")
+	// 已经从前一个实例转发过来
+	r.Header.Set("X-Forwarded-By-Instance", "edge-node-0")
+
+	rec := do(t, s, r)
+	// 绝不能死循环二次转发，应返回 503 拒绝
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503 on already forwarded request to prevent loops, got %d", rec.Code)
+	}
+}
+
+func TestDistributedEdge_ForwardHeadersIntegrity(t *testing.T) {
+	var capturedHeaders http.Header
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedHeaders = r.Header.Clone()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	s := newServer(t, leaderWith(upstream.URL), upstream)
+	s.cfg.InstanceID = "edge-east-1"
+
+	req := signedRequest(t, "POST", "/api/v2/tasks/download", []byte(taskBody), testKey)
+	req.Header.Set("x-instance-secret", "cluster-secret-key")
+	rec := do(t, s, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	if capturedHeaders.Get("X-Forwarded-By-Instance") != "edge-east-1" {
+		t.Errorf("X-Forwarded-By-Instance header mismatch: got %q", capturedHeaders.Get("X-Forwarded-By-Instance"))
+	}
+	if capturedHeaders.Get("x-instance-secret") != "cluster-secret-key" {
+		t.Errorf("x-instance-secret header not preserved: got %q", capturedHeaders.Get("x-instance-secret"))
+	}
+	if capturedHeaders.Get("Upstash-Signature") == "" {
+		t.Errorf("Upstash-Signature header was dropped during forwarding")
+	}
+}
+
+func TestDistributedEdge_ConcurrentConfigRefresh(t *testing.T) {
+	var refreshCount atomic.Int64
+	cfg := Config{
+		InstanceSecret: "secret-abc",
+		Log:            discardLogger(),
+		OnConfigRefresh: func(ctx context.Context) error {
+			refreshCount.Add(1)
+			time.Sleep(5 * time.Millisecond)
+			return nil
+		},
+	}
+	s := New(cfg)
+
+	var wg sync.WaitGroup
+	const concurrency = 10
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r := httptest.NewRequest("POST", "/api/v2/config/refresh", nil)
+			r.Header.Set("x-instance-secret", "secret-abc")
+			rec := do(t, s, r)
+			if rec.Code != http.StatusOK {
+				t.Errorf("concurrent refresh status = %d, want 200", rec.Code)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if refreshCount.Load() != int64(concurrency) {
+		t.Errorf("expected %d refresh calls, got %d", concurrency, refreshCount.Load())
 	}
 }

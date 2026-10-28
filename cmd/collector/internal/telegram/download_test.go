@@ -1,6 +1,9 @@
 package telegram
 
 import (
+	"os"
+	"path/filepath"
+	"time"
 	"testing"
 
 	"github.com/gotd/td/tg"
@@ -167,5 +170,62 @@ func TestLocationOfRejectsEmptyPhoto(t *testing.T) {
 
 	if _, err := locationOf(&tg.MessageMediaPhoto{Photo: photo}); err == nil {
 		t.Error("没有尺寸的图片应报错")
+	}
+}
+
+
+func TestResolveChunkSize(t *testing.T) {
+	if got := ResolveChunkSize(50 * 1024 * 1024); got != DefaultSmallChunkSize {
+		t.Errorf("got %d, want %d", got, DefaultSmallChunkSize)
+	}
+	if got := ResolveChunkSize(200 * 1024 * 1024); got != DefaultLargeChunkSize {
+		t.Errorf("got %d, want %d", got, DefaultLargeChunkSize)
+	}
+}
+
+func TestCleanupStalePartFiles(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "part-cleanup-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// 1. 创建未过期的 .part
+	freshPart := filepath.Join(tmpDir, "task1.bin.part")
+	if err := os.WriteFile(freshPart, []byte("fresh content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. 创建过期的 .part
+	stalePart := filepath.Join(tmpDir, "task2.bin.part")
+	if err := os.WriteFile(stalePart, []byte("stale content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldTime := time.Now().Add(-48 * time.Hour)
+	_ = os.Chtimes(stalePart, oldTime, oldTime)
+
+	// 3. 创建非 .part 文件（即使时间很旧也不应删除）
+	regularFile := filepath.Join(tmpDir, "keepme.txt")
+	if err := os.WriteFile(regularFile, []byte("regular"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Chtimes(regularFile, oldTime, oldTime)
+
+	removed, err := CleanupStalePartFiles(tmpDir, 24*time.Hour)
+	if err != nil {
+		t.Fatalf("CleanupStalePartFiles error: %v", err)
+	}
+	if removed != 1 {
+		t.Fatalf("expected 1 removed file, got %d", removed)
+	}
+
+	if _, err := os.Stat(stalePart); !os.IsNotExist(err) {
+		t.Errorf("stalePart should be deleted")
+	}
+	if _, err := os.Stat(freshPart); err != nil {
+		t.Errorf("freshPart should still exist")
+	}
+	if _, err := os.Stat(regularFile); err != nil {
+		t.Errorf("regularFile should still exist")
 	}
 }
