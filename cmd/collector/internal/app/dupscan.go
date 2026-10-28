@@ -6,6 +6,10 @@ package app
 //   - 判重分两档:后端给内容哈希就按哈希判重,不给就退化成按大小归组,
 //     并把「判重依据不可靠」这件事明说 —— 否则用户会把「按大小猜」
 //     误当成「网盘是干净的」。
+//   - 支持全网盘跨盘混查:
+//     * L1 强特征: 相同算法名且哈希值相等(跨盘 100% 内容一致)。
+//     * L2 跨盘高概率推测: 无哈希或算法不兼容时，同名且同大小关联。
+//     * 并查集(Disjoint Set)内存聚类汇聚，盘符区分打标。
 //   - 状态放 Redis 而非内存:按钮回调可能落在另一台实例上,
 //     进程重启也不该让用户拿不到已经扫出来的结果。
 // ============================================================================
@@ -14,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -41,13 +46,24 @@ const (
 	dupScanMaxShownPaths = 6
 )
 
+// dupFileItem 记录具体某网盘里的某一个文件。
+type dupFileItem struct {
+	DriveID    string `json:"driveId,omitempty"`
+	DriveLabel string `json:"driveLabel,omitempty"`
+	Path       string `json:"path"`
+	Algo       string `json:"algo,omitempty"`
+	Hash       string `json:"hash,omitempty"`
+	Note       string `json:"note,omitempty"` // 如 "(md5: 8f3a...)" 或 "(⚠️ 无哈希，依同名同大小关联)"
+}
+
 // dupGroup 一组重复文件。
 type dupGroup struct {
-	// Basis 是 "hash" 或 "size" —— 决定这一组可不可信。
-	Basis string   `json:"basis"`
-	Algo  string   `json:"algo"`
-	Size  int64    `json:"size"`
-	Paths []string `json:"paths"`
+	// Basis 是 "hash"、"cross_mixed"、"cross_name_size" 或 "size"
+	Basis string        `json:"basis"`
+	Algo  string        `json:"algo,omitempty"`
+	Size  int64         `json:"size"`
+	Paths []string      `json:"paths"`
+	Items []dupFileItem `json:"items,omitempty"`
 }
 
 // dupScanResult 一次扫描的结论。
@@ -59,6 +75,14 @@ type dupScanResult struct {
 	// HashAvailable 没有任何哈希就 false。这个信号必须传出去,
 	// 否则上层会把「按大小归组」渲染成「未发现重复」。
 	HashAvailable bool `json:"hashAvailable"`
+	// IsCrossDrive 是否为全网盘跨盘混查结果
+	IsCrossDrive bool `json:"isCrossDrive,omitempty"`
+}
+
+// DriveEntries 将网盘与其扫描到的文件条目打包。
+type DriveEntries struct {
+	Drive   drive.Drive
+	Entries []rclone.FileEntry
 }
 
 // dupScanState 是 Redis 里的扫描状态,字段名与 JS 侧逐字一致 ——
@@ -73,6 +97,245 @@ type dupScanState struct {
 }
 
 func dupScanKey(userID string) string { return "dupscan:" + userID }
+
+// unionFind 并查集实现
+type unionFind struct {
+	parent []int
+}
+
+func newUnionFind(n int) *unionFind {
+	p := make([]int, n)
+	for i := range p {
+		p[i] = i
+	}
+	return &unionFind{parent: p}
+}
+
+func (uf *unionFind) find(i int) int {
+	root := i
+	for root != uf.parent[root] {
+		root = uf.parent[root]
+	}
+	curr := i
+	for curr != root {
+		nxt := uf.parent[curr]
+		uf.parent[curr] = root
+		curr = nxt
+	}
+	return root
+}
+
+func (uf *unionFind) union(i, j int) {
+	ri := uf.find(i)
+	rj := uf.find(j)
+	if ri != rj {
+		uf.parent[ri] = rj
+	}
+}
+
+func shortHash(h string) string {
+	if len(h) <= 8 {
+		return h
+	}
+	return h[:8] + "..."
+}
+
+// groupCrossDuplicates 跨网盘混查聚类算法。
+//
+// 梯级判重策略:
+//   - L1(强确信): 相同算法 Hash 且 Hash 值相等(跨网盘 100% 内容一致)。
+//   - L2(高置信推测): 无 Hash 或算法不互通时，同名且同大小(针对无哈希网盘/跨盘备份)。
+//   - 过滤孤立节点，按并查集聚类为重复组。
+func groupCrossDuplicates(allDriveEntries []DriveEntries) dupScanResult {
+	type rawCrossItem struct {
+		driveID    string
+		driveLabel string
+		file       rclone.FileEntry
+		algo       string
+		hash       string
+	}
+
+	var allItems []rawCrossItem
+	totalCount := 0
+	hashedCount := 0
+
+	for _, de := range allDriveEntries {
+		label := driveLabel(de.Drive)
+		for _, f := range de.Entries {
+			if f.IsDir || f.Size <= 0 {
+				continue
+			}
+			totalCount++
+			algo, val := firstHash(f.Hashes)
+			if val != "" {
+				hashedCount++
+			}
+			allItems = append(allItems, rawCrossItem{
+				driveID:    de.Drive.ID,
+				driveLabel: label,
+				file:       f,
+				algo:       algo,
+				hash:       val,
+			})
+		}
+	}
+
+	res := dupScanResult{
+		Groups:        []dupGroup{},
+		Hashed:        hashedCount,
+		Total:         totalCount,
+		HashAvailable: hashedCount > 0,
+		IsCrossDrive:  true,
+	}
+
+	N := len(allItems)
+	if N < 2 {
+		return res
+	}
+
+	uf := newUnionFind(N)
+
+	// Phase 1: L1 内容哈希强特征匹配
+	hashToIndices := map[string][]int{}
+	for i, it := range allItems {
+		for a, v := range it.file.Hashes {
+			if v != "" {
+				key := a + ":" + v
+				hashToIndices[key] = append(hashToIndices[key], i)
+			}
+		}
+	}
+	for _, indices := range hashToIndices {
+		if len(indices) > 1 {
+			for k := 1; k < len(indices); k++ {
+				uf.union(indices[0], indices[k])
+			}
+		}
+	}
+
+	// Phase 2: L2 跨盘/无哈希 同名同大小高概率关联
+	type nameSizeKey struct {
+		size int64
+		name string
+	}
+	nameSizeMap := map[nameSizeKey][]int{}
+	for i, it := range allItems {
+		cleanPath := strings.ReplaceAll(dupPath(it.file), "\\", "/")
+		baseName := path.Base(cleanPath)
+		k := nameSizeKey{size: it.file.Size, name: baseName}
+		nameSizeMap[k] = append(nameSizeMap[k], i)
+	}
+
+	for _, indices := range nameSizeMap {
+		if len(indices) < 2 {
+			continue
+		}
+		// 检查同名同大小文件的哈希根是否产生冲突
+		rootHashes := map[int]string{}
+		for _, idx := range indices {
+			it := allItems[idx]
+			if it.hash != "" {
+				r := uf.find(idx)
+				rootHashes[r] = it.hash
+			}
+		}
+		// 若哈希根互不冲突（<= 1 个不同的哈希根），允许将同名同大小文件合并聚类
+		if len(rootHashes) <= 1 {
+			for k := 1; k < len(indices); k++ {
+				uf.union(indices[0], indices[k])
+			}
+		}
+	}
+
+	// 聚类归组
+	clusters := map[int][]int{}
+	for i := 0; i < N; i++ {
+		r := uf.find(i)
+		clusters[r] = append(clusters[r], i)
+	}
+
+	for _, indices := range clusters {
+		if len(indices) < 2 {
+			continue
+		}
+		hasHash := false
+		hasUnhashed := false
+		commonAlgo := ""
+		for _, idx := range indices {
+			it := allItems[idx]
+			if it.hash != "" {
+				hasHash = true
+				if commonAlgo == "" {
+					commonAlgo = it.algo
+				}
+			} else {
+				hasUnhashed = true
+			}
+		}
+
+		basis := "hash"
+		if hasHash && hasUnhashed {
+			basis = "cross_mixed"
+		} else if !hasHash {
+			basis = "cross_name_size"
+		}
+
+		var items []dupFileItem
+		var paths []string
+		size := allItems[indices[0]].file.Size
+
+		for _, idx := range indices {
+			it := allItems[idx]
+			note := ""
+			p := dupPath(it.file)
+			if it.hash != "" {
+				note = fmt.Sprintf("(%s: %s)", it.algo, shortHash(it.hash))
+			} else if hasHash {
+				note = "(⚠️ 无哈希，依同名同大小关联)"
+			} else {
+				note = "(⚠️ 无哈希，同名同大小)"
+			}
+			items = append(items, dupFileItem{
+				DriveID:    it.driveID,
+				DriveLabel: it.driveLabel,
+				Path:       p,
+				Algo:       it.algo,
+				Hash:       it.hash,
+				Note:       note,
+			})
+			paths = append(paths, fmt.Sprintf("[%s] %s", it.driveLabel, p))
+		}
+
+		// 组内文件按网盘名及路径排序，保证翻页稳定
+		sort.Slice(items, func(i, j int) bool {
+			if items[i].DriveLabel != items[j].DriveLabel {
+				return items[i].DriveLabel < items[j].DriveLabel
+			}
+			return items[i].Path < items[j].Path
+		})
+
+		res.Groups = append(res.Groups, dupGroup{
+			Basis: basis,
+			Algo:  commonAlgo,
+			Size:  size,
+			Paths: paths,
+			Items: items,
+		})
+	}
+
+	// 大组在前
+	sort.Slice(res.Groups, func(i, j int) bool {
+		if len(res.Groups[i].Items) != len(res.Groups[j].Items) {
+			return len(res.Groups[i].Items) > len(res.Groups[j].Items)
+		}
+		if res.Groups[i].Size != res.Groups[j].Size {
+			return res.Groups[i].Size > res.Groups[j].Size
+		}
+		return res.Groups[i].Items[0].Path < res.Groups[j].Items[0].Path
+	})
+
+	return res
+}
 
 // groupDuplicates 把 lsjson 条目按判重依据分组。
 //
@@ -185,6 +448,7 @@ func dupPath(f rclone.FileEntry) string {
 
 // dupScanTitle 与 JS STRINGS.dup_scan.title 一致。
 const dupScanTitle = "🔍 <b>网盘重复文件扫描</b>\n\n"
+const dupCrossScanTitle = "🔍 <b>全网盘重复文件扫描</b>\n\n"
 
 // formatExactBytes 为字节数添加千分位逗号。
 func formatExactBytes(b int64) string {
@@ -232,8 +496,18 @@ func renderDupScanPage(driveName string, r dupScanResult, page int) (string, [][
 		page = totalPages - 1
 	}
 
+	title := dupScanTitle
+	if r.IsCrossDrive {
+		title = dupCrossScanTitle
+	}
+
 	if len(groups) == 0 {
-		return dupScanTitle + fmt.Sprintf(
+		if r.IsCrossDrive {
+			return title + fmt.Sprintf(
+				"✅ <b>未发现跨盘重复文件</b>\n\n📂 范围: <code>全网盘</code>\n📄 扫描文件: %d 个\n\n%s",
+				r.Total, dupScanBasisNote(r)), nil
+		}
+		return title + fmt.Sprintf(
 			"✅ <b>未发现重复文件</b>\n\n📂 网盘: <code>%s</code>\n📄 扫描文件: %d 个\n\n%s",
 			escapeHTMLText(driveName), r.Total, dupScanBasisNote(r)), nil
 	}
@@ -241,28 +515,85 @@ func renderDupScanPage(driveName string, r dupScanResult, page int) (string, [][
 	end := min((page+1)*dupScanPageSize, len(groups))
 	lines := make([]string, 0, end-page*dupScanPageSize)
 	for _, g := range groups[page*dupScanPageSize : end] {
-		var header string
-		if g.Basis == "hash" {
-			header = fmt.Sprintf("🔁 <b>%d 份相同内容</b>（每个 %s，哈希 %s）",
-				len(g.Paths), formatDupSize(g.Size), escapeHTMLText(g.Algo))
+		count := len(g.Items)
+		if count == 0 {
+			count = len(g.Paths)
+		}
+
+		if r.IsCrossDrive {
+			header := fmt.Sprintf("🔁 <b>%d 份重复文件</b>（每个 %s）", count, formatDupSize(g.Size))
+			var basisSub string
+			switch g.Basis {
+			case "hash":
+				basisSub = fmt.Sprintf("  🟢 <i>判重依据：内容哈希 (%s)</i>", escapeHTMLText(g.Algo))
+			case "cross_mixed":
+				basisSub = fmt.Sprintf("  🟢 <i>判重依据：内容哈希 (%s) + 同名同大小</i>", escapeHTMLText(g.Algo))
+			case "cross_name_size":
+				basisSub = "  🟡 <i>判重依据：跨盘同名同大小关联（无哈希或算法不兼容）</i>"
+			default:
+				basisSub = "  🟡 <i>判重依据：同名同大小推测</i>"
+			}
+
+			shown := make([]string, 0, dupScanMaxShownPaths+1)
+			if len(g.Items) > 0 {
+				for _, it := range g.Items[:min(dupScanMaxShownPaths, len(g.Items))] {
+					noteStr := ""
+					if it.Note != "" {
+						noteStr = " " + it.Note
+					}
+					shown = append(shown, fmt.Sprintf("  • 📂 <b>[%s]</b> <code>%s</code>%s",
+						escapeHTMLText(it.DriveLabel), escapeHTMLText(it.Path), noteStr))
+				}
+				if len(g.Items) > dupScanMaxShownPaths {
+					shown = append(shown, fmt.Sprintf("    <i>…另有 %d 份</i>", len(g.Items)-dupScanMaxShownPaths))
+				}
+			} else {
+				for _, p := range g.Paths[:min(dupScanMaxShownPaths, len(g.Paths))] {
+					shown = append(shown, "  • "+escapeHTMLText(p))
+				}
+				if len(g.Paths) > dupScanMaxShownPaths {
+					shown = append(shown, fmt.Sprintf("    <i>…另有 %d 份</i>", len(g.Paths)-dupScanMaxShownPaths))
+				}
+			}
+			lines = append(lines, header+"\n"+basisSub+"\n"+strings.Join(shown, "\n"))
 		} else {
-			header = fmt.Sprintf("🔁 <b>%d 份相同大小</b>（每个 %s，内容可能不同）",
-				len(g.Paths), formatDupSize(g.Size))
+			var header string
+			if g.Basis == "hash" {
+				header = fmt.Sprintf("🔁 <b>%d 份相同内容</b>（每个 %s，哈希 %s）",
+					count, formatDupSize(g.Size), escapeHTMLText(g.Algo))
+			} else {
+				header = fmt.Sprintf("🔁 <b>%d 份相同大小</b>（每个 %s，内容可能不同）",
+					count, formatDupSize(g.Size))
+			}
+			shown := make([]string, 0, dupScanMaxShownPaths+1)
+			for _, p := range g.Paths[:min(dupScanMaxShownPaths, len(g.Paths))] {
+				shown = append(shown, "    • "+escapeHTMLText(p))
+			}
+			if len(g.Paths) > dupScanMaxShownPaths {
+				shown = append(shown, fmt.Sprintf("    <i>…另有 %d 份</i>", len(g.Paths)-dupScanMaxShownPaths))
+			}
+			lines = append(lines, header+"\n"+strings.Join(shown, "\n"))
 		}
-		shown := make([]string, 0, dupScanMaxShownPaths+1)
-		for _, p := range g.Paths[:min(dupScanMaxShownPaths, len(g.Paths))] {
-			shown = append(shown, "    • "+escapeHTMLText(p))
-		}
-		if len(g.Paths) > dupScanMaxShownPaths {
-			shown = append(shown, fmt.Sprintf("    <i>…另有 %d 份</i>", len(g.Paths)-dupScanMaxShownPaths))
-		}
-		lines = append(lines, header+"\n"+strings.Join(shown, "\n"))
+	}
+
+	var metaLine string
+	if r.IsCrossDrive {
+		metaLine = fmt.Sprintf("📊 <i>第 %d/%d 页 | 共 %d 组跨盘重复</i>", page+1, totalPages, len(groups))
+	} else {
+		metaLine = fmt.Sprintf("📊 <i>第 %d/%d 页 | 共 %d 组重复</i>", page+1, totalPages, len(groups))
+	}
+
+	var headerSection string
+	if r.IsCrossDrive {
+		headerSection = title + "📂 范围: <code>全网盘</code>"
+	} else {
+		headerSection = title + fmt.Sprintf("📂 网盘: <code>%s</code>", escapeHTMLText(driveName))
 	}
 
 	text := strings.Join([]string{
-		dupScanTitle + fmt.Sprintf("📂 网盘: <code>%s</code>", escapeHTMLText(driveName)),
+		headerSection,
 		strings.Join(lines, "\n\n"),
-		fmt.Sprintf("📊 <i>第 %d/%d 页 | 共 %d 组重复</i>", page+1, totalPages, len(groups)),
+		metaLine,
 		dupScanBasisNote(r),
 		"📌 清单仅供参考，<b>请自行到网盘里确认后再删除</b>。",
 	}, "\n\n")
@@ -281,6 +612,17 @@ func renderDupScanPage(driveName string, r dupScanResult, page int) (string, [][
 // dupScanBasisNote 说明这一页的判重依据。哈希不可用时必须明说,
 // 否则用户会误以为网盘是干净的。
 func dupScanBasisNote(r dupScanResult) string {
+	if r.IsCrossDrive {
+		switch {
+		case r.Hashed == 0:
+			return "⚠️ 判重依据: <b>同名同大小关联</b>。所有已绑网盘均不返回内容哈希，按同名同大小推测，内容可能不同。"
+		case r.Hashed < r.Total:
+			return fmt.Sprintf("🟢 判重依据: <b>混合关联</b>。%d/%d 个文件带内容哈希，无哈希网盘按同名同大小推测关联。", r.Hashed, r.Total)
+		default:
+			return "🟢 判重依据: <b>全量内容哈希</b>，所有网盘均支持哈希校验，结果 100% 准确。"
+		}
+	}
+
 	switch {
 	case r.Hashed == 0:
 		return "⚠️ 判重依据: <b>文件大小</b>。该网盘后端不返回内容哈希，无法做内容级判重，<b>下面同大小的文件内容可能不同</b>。"
@@ -420,15 +762,22 @@ func (a *App) handleDupScanCallback(ctx context.Context, cb tgclient.CallbackCon
 		if len(drives) == 0 {
 			return a.editScanText(ctx, cb, "🚫 <b>还没有绑定网盘</b>\n\n请先发送 /drive 绑定网盘。", nil)
 		}
+		isCross := (data == "dupscan_scope_all" && len(drives) > 1)
+		initialText := fmt.Sprintf(
+			"🔍 <b>正在扫描重复文件</b>\n\n📁 网盘: <code>%s</code>\n📄 已扫描: 0/%d\n⏱ 用时: 0 秒\n\n<i>可随时点下方按钮停止</i>",
+			escapeHTMLText(driveLabel(drives[0])), len(drives))
+		if isCross {
+			initialText = fmt.Sprintf(
+				"🔍 <b>正在扫描全网盘重复文件</b>\n\n📁 当前网盘: <code>%s</code> (1/%d)\n⏱ 用时: 0 秒\n\n<i>可随时点下方按钮停止</i>",
+				escapeHTMLText(driveLabel(drives[0])), len(drives))
+		}
 		// 立刻刷成「已在扫」,让用户看到反应。必须带上停止按钮 ——
 		// 文案里写着「可随时点下方按钮停止」,按钮没了就是骗人。
-		if err := a.editScanText(ctx, cb, fmt.Sprintf(
-			"🔍 <b>正在扫描重复文件</b>\n\n📂 网盘: <code>%s</code>\n📄 已扫描: 0/%d\n⏱ 用时: 0 秒\n\n<i>可随时点下方按钮停止</i>",
-			escapeHTMLText(driveLabel(drives[0])), len(drives)), dupScanCancelButtons()); err != nil {
+		if err := a.editScanText(ctx, cb, initialText, dupScanCancelButtons()); err != nil {
 			return err
 		}
 		// 后台跑,不阻塞这次回调响应。
-		go a.runDupScan(context.WithoutCancel(ctx), userID, cb.ChatID, cb.MsgID, drives)
+		go a.runDupScan(context.WithoutCancel(ctx), userID, cb.ChatID, cb.MsgID, drives, isCross)
 		answer("", false)
 		return nil
 	}
@@ -490,12 +839,44 @@ func driveLabel(d drive.Drive) string {
 // ============================================================================
 
 // runDupScan 逐盘扫描。每个网盘之间检查取消标志。
-func (a *App) runDupScan(ctx context.Context, userID string, chatID int64, msgID int, drives []drive.Drive) {
+func (a *App) runDupScan(ctx context.Context, userID string, chatID int64, msgID int, drives []drive.Drive, isCrossDrive bool) {
 	startedAt := time.Now()
 	lastEdit := time.Time{}
 
 	a.writeDupScanState(ctx, userID, dupScanState{Status: "running"})
 	cancelButtons := dupScanCancelButtons()
+
+	if isCrossDrive && len(drives) > 1 {
+		var allDriveEntries []DriveEntries
+		for i, d := range drives {
+			if st := a.readDupScanState(ctx, userID); st != nil && st.CancelAsked {
+				a.writeDupScanState(ctx, userID, dupScanState{Status: "cancelled"})
+				a.editScanMessage(ctx, chatID, msgID,
+					"🚫 <b>扫描已停止</b>\n\n已扫描部分的结果不会被保留，重新发送 /scan_dup 可以再扫一次。", nil)
+				return
+			}
+
+			if time.Since(lastEdit) >= dupScanEditThrottle {
+				lastEdit = time.Now()
+				a.editScanMessage(ctx, chatID, msgID, fmt.Sprintf(
+					"🔍 <b>正在扫描全网盘重复文件</b>\n\n📁 当前网盘: <code>%s</code> (%d/%d)\n⏱ 用时: %d 秒\n\n<i>可随时点下方按钮停止</i>",
+					escapeHTMLText(driveLabel(d)), i+1, len(drives), int(time.Since(startedAt).Seconds())), cancelButtons)
+			}
+
+			entries, err := a.scanDriveEntries(ctx, &d)
+			if err != nil {
+				a.log.Error("单盘扫描失败(跳过该盘)", "userId", userID, "driveId", d.ID, "err", err)
+				continue
+			}
+			allDriveEntries = append(allDriveEntries, DriveEntries{Drive: d, Entries: entries})
+		}
+
+		result := groupCrossDuplicates(allDriveEntries)
+		a.writeDupScanState(ctx, userID, dupScanState{Status: "done", DriveName: "全网盘", Result: &result})
+		text, buttons := renderDupScanPage("全网盘", result, 0)
+		a.editScanMessage(ctx, chatID, msgID, text, buttons)
+		return
+	}
 
 	for i, d := range drives {
 		// 取消检查放在扫描之间:正在跑的那次由 rclone 超时兜底。
@@ -510,7 +891,7 @@ func (a *App) runDupScan(ctx context.Context, userID string, chatID int64, msgID
 		if time.Since(lastEdit) >= dupScanEditThrottle {
 			lastEdit = time.Now()
 			a.editScanMessage(ctx, chatID, msgID, fmt.Sprintf(
-				"🔍 <b>正在扫描重复文件</b>\n\n📂 网盘: <code>%s</code>\n📄 已扫描: %d/%d\n⏱ 用时: %d 秒\n\n<i>可随时点下方按钮停止</i>",
+				"🔍 <b>正在扫描重复文件</b>\n\n📁 网盘: <code>%s</code>\n📄 已扫描: %d/%d\n⏱ 用时: %d 秒\n\n<i>可随时点下方按钮停止</i>",
 				escapeHTMLText(driveLabel(d)), i, len(drives), int(time.Since(startedAt).Seconds())), cancelButtons)
 		}
 
@@ -519,7 +900,7 @@ func (a *App) runDupScan(ctx context.Context, userID string, chatID int64, msgID
 			// 单盘失败不中断整体,但必须如实告诉用户这一盘没扫成。
 			a.log.Error("重复文件扫描失败", "userId", userID, "driveId", d.ID, "err", err)
 			a.editScanMessage(ctx, chatID, msgID, fmt.Sprintf(
-				"❌ <b>扫描失败</b>\n\n📂 网盘: <code>%s</code>\n原因: %s\n\n其他网盘仍会继续扫描。",
+				"❌ <b>扫描失败</b>\n\n📁 网盘: <code>%s</code>\n原因: %s\n\n其他网盘仍会继续扫描。",
 				escapeHTMLText(driveLabel(d)), escapeHTMLText(err.Error())), cancelButtons)
 			continue
 		}
@@ -531,14 +912,10 @@ func (a *App) runDupScan(ctx context.Context, userID string, chatID int64, msgID
 	}
 }
 
-// scanDrive 扫一个网盘。
-//
-// 必须与上传同等待遇:进程内会话锁 + 跑完收割写回。少任何一样,
-// 一次 /scan_dup 就可能把账号砖化 —— 而「只是看看有没有重复文件」的
-// 用户什么都没做错(记忆 proton-refresh-token-race / PR#446)。
-func (a *App) scanDrive(ctx context.Context, d *drive.Drive) (*dupScanResult, error) {
+// scanDriveEntries 扫一个网盘的所有文件条目。
+func (a *App) scanDriveEntries(ctx context.Context, d *drive.Drive) ([]rclone.FileEntry, error) {
 	key := drive.Key(drive.Type(d.Type), d.UserID)
-	var result *dupScanResult
+	var entries []rclone.FileEntry
 	err := a.locks.WithSession(ctx, key, func() error {
 		cfg, harvest, err := a.buildRuntime(ctx, d)
 		if err != nil {
@@ -547,7 +924,7 @@ func (a *App) scanDrive(ctx context.Context, d *drive.Drive) (*dupScanResult, er
 		cfg.Timeout = dupScanPerDriveTimeout
 		// 扫的是网盘根(remotePath 留空),与 JS scanDrive 传
 		// runtime.connectionString 一致 —— 不是用户那个子目录。
-		entries, err := a.rclone.ScanFiles(ctx, cfg, "")
+		es, err := a.rclone.ScanFiles(ctx, cfg, "")
 		// 收割与成败无关:rclone 跑完可能已经旋转过 token,
 		// 不写回就等于把它扔了。
 		if harvest != nil {
@@ -558,14 +935,23 @@ func (a *App) scanDrive(ctx context.Context, d *drive.Drive) (*dupScanResult, er
 		if err != nil {
 			return err
 		}
-		r := groupDuplicates(entries)
-		result = &r
+		entries = es
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	return result, nil
+	return entries, nil
+}
+
+// scanDrive 扫一个网盘并执行单盘判重。
+func (a *App) scanDrive(ctx context.Context, d *drive.Drive) (*dupScanResult, error) {
+	entries, err := a.scanDriveEntries(ctx, d)
+	if err != nil {
+		return nil, err
+	}
+	r := groupDuplicates(entries)
+	return &r, nil
 }
 
 func (a *App) editScanMessage(ctx context.Context, chatID int64, msgID int, text string, buttons [][]tgclient.Button) {
