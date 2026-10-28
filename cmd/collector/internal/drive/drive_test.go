@@ -10,12 +10,14 @@ import (
 )
 
 func TestSupportedDrives(t *testing.T) {
-	for _, tp := range []Type{TypeMega, TypeProton, TypeWebDAV, TypeOSS, TypePikPak, TypeFilen} {
+	for _, tp := range []Type{
+		TypeMega, TypeProton, TypeWebDAV, TypeOSS, TypePikPak, TypeFilen, TypePCloud,
+	} {
 		if !IsSupported(tp) {
 			t.Errorf("%s 应被支持", tp)
 		}
 	}
-	for _, tp := range []Type{"box", "dropbox", "gdrive", "onedrive", "baidupan"} {
+	for _, tp := range []Type{"baidupan", "onedrive", "google_drive", "dropbox", "box"} {
 		if IsSupported(tp) {
 			t.Errorf("%s 是占位,不该被报为支持", tp)
 		}

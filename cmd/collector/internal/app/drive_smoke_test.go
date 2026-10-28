@@ -60,6 +60,9 @@ func (f *fakeSmokeTG) AnswerCallback(context.Context, int64, string, bool) error
 	return nil
 }
 
+func (f *fakeSmokeTG) WaitReady(context.Context) error { return nil }
+func (f *fakeSmokeTG) RegisterBotCommands(context.Context, int64) error { return nil }
+
 // fakeMemorySession 模拟 Redis 绑定会话存储。
 type fakeMemorySession struct {
 	sessions map[string]*bindingsession.Session

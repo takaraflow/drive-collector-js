@@ -21,17 +21,20 @@ import (
 type Type string
 
 const (
-	TypeMega   Type = "mega"
-	TypeProton Type = "protondrive"
-	TypeWebDAV Type = "webdav"
-	TypeOSS    Type = "oss"
-	TypePikPak Type = "pikpak"
-	TypeFilen  Type = "filen"
+	TypeMega        Type = "mega"
+	TypeProton      Type = "protondrive"
+	TypeWebDAV      Type = "webdav"
+	TypeOSS         Type = "oss"
+	TypePikPak      Type = "pikpak"
+	TypeFilen       Type = "filen"
+	TypePCloud      Type = "pcloud"
 )
 
 // Supported 列出当前实现的网盘。
 func Supported() []Type {
-	return []Type{TypeMega, TypeProton, TypeWebDAV, TypeOSS, TypePikPak, TypeFilen}
+	return []Type{
+		TypeMega, TypeProton, TypeWebDAV, TypeOSS, TypePikPak, TypeFilen, TypePCloud,
+	}
 }
 
 // IsSupported 报告该类型是否已实现。
@@ -116,6 +119,8 @@ func ConnectionString(t Type, cfg Config) (string, error) {
 		return pikpakConn(cfg)
 	case TypeFilen:
 		return filenConn(cfg)
+	case TypePCloud:
+		return pCloudConn(cfg)
 	default:
 		return "", fmt.Errorf("drive: %q 尚未实现(占位,后续补)", t)
 	}
@@ -148,8 +153,10 @@ func protonConn(cfg Config) (string, error) {
 			fmt.Sprintf("client_salted_key_pass=%q", escapeValue(cfg.Session.ClientSaltedKeyPass)),
 		)
 	} else {
+		// 没有 session:回退到明文/已混淆密码。
+		// 绑定完成后的首次调用走这里(第一次登录拿 session)。
 		if cfg.Pass == "" {
-			return "", fmt.Errorf("drive: protondrive 缺少密码或可复用 session")
+			return "", fmt.Errorf("drive: protondrive 既无有效 session 又无密码")
 		}
 		segments = append(segments, fmt.Sprintf("password=%q", escapeValue(cfg.Pass)))
 	}
@@ -212,4 +219,12 @@ func filenConn(c Config) (string, error) {
 		fmt.Sprintf("api_key=%q", escapeValue(c.APIKey)),
 	}
 	return fmt.Sprintf(":filen,%s:", strings.Join(parts, ",")), nil
+}
+
+func pCloudConn(c Config) (string, error) {
+	if c.User == "" || c.Pass == "" {
+		return "", fmt.Errorf("drive: pcloud 缺少账号或密码")
+	}
+	return fmt.Sprintf(`:webdav,url="https://webdav.pcloud.com",vendor="other",user=%q,pass=%q:`,
+		escapeValue(c.User), escapeValue(c.Pass)), nil
 }

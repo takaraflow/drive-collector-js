@@ -121,6 +121,9 @@ func (a *App) filesLoadAndEdit(userID string, chatID int64, msgID, page int, for
 				{Text: "⚡ PikPak", Data: "drive_bind_pikpak"},
 				{Text: "🔒 Filen", Data: "drive_bind_filen"},
 			},
+			{
+				{Text: "☁️ pCloud", Data: "drive_bind_pcloud"},
+			},
 		}
 	}
 

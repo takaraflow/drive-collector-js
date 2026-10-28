@@ -274,6 +274,19 @@ func ptsOf(u tg.UpdateClass) int {
 // SelfID 返回登录账号的 ID,未连接时为 0。
 func (c *Client) SelfID() int64 { return c.selfID }
 
+// WaitReady 等待客户端登录并建立自身身份，或者 ctx 结束。
+func (c *Client) WaitReady(ctx context.Context) error {
+	if c.readyOnce == nil {
+		return nil
+	}
+	select {
+	case <-c.readyOnce:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // SendMessage 给指定 chat 发文本消息。
 //
 // RandomID 交给 gotd 生成 —— 自己造反而可能和它的实现不一致。

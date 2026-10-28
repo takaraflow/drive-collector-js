@@ -448,6 +448,8 @@ func (f *fakeTG) AnswerCallback(_ context.Context, _ int64, text string, alert b
 }
 
 func (f *fakeTG) DeleteMessages(context.Context, int64, []int64) error { return nil }
+func (f *fakeTG) WaitReady(context.Context) error                  { return nil }
+func (f *fakeTG) RegisterBotCommands(context.Context, int64) error { return nil }
 
 // withFakeTG 给 App 装上假的 Telegram —— 状态消息通道一并指过去,
 // 否则 notify 会因为 notices==nil 直接返回,「消息有没有被改」测不到。
