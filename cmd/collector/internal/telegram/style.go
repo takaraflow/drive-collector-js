@@ -9,6 +9,7 @@ import (
 	"github.com/gotd/td/telegram/message/html"
 	"github.com/gotd/td/telegram/message/styling"
 	"github.com/gotd/td/tg"
+	"github.com/gotd/td/tgerr"
 )
 
 // styledText 把 Bot API 风格的 HTML 变成 gotd 的样式选项。
@@ -35,11 +36,10 @@ type styledSender interface {
 
 // sendOrEdit 发或改一条 HTML 样式消息。
 //
-// 降级是刻意的:gotd 的 StyledText 先解析后发送,解析失败时服务端根本
-// 什么都没收到,退回纯文本重发不会重复。宁可让用户看见裸标签,也不能让
-// 状态消息凭空消失 —— 任务卡在「上传中」而没有任何提示,比丑陋得多。
-// 动态内容(任务名、报错)都已过 escapeHTMLText,正常不会走到这条分支。
-// 若配置了 flood 限流保护，所有调用会自动享受 FloodWait 指数退避重试与冷静期守护。
+// 降级是刻意的:gotd 的 StyledText 先解析后发送，若本地 HTML 解析失败，
+// 剥离 HTML 标签退回纯文本重发，绝不将裸 <b> 标签原样暴露给用户。
+// 若内容本身合规只是遇到 MESSAGE_NOT_MODIFIED 等网络/服务端无变更状态，
+// 优雅忽略或上抛给 flood 限流层重试，杜绝因服务端瞬态报错误降级为裸标签的问题。
 func (c *Client) sendOrEdit(ctx context.Context, s styledSender, text string) (tg.UpdatesClass, error) {
 	var upd tg.UpdatesClass
 
@@ -49,13 +49,25 @@ func (c *Client) sendOrEdit(ctx context.Context, s styledSender, text string) (t
 			upd = u
 			return nil
 		}
-		c.log.Warn("HTML 解析失败,退回纯文本", "err", err)
-		u, err = s.Text(ctx, text)
-		if err != nil {
-			return err
+		// 编辑消息未发生变化时返回 MESSAGE_NOT_MODIFIED，视为成功
+		if tgerr.Is(err, "MESSAGE_NOT_MODIFIED") {
+			return nil
 		}
-		upd = u
-		return nil
+
+		// 检查是否是本地 HTML 解析失败
+		var tb entity.Builder
+		if parseErr := styling.Perform(&tb, styledText(text)); parseErr != nil {
+			c.log.Warn("HTML 解析失败, 剥除标签退回纯文本", "err", parseErr)
+			u, err = s.Text(ctx, stripHTML(text))
+			if err != nil {
+				return err
+			}
+			upd = u
+			return nil
+		}
+
+		// 本地解析正常说明是网络或 RPC 错误，由外层 flood 或调用方处理
+		return err
 	}
 
 	if c.flood != nil {

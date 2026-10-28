@@ -10,6 +10,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gotd/td/telegram/message/entity"
+	"github.com/gotd/td/telegram/message/html"
+	"github.com/gotd/td/telegram/message/styling"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/drive"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/rclone"
 )
@@ -242,5 +245,238 @@ func TestResolveScanDrives(t *testing.T) {
 	defDrive, err := a.resolveScanDrives(context.Background(), "u1", "dupscan_scope_default")
 	if err != nil || len(defDrive) != 1 || defDrive[0].ID != "d1" {
 		t.Errorf("dupscan_scope_default 应返回默认网盘 d1, err=%v, drives=%+v", err, defDrive)
+	}
+}
+
+// ============================================================================
+// 跨网盘混查测试
+// ============================================================================
+
+func TestGroupCrossDuplicates_HashMatching(t *testing.T) {
+	d1 := drive.Drive{ID: "mega", Name: "MEGA 主盘"}
+	d2 := drive.Drive{ID: "oss", Name: "OSS 归档"}
+
+	allDriveEntries := []DriveEntries{
+		{
+			Drive: d1,
+			Entries: []rclone.FileEntry{
+				hashed("/Movies/Avatar.mkv", "md5", "8f3a9876", 1200000000),
+				hashed("/Other/test.txt", "md5", "1111", 50),
+			},
+		},
+		{
+			Drive: d2,
+			Entries: []rclone.FileEntry{
+				hashed("/Backups/2026/Avatar.mkv", "md5", "8f3a9876", 1200000000),
+				hashed("/Other/diff.txt", "md5", "2222", 60),
+			},
+		},
+	}
+
+	res := groupCrossDuplicates(allDriveEntries)
+	if !res.IsCrossDrive {
+		t.Fatal("IsCrossDrive 应为 true")
+	}
+	if len(res.Groups) != 1 {
+		t.Fatalf("应归出 1 组跨盘重复, 实际得到 %d 组: %+v", len(res.Groups), res.Groups)
+	}
+
+	g := res.Groups[0]
+	if g.Basis != "hash" || g.Algo != "md5" || g.Size != 1200000000 {
+		t.Errorf("分组元数据不对: %+v", g)
+	}
+	if len(g.Items) != 2 {
+		t.Fatalf("组内应有 2 个条目, 实际得到 %d", len(g.Items))
+	}
+	if g.Items[0].DriveLabel != "MEGA 主盘" && g.Items[1].DriveLabel != "MEGA 主盘" {
+		t.Errorf("应包含 MEGA 主盘项: %+v", g.Items)
+	}
+}
+
+func TestGroupCrossDuplicates_MixedHashAndNameSize(t *testing.T) {
+	d1 := drive.Drive{ID: "mega", Name: "MEGA 主盘"}
+	d2 := drive.Drive{ID: "oss", Name: "OSS 归档"}
+	d3 := drive.Drive{ID: "proton", Name: "ProtonDrive"}
+
+	allDriveEntries := []DriveEntries{
+		{
+			Drive: d1,
+			Entries: []rclone.FileEntry{
+				hashed("/Movies/Avatar.mkv", "md5", "8f3a987654321", 1200000000),
+			},
+		},
+		{
+			Drive: d2,
+			Entries: []rclone.FileEntry{
+				hashed("/Backups/2026/Avatar.mkv", "md5", "8f3a987654321", 1200000000),
+			},
+		},
+		{
+			Drive: d3,
+			Entries: []rclone.FileEntry{
+				// ProtonDrive 无哈希
+				{Path: "/Avatar.mkv", Size: 1200000000},
+			},
+		},
+	}
+
+	res := groupCrossDuplicates(allDriveEntries)
+	if len(res.Groups) != 1 {
+		t.Fatalf("应将有哈希与同名同大小无哈希的归出 1 组, 得到 %d 组", len(res.Groups))
+	}
+	g := res.Groups[0]
+	if g.Basis != "cross_mixed" {
+		t.Errorf("混合判重 basis 应为 cross_mixed, 得到 %q", g.Basis)
+	}
+	if len(g.Items) != 3 {
+		t.Fatalf("应包含 3 份文件, 得到 %d", len(g.Items))
+	}
+
+	// 检查 ProtonDrive 项的标注
+	var protonItem *dupFileItem
+	for i := range g.Items {
+		if g.Items[i].DriveLabel == "ProtonDrive" {
+			protonItem = &g.Items[i]
+			break
+		}
+	}
+	if protonItem == nil {
+		t.Fatal("未找到 ProtonDrive 条目")
+	}
+	if !strings.Contains(protonItem.Note, "无哈希") {
+		t.Errorf("ProtonDrive 项 Note 应标注无哈希, 得到 %q", protonItem.Note)
+	}
+
+	// 验证页面渲染
+	text, _ := renderDupScanPage("全网盘", res, 0)
+	if !strings.Contains(text, "🔍 <b>全网盘重复文件扫描</b>") {
+		t.Errorf("跨盘页面标题不正确:\n%s", text)
+	}
+	if !strings.Contains(text, "🔁 <b>3 份重复文件</b>") {
+		t.Errorf("重复文件头信息不正确:\n%s", text)
+	}
+	if !strings.Contains(text, "🟢 <i>判重依据：内容哈希 (md5) + 同名同大小</i>") {
+		t.Errorf("判重依据行不正确:\n%s", text)
+	}
+	if !strings.Contains(text, "• 📂 <b>[MEGA 主盘]</b> <code>/Movies/Avatar.mkv</code> (md5: 8f3a9876...)") {
+		t.Errorf("MEGA 条目渲染不匹配:\n%s", text)
+	}
+	if !strings.Contains(text, "• 📂 <b>[ProtonDrive]</b> <code>/Avatar.mkv</code> (⚠️ 无哈希，依同名同大小关联)") {
+		t.Errorf("ProtonDrive 条目渲染不匹配:\n%s", text)
+	}
+	if !strings.Contains(text, "📊 <i>第 1/1 页 | 共 1 组跨盘重复</i>") {
+		t.Errorf("跨盘页脚统计不匹配:\n%s", text)
+	}
+}
+
+func TestGroupCrossDuplicates_NameSizeFallback(t *testing.T) {
+	d1 := drive.Drive{ID: "d1", Name: "网盘A"}
+	d2 := drive.Drive{ID: "d2", Name: "网盘B"}
+
+	allDriveEntries := []DriveEntries{
+		{
+			Drive: d1,
+			Entries: []rclone.FileEntry{
+				{Path: "/doc/report.pdf", Size: 50000},
+			},
+		},
+		{
+			Drive: d2,
+			Entries: []rclone.FileEntry{
+				{Path: "/archive/report.pdf", Size: 50000},
+			},
+		},
+	}
+
+	res := groupCrossDuplicates(allDriveEntries)
+	if len(res.Groups) != 1 {
+		t.Fatalf("应按同名同大小归出 1 组, 得到 %d 组", len(res.Groups))
+	}
+	if res.Groups[0].Basis != "cross_name_size" {
+		t.Errorf("basis 应为 cross_name_size, 得到 %q", res.Groups[0].Basis)
+	}
+}
+
+func TestGroupCrossDuplicates_ConflictingHashesNotMerged(t *testing.T) {
+	d1 := drive.Drive{ID: "d1", Name: "网盘A"}
+	d2 := drive.Drive{ID: "d2", Name: "网盘B"}
+
+	allDriveEntries := []DriveEntries{
+		{
+			Drive: d1,
+			Entries: []rclone.FileEntry{
+				hashed("conflict.bin", "md5", "hash111", 5000),
+			},
+		},
+		{
+			Drive: d2,
+			Entries: []rclone.FileEntry{
+				hashed("conflict.bin", "md5", "hash222", 5000),
+			},
+		},
+	}
+
+	res := groupCrossDuplicates(allDriveEntries)
+	if len(res.Groups) != 0 {
+		t.Fatalf("哈希冲突的文件即使同名同大小也不应聚为重复, 得到 %d 组", len(res.Groups))
+	}
+}
+
+func TestRenderDupScanPage_CrossDrive_NoDuplicates(t *testing.T) {
+	res := dupScanResult{
+		Total:        100,
+		IsCrossDrive: true,
+	}
+	text, buttons := renderDupScanPage("全网盘", res, 0)
+	if !strings.Contains(text, "全网盘重复文件扫描") {
+		t.Errorf("应包含全网盘标题:\n%s", text)
+	}
+	if !strings.Contains(text, "未发现跨盘重复文件") {
+		t.Errorf("应包含未发现提示:\n%s", text)
+	}
+	if len(buttons) != 0 {
+		t.Errorf("无重复时不应有分页按钮")
+	}
+}
+
+func TestRenderDupScanPage_HTMLValidity(t *testing.T) {
+	d1 := drive.Drive{ID: "mega", Name: "MEGA <主盘> & \"Special\""}
+	d2 := drive.Drive{ID: "oss", Name: "OSS 归档"}
+	d3 := drive.Drive{ID: "proton", Name: "ProtonDrive"}
+
+	allDriveEntries := []DriveEntries{
+		{
+			Drive: d1,
+			Entries: []rclone.FileEntry{
+				hashed("/Movies/<Avatar> & Co.mkv", "md5", "8f3a987654321", 1200000000),
+			},
+		},
+		{
+			Drive: d2,
+			Entries: []rclone.FileEntry{
+				hashed("/Backups/2026/<Avatar> & Co.mkv", "md5", "8f3a987654321", 1200000000),
+			},
+		},
+		{
+			Drive: d3,
+			Entries: []rclone.FileEntry{
+				{Path: "/<Avatar> & Co.mkv", Size: 1200000000},
+			},
+		},
+	}
+
+	res := groupCrossDuplicates(allDriveEntries)
+	text, _ := renderDupScanPage("全网盘", res, 0)
+
+	tb := entity.Builder{}
+	err := styling.Perform(&tb, styling.Custom(func(eb *entity.Builder) error {
+		return html.HTML(strings.NewReader(text), eb, html.Options{})
+	}))
+	if err != nil {
+		t.Fatalf("HTML 解析失败: %v, text=\n%s", err, text)
+	}
+	plain, entities := tb.Complete()
+	if len(plain) == 0 || len(entities) == 0 {
+		t.Fatalf("解析得到的实体或文本为空: textLen=%d, entities=%d", len(plain), len(entities))
 	}
 }

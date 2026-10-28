@@ -8,7 +8,7 @@ import (
 	"github.com/gotd/td/tg"
 )
 
-// render 走 gotd 自己的解析入口(styling.Perform → Complete),
+// render 走 gotd 自己的解析入口(styling.Perform → Complete)，
 // 与 Builder.StyledText 内部完全同一条路径 —— 测它就等于测发送时
 // 真正会发生的事。
 func render(t *testing.T, text string) (string, []tg.MessageEntityClass) {
@@ -147,6 +147,10 @@ func TestStyledText_Tolerant(t *testing.T) {
 		tb := entity.Builder{}
 		if err := styling.Perform(&tb, styledText(in)); err != nil {
 			t.Logf("输入 %q 解析报错(err=%v)—— 会走纯文本降级,消息不会丢", in, err)
+			stripped := stripHTML(in)
+			if stripped == "" {
+				t.Errorf("输入 %q 剥离标签后文本为空", in)
+			}
 			continue
 		}
 		text, entities := tb.Complete()
