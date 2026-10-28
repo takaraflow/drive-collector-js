@@ -51,6 +51,8 @@ type Telegram interface {
 	EditWithButtons(ctx context.Context, chatID int64, msgID int, text string, buttons [][]tgclient.Button) error
 	AnswerCallback(ctx context.Context, callbackID int64, text string, alert bool) error
 	DeleteMessages(ctx context.Context, chatID int64, ids []int64) error
+	WaitReady(ctx context.Context) error
+	RegisterBotCommands(ctx context.Context, ownerID int64) error
 }
 
 // NoticeSender 是任务状态消息需要的三个动作。

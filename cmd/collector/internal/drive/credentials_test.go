@@ -127,7 +127,7 @@ func TestProtonNoSessionNoPasswordRejected(t *testing.T) {
 
 // TestPlaceholderDriveRejected 占位网盘必须明确报错。
 func TestPlaceholderDriveRejected(t *testing.T) {
-	d := &Drive{Type: "gdrive", Config: DriveConfig{User: "u", Pass: "p"}}
+	d := &Drive{Type: "unknown_drive", Config: DriveConfig{User: "u", Pass: "p"}}
 	_, err := ToConnectionString(d)
 	if err == nil {
 		t.Fatal("占位网盘应报错")
@@ -225,7 +225,7 @@ func TestWebDAVConnectionString(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	wantPrefix := ":webdav,url=\"https://dav.jianguoyun.com/dav/\",user=\"alice@example.com\",pass=\"obscured_pass\",vendor=\"other\":"
+	wantPrefix := `:webdav,url="https://dav.jianguoyun.com/dav/",user="alice@example.com",pass="obscured_pass",vendor="other":`
 	if got != wantPrefix {
 		t.Errorf("got %q, want %q", got, wantPrefix)
 	}
@@ -245,7 +245,7 @@ func TestOSSConnectionString(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := ":s3,provider=\"Other\",endpoint=\"https://oss-cn-hangzhou.aliyuncs.com\",access_key_id=\"LTAI5txxxxxxxxxxxx\",secret_access_key=\"SecRetKey1234567890\":my-backup-bucket"
+	want := `:s3,provider="Other",endpoint="https://oss-cn-hangzhou.aliyuncs.com",access_key_id="LTAI5txxxxxxxxxxxx",secret_access_key="SecRetKey1234567890":my-backup-bucket`
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
@@ -298,5 +298,23 @@ func TestFilenConnectionString(t *testing.T) {
 	}
 	if !strings.Contains(got, `api_key="filen_api_key_sample_token"`) {
 		t.Errorf("缺少 api_key 字段: %q", got)
+	}
+}
+
+func TestPCloudConnectionString(t *testing.T) {
+	d := &Drive{
+		Type: "pcloud",
+		Config: DriveConfig{
+			User: "alice@example.com",
+			Pass: "PCloudSecretPass",
+		},
+	}
+	got, err := ToConnectionString(d)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := `:webdav,url="https://webdav.pcloud.com",vendor="other",user="alice@example.com",pass="PCloudSecretPass":`
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }

@@ -11,8 +11,7 @@ import (
 
 // 本文件是绑定向导的编排:接住用户每条输入,推进状态机,最后落库。
 //
-// 与 JS 侧 DriveConfigFlow._processInput + BindingService.handleInput
-// 对齐,但只覆盖 Go 已实现的 mega / protondrive 两个类型。
+// 与 JS 侧 DriveConfigFlow._processInput + BindingService.handleInput 对齐。
 
 // stepType 从会话步骤里解出 (driveType, stepName)。
 //
@@ -36,7 +35,7 @@ func encodeStep(t drive.Type, step string) string {
 func (a *App) bindStart(ctx context.Context, chatID int64, userID, typeStr string) error {
 	t := drive.Type(typeStr)
 	if !drive.IsSupported(t) {
-		return a.sendSafe(ctx, chatID, "⚠️ 暂不支持该网盘类型。当前可用:Mega、Proton Drive、WebDAV、S3/OSS、PikPak、Filen。")
+		return a.sendSafe(ctx, chatID, "⚠️ 暂不支持该网盘类型。当前可用:Mega、Proton Drive、WebDAV、S3/OSS、PikPak、Filen、Google Drive、OneDrive、Dropbox。")
 	}
 	step := drive.FirstStep(t)
 	if step == "" {
@@ -61,6 +60,8 @@ func (a *App) bindStart(ctx context.Context, chatID int64, userID, typeStr strin
 		prompt = "⚡ <b>请输入 PikPak 账号/邮箱</b>：\n\n发送 /cancel 或输入 取消 可随时退出绑定流程。"
 	case drive.TypeFilen:
 		prompt = "🔒 <b>请输入 Filen 账号邮箱</b>：\n\n发送 /cancel 或输入 取消 可随时退出绑定流程。"
+	case drive.TypePCloud:
+		prompt = "☁️ <b>请输入 pCloud 账号邮箱</b>：\n\n发送 /cancel 或输入 取消 可随时退出绑定流程。"
 	}
 	return a.tg.SendMessage(ctx, chatID, prompt)
 }
@@ -88,8 +89,8 @@ func (a *App) handleBindInput(ctx context.Context, msg messageInfo, text string)
 		return false
 	}
 
-	// 敏感步骤(密码/2FA)的原始消息要删 —— 凭据留在聊天记录里是隐患。
-	// 与 JS 侧 isSensitiveBindingStep 一致:WAIT_PASS / WAIT_PASSWORD / WAIT_2FA。
+	// 敏感步骤(密码/2FA/Token)的原始消息要删 —— 凭据留在聊天记录里是隐患。
+	// 与 JS 侧 isSensitiveBindingStep 一致:WAIT_PASS / WAIT_PASSWORD / WAIT_2FA / WAIT_TOKEN。
 	if isSensitiveStep(step) {
 		if err := a.tg.DeleteMessages(ctx, msg.ChatID, []int64{int64(msg.ID)}); err != nil {
 			a.log.Warn("删除敏感输入失败(不影响流程)", "err", err)
@@ -110,6 +111,8 @@ func (a *App) handleBindInput(ctx context.Context, msg messageInfo, text string)
 		res = drive.HandlePikPakStep(ctx, a.rcloneRunner, step, text, sess.Data)
 	case drive.TypeFilen:
 		res = drive.HandleFilenStep(ctx, a.rcloneRunner, a.filenClient, step, text, sess.Data)
+	case drive.TypePCloud:
+		res = drive.HandlePCloudStep(ctx, a.rcloneRunner, step, text, sess.Data)
 	default:
 		_ = a.bindSessions.Clear(ctx, userID)
 		return false
@@ -178,10 +181,10 @@ func (a *App) createBoundDrive(ctx context.Context, userID string, t drive.Type,
 }
 
 // isSensitiveStep 报告该步骤的原始消息是否该删。
-// 与 JS isSensitiveBindingStepName 对齐(WAIT_PASS / WAIT_PASSWORD / WAIT_2FA)。
+// 与 JS isSensitiveBindingStepName 对齐(WAIT_PASS / WAIT_PASSWORD / WAIT_2FA / WAIT_SK / WAIT_TOKEN)。
 func isSensitiveStep(step string) bool {
 	switch step {
-	case "WAIT_PASS", "WAIT_PASSWORD", "WAIT_2FA", "WAIT_SK":
+	case "WAIT_PASS", "WAIT_PASSWORD", "WAIT_2FA", "WAIT_SK", "WAIT_TOKEN":
 		return true
 	}
 	return false

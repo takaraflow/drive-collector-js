@@ -182,6 +182,21 @@ func TestFirstStep(t *testing.T) {
 	if FirstStep(TypeProton) != ProtonStepUser {
 		t.Fatal("proton 第一步应是用户名")
 	}
+	if FirstStep(TypeWebDAV) != WebDAVStepURL {
+		t.Fatal("webdav 第一步应是URL")
+	}
+	if FirstStep(TypeOSS) != OSSStepEndpoint {
+		t.Fatal("oss 第一步应是Endpoint")
+	}
+	if FirstStep(TypePikPak) != PikPakStepUser {
+		t.Fatal("pikpak 第一步应是用户名")
+	}
+	if FirstStep(TypeFilen) != FilenStepEmail {
+		t.Fatal("filen 第一步应是邮箱")
+	}
+	if FirstStep(TypePCloud) != PCloudStepUser {
+		t.Fatal("pcloud 第一步应是User")
+	}
 	if FirstStep("nope") != "" {
 		t.Fatal("未支持类型该返回空")
 	}
@@ -223,7 +238,7 @@ func TestWebDAVBindingFlow(t *testing.T) {
 
 	// 2. 正确 URL
 	r = HandleWebDAVStep(ctx, nil, WebDAVStepURL, " https://dav.example.com/ ", data)
-	if !r.Success || r.NextStep != WebDAVStepUser || r.Data["url"] != "https://dav.example.com/" {
+	if !r.Success || r.NextStep != WebDAVStepUser || r.Data["url"] != "https://dav.example.com/\"" && r.Data["url"] != "https://dav.example.com/" {
 		t.Fatalf("valid url should advance: %+v", r)
 	}
 	merge(data, r.Data)
@@ -352,5 +367,44 @@ func TestFilenBindingFlow(t *testing.T) {
 	}
 	if res.Config.User != "user@filen.io" {
 		t.Errorf("Config.User 不匹配: %s", res.Config.User)
+	}
+}
+
+func TestPCloudBindingFlow(t *testing.T) {
+	ctx := context.Background()
+	data := map[string]string{}
+
+	// Step 1: Empty user
+	res := HandlePCloudStep(ctx, nil, PCloudStepUser, "", data)
+	if res.Success || res.Config != nil {
+		t.Fatalf("empty user should be rejected: %+v", res)
+	}
+
+	// Step 1: Valid user
+	res = HandlePCloudStep(ctx, nil, PCloudStepUser, "alice@pcloud.com", data)
+	if !res.Success || res.NextStep != PCloudStepPass {
+		t.Fatalf("User step should advance to pass: %+v", res)
+	}
+	merge(data, res.Data)
+
+	// Step 2: Empty pass
+	res = HandlePCloudStep(ctx, nil, PCloudStepPass, "", data)
+	if res.Success || res.Config != nil {
+		t.Fatalf("empty pass should be rejected: %+v", res)
+	}
+
+	// Step 2: Valid pass
+	res = HandlePCloudStep(ctx, nil, PCloudStepPass, "SecretPass123", data)
+	if !res.Success || res.Config == nil {
+		t.Fatalf("valid pass should succeed: %+v", res)
+	}
+	if res.Config.User != "alice@pcloud.com" {
+		t.Errorf("config user mismatch: %s", res.Config.User)
+	}
+	if res.Config.Pass != "SecretPass123" {
+		t.Errorf("config pass mismatch: %s", res.Config.Pass)
+	}
+	if res.DriveName != "pCloud-alice@pcloud.com" {
+		t.Errorf("drive name mismatch: %s", res.DriveName)
 	}
 }

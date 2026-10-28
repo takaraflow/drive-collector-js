@@ -130,6 +130,9 @@ const (
 	FilenStepEmail = "WAIT_EMAIL"
 	FilenStepPass  = "WAIT_PASS"
 	FilenStep2FA   = "WAIT_2FA"
+
+	PCloudStepUser = "WAIT_USER"
+	PCloudStepPass = "WAIT_PASS"
 )
 
 // FirstStep 返回某网盘绑定的第一步。
@@ -147,6 +150,8 @@ func FirstStep(t Type) string {
 		return PikPakStepUser
 	case TypeFilen:
 		return FilenStepEmail
+	case TypePCloud:
+		return PCloudStepUser
 	}
 	return ""
 }
@@ -704,6 +709,62 @@ func finalizeFilen(ctx context.Context, runner *rclone.Runner, email, pass, apiK
 		Data:      map[string]string{},
 		Config:    &cfg,
 		DriveName: "Filen-" + email,
+	}
+}
+
+// ---------- pCloud ----------
+
+func HandlePCloudStep(ctx context.Context, runner *rclone.Runner, step, input string, data map[string]string) BindResult {
+	if Cancelled(input) {
+		return BindResult{Success: true, Message: "🚫 绑定流程已取消。"}
+	}
+	switch step {
+	case PCloudStepUser:
+		user := normalizeText(input)
+		if user == "" {
+			return BindResult{Success: false, Message: "❌ 账号邮箱不能为空，请重新输入："}
+		}
+		return BindResult{
+			Success:  true,
+			Message:  "🔑 <b>请输入 pCloud 登录密码</b>：\n\n🔒 提示: 密码输入在提交后会被立即自动删除。",
+			NextStep: PCloudStepPass,
+			Data:     map[string]string{"user": user},
+		}
+
+	case PCloudStepPass:
+		pass := normalizeText(input)
+		if pass == "" {
+			return BindResult{Success: false, Message: "❌ 密码不能为空，请重新输入："}
+		}
+		passObscured := pass
+		if runner != nil {
+			var err error
+			passObscured, err = runner.Obscure(ctx, pass)
+			if err != nil {
+				return BindResult{
+					Success:       false,
+					Failed:        true,
+					FailureReason: "ERROR",
+					Message:       "❌ <b>绑定失败</b>\n\n原因：混淆密码出错，请稍后重试。",
+				}
+			}
+		}
+		cfg := DriveConfig{
+			User:               data["user"],
+			Pass:               passObscured,
+			PassFormat:         "rclone_obscured",
+			SchemaVersion:      1,
+			CredentialVerified: true,
+		}
+		account := data["user"]
+		return BindResult{
+			Success:   true,
+			Message:   "✅ <b>pCloud 绑定成功！</b>\n\n账号: <code>" + escapeHTML(account) + "</code>\n\n现在可以直接发送文件或链接开始转存。",
+			Config:    &cfg,
+			DriveName: "pCloud-" + account,
+		}
+	default:
+		return BindResult{Success: false, Failed: true, Message: "未知步骤"}
 	}
 }
 

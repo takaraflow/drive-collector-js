@@ -20,6 +20,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -180,6 +181,8 @@ type App struct {
 	// 真成了内存问题再按时间窗清理。
 	filesRefreshAt map[string]time.Time
 
+	probeURL func(ctx context.Context, targetURL string, maxBytes int64) (*externalSourceInfo, error)
+
 	// modeMu/modeCached 保护访问模式的进程内缓存 —— 全局守卫每条
 	// 消息都要读一次,不缓存就是每条消息一次 D1 往返。
 	modeMu       sync.Mutex
@@ -250,6 +253,8 @@ func New(cfg Config) (*App, error) {
 		a.bindRuntime = newProtonRuntime(a.rcloneRunner)
 		a.filenClient = drive.NewHTTPFilenClient()
 	}
+
+	a.probeURL = probeExternalURL
 
 	// task.Manager 只负责「该不该处理」和状态推进,具体怎么做由这里注入。
 	manager := task.NewManager(cfg.Repo, cfg.Log)
@@ -429,6 +434,23 @@ func (a *App) Run(ctx context.Context) error {
 				cancelTG()
 			}
 		case <-tgCtx.Done():
+		}
+	}()
+
+	go func() {
+		if err := a.tg.WaitReady(tgCtx); err != nil {
+			return
+		}
+		var ownerID int64
+		if a.ownerID != "" {
+			if id, err := strconv.ParseInt(a.ownerID, 10, 64); err == nil {
+				ownerID = id
+			}
+		}
+		if err := a.tg.RegisterBotCommands(tgCtx, ownerID); err != nil {
+			a.log.Warn("注册 Bot 命令列表失败", "err", err)
+		} else {
+			a.log.Info("已自动向 Telegram 注册 Bot 命令列表", "ownerId", ownerID)
 		}
 	}()
 
@@ -663,6 +685,10 @@ func (a *App) onUpdate(ctx context.Context, u tgclient.Update) error {
 			return nil
 		}
 
+		if a.handleExternalURLMessage(ctx, msg) {
+			return nil
+		}
+
 		if !msg.HasMedia {
 			if a.handleLinkMessage(ctx, msg) {
 				return nil
@@ -724,6 +750,7 @@ func (a *App) routeCommand(ctx context.Context, msg messageInfo) error {
 		return a.handleModeSwitchCommand(ctx, msg, store.AccessModePublic)
 	case "/status_private", "/close_service":
 		return a.handleModeSwitchCommand(ctx, msg, store.AccessModePrivate)
+
 	}
 
 	if a.dispatcher == nil {
@@ -791,6 +818,9 @@ func (a *App) handleDriveCommand(ctx context.Context, msg messageInfo) error {
 			{Text: "⚡ PikPak", Data: "drive_bind_pikpak"},
 			{Text: "🔒 Filen", Data: "drive_bind_filen"},
 		},
+		{
+			{Text: "☁️ pCloud", Data: "drive_bind_pcloud"},
+		},
 	}
 	for i := range drives {
 		d := &drives[i]
@@ -825,22 +855,43 @@ func (a *App) handleUnbindCommand(ctx context.Context, msg messageInfo) error {
 	return a.handleDriveCommand(ctx, msg)
 }
 
-// handleRemoteFolderCommand /set_remote_folder /path —— 真正写库。
+// handleRemoteFolderCommand /set_remote_folder 或 /remote_folder。
 func (a *App) handleRemoteFolderCommand(ctx context.Context, msg messageInfo) error {
 	userID := fmt.Sprintf("%d", msg.SenderID)
 	fields := strings.Fields(strings.TrimSpace(msg.Text))
 	if len(fields) < 2 {
+		currentFolder := a.cfg.RemoteBase
+		if currentFolder == "" {
+			currentFolder = "/"
+		}
+		if a.drives != nil {
+			if d, err := a.drives.DefaultDrive(ctx, userID); err == nil && d != nil && d.RemoteFolder.Valid && strings.TrimSpace(d.RemoteFolder.String) != "" {
+				currentFolder = d.RemoteFolder.String + " (自定义)"
+			} else {
+				currentFolder = currentFolder + " (默认)"
+			}
+		}
 		return a.tg.SendMessage(ctx, msg.ChatID,
-			"用法:<code>/set_remote_folder /你的目录</code>\n\n"+
-				"例如:<code>/set_remote_folder /backup</code>")
+			"📂 <b>保存目录设置</b>\n\n"+
+				"当前上传目录：<code>"+escapeHTMLText(currentFolder)+"</code>\n\n"+
+				"修改目录用法：<code>/set_remote_folder /你的目录</code>\n"+
+				"重置目录用法：<code>/set_remote_folder reset</code>\n"+
+				"例如：<code>/set_remote_folder /backup</code>")
 	}
 	folder := strings.Join(fields[1:], " ")
+	if folder == "reset" || folder == "default" {
+		folder = ""
+	}
 	if !a.bindDriveReady() {
 		return a.tg.SendMessage(ctx, msg.ChatID, "⚠️ 该功能暂未迁移到新服务。")
 	}
 	if err := a.setRemoteFolder(ctx, userID, "", folder); err != nil {
 		a.log.Error("设置保存目录失败", "err", err)
 		return a.tg.SendMessage(ctx, msg.ChatID, "❌ 设置失败:"+escapeHTMLText(err.Error()))
+	}
+	if folder == "" {
+		return a.tg.SendMessage(ctx, msg.ChatID,
+			"✅ 保存目录已重置为默认目录")
 	}
 	return a.tg.SendMessage(ctx, msg.ChatID,
 		"✅ 保存目录已设为 <code>"+escapeHTMLText(folder)+"</code>")
@@ -947,6 +998,9 @@ func (a *App) handleCallback(ctx context.Context, u tgclient.Update) error {
 
 	case strings.HasPrefix(data, "dupscan_"):
 		return a.handleDupScanCallback(ctx, cb, data)
+
+	case strings.HasPrefix(data, "external_url_cancel_"), strings.HasPrefix(data, "external_url_execute_"):
+		return a.handleExternalURLCallback(ctx, cb, data)
 	}
 
 	a.log.Debug("收到未处理的按钮点击", "data", data)

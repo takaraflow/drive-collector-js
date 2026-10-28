@@ -179,6 +179,15 @@ func ToConnectionString(d *Drive) (string, error) {
 			Pass:   pass,
 			APIKey: d.Config.APIKey,
 		})
+
+	case TypePCloud:
+		if d.Config.User == "" || d.Config.Pass == "" {
+			return "", fmt.Errorf("drive: pcloud 缺少账号或密码")
+		}
+		return ConnectionString(TypePCloud, Config{
+			User: d.Config.User,
+			Pass: d.Config.Pass,
+		})
 	}
 	return "", fmt.Errorf("drive: %q 尚未实现(占位)", d.Type)
 }
