@@ -13,25 +13,16 @@ func CommonBotCommands() []tg.BotCommand {
 		{Command: "start", Description: "🚀 启动机器人"},
 		{Command: "drive", Description: "🔑 绑定或管理网盘"},
 		{Command: "files", Description: "📁 浏览已转存文件"},
-		{Command: "scan_dup", Description: "🔍 查找网盘重复文件"},
 		{Command: "status", Description: "📊 查看我的任务"},
-		{Command: "remote_folder", Description: "📂 保存目录设置"},
+		{Command: "cancel", Description: "❌ 取消当前操作与退出会话"},
 		{Command: "help", Description: "📖 显示帮助菜单"},
 	}
 }
 
-// AdminBotCommands 返回管理员专属的 Bot 命令菜单（包含普通命令与管理命令）。
+// AdminBotCommands 返回管理员专属的 Bot 命令菜单（包含普通命令与单一管理员控制台入口）。
 func AdminBotCommands() []tg.BotCommand {
 	adminOnly := []tg.BotCommand{
-		{Command: "users", Description: "👥 用户列表"},
-		{Command: "task_queue", Description: "📊 全局任务队列"},
-		{Command: "diagnosis", Description: "🩺 系统诊断"},
-		{Command: "open_service", Description: "🔓 开启服务"},
-		{Command: "close_service", Description: "🔒 关闭服务"},
-		{Command: "ban", Description: "🚫 封禁用户"},
-		{Command: "unban", Description: "✅ 解封用户"},
-		{Command: "pro_admin", Description: "👑 设置管理员"},
-		{Command: "de_admin", Description: "🗑️ 取消管理员"},
+		{Command: "admin", Description: "⚙️ 管理员控制台"},
 	}
 	res := make([]tg.BotCommand, 0, len(CommonBotCommands())+len(adminOnly))
 	res = append(res, CommonBotCommands()...)

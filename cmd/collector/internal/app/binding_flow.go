@@ -89,6 +89,16 @@ func (a *App) handleBindInput(ctx context.Context, msg messageInfo, text string)
 		return false
 	}
 
+	// 拦截退出/取消指令：避免把 "/cancel" 当作密码或凭据送往校验
+	if drive.Cancelled(text) {
+		if isSensitiveStep(step) {
+			_ = a.tg.DeleteMessages(ctx, msg.ChatID, []int64{int64(msg.ID)})
+		}
+		_ = a.bindSessions.Clear(ctx, userID)
+		_ = a.tg.SendMessage(ctx, msg.ChatID, "✅ 已取消并退出网盘绑定流程。随时发送 /drive 可重新发起绑定。")
+		return true
+	}
+
 	// 敏感步骤(密码/2FA/Token)的原始消息要删 —— 凭据留在聊天记录里是隐患。
 	// 与 JS 侧 isSensitiveBindingStep 一致:WAIT_PASS / WAIT_PASSWORD / WAIT_2FA / WAIT_TOKEN。
 	if isSensitiveStep(step) {
@@ -152,7 +162,7 @@ func (a *App) handleBindInput(ctx context.Context, msg messageInfo, text string)
 		return true
 	}
 	_ = a.bindSessions.Clear(ctx, userID)
-	a.sendWithButtons(ctx, msg.ChatID, res.Message, [][]tgclient.Button{
+	_ = a.tg.SendWithButtons(ctx, msg.ChatID, res.Message, [][]tgclient.Button{
 		{{Text: "📁 浏览文件", Data: "files_page_0"}},
 	})
 	return true
@@ -193,13 +203,6 @@ func isSensitiveStep(step string) bool {
 
 func (a *App) sendSafe(ctx context.Context, chatID int64, text string) error {
 	if err := a.tg.SendMessage(ctx, chatID, text); err != nil {
-		a.log.Error("发送消息失败", "chatId", chatID, "err", err)
-	}
-	return nil
-}
-
-func (a *App) sendWithButtons(ctx context.Context, chatID int64, text string, buttons [][]tgclient.Button) error {
-	if err := a.tg.SendWithButtons(ctx, chatID, text, buttons); err != nil {
 		a.log.Error("发送消息失败", "chatId", chatID, "err", err)
 	}
 	return nil

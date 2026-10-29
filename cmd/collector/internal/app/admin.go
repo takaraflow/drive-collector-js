@@ -1,11 +1,11 @@
 package app
 
-// 管理员看板 —— /task_queue、/users、/diagnosis 与开关服务模式。
+// 管理员看板 —— /admin、/task_queue、/users、/diagnosis 与开关服务模式。
 //
 // 对应 JS 侧 Dispatcher._handleTaskQueueCommand / _buildTaskQueueOverview /
 // _handleTaskQueueCallback / _handleAdminUsersCommand / _buildAdminUsersView /
 // _handleAdminUsersCallback / _handleDiagnosisCommand / _buildDiagnosisReport /
-// _handleModeSwitchCommand,渲染对应 UIHelper.renderTaskQueue /
+// _handleModeSwitchCommand，渲染对应 UIHelper.renderTaskQueue /
 // renderTaskQueueDetail / renderAdminUsers / renderDiagnosisReport。
 //
 // 放 app 而不是 dispatcher 的理由与 /status 相同:重试失败任务要写状态机,
@@ -92,6 +92,93 @@ var tqOrderedStatuses = []contract.TaskStatus{
 }
 
 // ============================================================================
+// /admin —— 统一管理员控制台
+// ============================================================================
+
+// handleAdminDashboardCommand /admin —— 管理员控制台主面板。
+func (a *App) handleAdminDashboardCommand(ctx context.Context, msg messageInfo) error {
+	userID := fmt.Sprintf("%d", msg.SenderID)
+	if !a.canAdmin(ctx, userID, auth.ActionMaintenanceBypass) {
+		return a.tg.SendMessage(ctx, msg.ChatID, adminNoPermission)
+	}
+	text, buttons := a.adminDashboard(ctx)
+	return a.tg.SendWithButtons(ctx, msg.ChatID, text, buttons)
+}
+
+// openAdminDashboard 回调刷新/返回控制台主面板。
+func (a *App) openAdminDashboard(ctx context.Context, cb tgclient.CallbackContext) error {
+	userID := fmt.Sprintf("%d", cb.UserID)
+	if !a.canAdmin(ctx, userID, auth.ActionMaintenanceBypass) {
+		_ = a.tg.AnswerCallback(ctx, cb.CallbackID, adminNoPermission, true)
+		return nil
+	}
+	_ = a.tg.AnswerCallback(ctx, cb.CallbackID, "", false)
+	text, buttons := a.adminDashboard(ctx)
+	return a.tg.EditWithButtons(ctx, cb.ChatID, cb.MsgID, text, buttons)
+}
+
+// adminDashboard 渲染控制台文本与功能矩阵。
+func (a *App) adminDashboard(ctx context.Context) (string, [][]tgclient.Button) {
+	var b strings.Builder
+	b.WriteString("⚙️ <b>管理员控制台</b>\n")
+	b.WriteString("━━━━━━━━━━━━━━━━━━━\n\n")
+
+	mode := "公开访问"
+	modeIcon := "🔓"
+	if a.accessMode(ctx) == store.AccessModePrivate {
+		mode = "维护模式 (私有访问)"
+		modeIcon = "🔒"
+	}
+	fmt.Fprintf(&b, "<b>服务状态:</b> %s %s\n", modeIcon, mode)
+
+	instancesCount := 1
+	if a.cfg.Coord != nil {
+		if insts, err := a.cfg.Coord.ActiveInstances(ctx); err == nil && len(insts) > 0 {
+			instancesCount = len(insts)
+		}
+	}
+	var ms runtime.MemStats
+	runtime.ReadMemStats(&ms)
+	fmt.Fprintf(&b, "<b>活跃节点:</b> %d 个实例 · <b>内存:</b> %s\n", instancesCount, formatSize(int64(ms.Alloc)))
+
+	if a.admin != nil {
+		if ov, err := a.admin.QueueOverview(ctx, 0); err == nil {
+			active := ov.StatusCounts[string(contract.StatusQueued)] +
+				ov.StatusCounts[string(contract.StatusDownloading)] +
+				ov.StatusCounts[string(contract.StatusUploading)]
+			fmt.Fprintf(&b, "<b>任务概览:</b> 排队 %d · 活跃 %d · 失败 %d · 完成 %d\n",
+				ov.StatusCounts[string(contract.StatusQueued)],
+				active,
+				ov.StatusCounts[string(contract.StatusFailed)],
+				ov.StatusCounts[string(contract.StatusCompleted)])
+		}
+	}
+	b.WriteString("\n请选择管理功能：")
+
+	switchModeText := "🔒 切换为维护模式"
+	switchModeData := "mode_switch_private"
+	if modeIcon == "🔒" {
+		switchModeText = "🔓 切换为公开访问"
+		switchModeData = "mode_switch_public"
+	}
+
+	buttons := [][]tgclient.Button{
+		{
+			{Text: "🩺 系统诊断", Data: "diagnosis_run"},
+			{Text: "📊 全局队列", Data: "task_queue_open"},
+		},
+		{
+			{Text: "👥 用户管理", Data: "admin_users_open"},
+			{Text: switchModeText, Data: switchModeData},
+		},
+		{
+			{Text: "🔄 刷新控制台", Data: "admin_dashboard_open"},
+		},
+	}
+	return b.String(), buttons
+}
+
+// ============================================================================
 // /task_queue —— 全局队列
 // ============================================================================
 
@@ -128,7 +215,7 @@ func (a *App) taskQueueView(ctx context.Context) (string, [][]tgclient.Button, e
 	return renderQueueOverviewPanel(ov), queueOverviewButtons(ov.StatusCounts), nil
 }
 
-// openTaskQueue 把 /status 里的「全局队列」按钮画进当前消息。
+// openTaskQueue 把 /status 或控制台里的「全局队列」按钮画进当前消息。
 func (a *App) openTaskQueue(ctx context.Context, cb tgclient.CallbackContext) error {
 	if !a.can(ctx, fmt.Sprintf("%d", cb.UserID), auth.ActionSystemAdmin) {
 		return a.tg.EditMessage(ctx, cb.ChatID, cb.MsgID, adminNoPermission)
@@ -144,7 +231,7 @@ func (a *App) openTaskQueue(ctx context.Context, cb tgclient.CallbackContext) er
 	return a.tg.EditWithButtons(ctx, cb.ChatID, cb.MsgID, text, buttons)
 }
 
-// openAdminUsers 把 /status 里的「用户列表」按钮画进当前消息。
+// openAdminUsers 把 /status 或控制台里的「用户列表」按钮画进当前消息。
 func (a *App) openAdminUsers(ctx context.Context, cb tgclient.CallbackContext) error {
 	if !a.can(ctx, fmt.Sprintf("%d", cb.UserID), auth.ActionUserManage) {
 		return a.tg.EditMessage(ctx, cb.ChatID, cb.MsgID, adminNoPermission)
@@ -176,6 +263,10 @@ func (a *App) handleTaskQueueCallback(ctx context.Context, cb tgclient.CallbackC
 	if a.admin == nil {
 		answer("该功能暂不可用", true)
 		return nil
+	}
+
+	if data == "admin_dashboard_open" {
+		return a.openAdminDashboard(ctx, cb)
 	}
 
 	// 「重试本页失败任务」要先于状态详情解析 —— retry_failed_page_1
@@ -287,6 +378,7 @@ func (a *App) handleRetryFailedPage(ctx context.Context, cb tgclient.CallbackCon
 func renderQueueOverviewPanel(ov store.QueueOverview) string {
 	var b strings.Builder
 	b.WriteString("📊 <b>全局任务队列</b>\n━━━━━━━━━━━━━━━━━━━\n\n")
+
 	b.WriteString("📈 <b>状态分布</b>\n")
 	for _, s := range tqOrderedStatuses {
 		count := ov.StatusCounts[string(s)]
@@ -342,10 +434,12 @@ func queueOverviewButtons(counts map[string]int) [][]tgclient.Button {
 			})
 		}
 	}
-	if len(row2) == 0 {
-		return [][]tgclient.Button{row1}
+	res := [][]tgclient.Button{row1}
+	if len(row2) > 0 {
+		res = append(res, row2)
 	}
-	return [][]tgclient.Button{row1, row2}
+	res = append(res, []tgclient.Button{{Text: "🔙 返回控制台", Data: "admin_dashboard_open"}})
+	return res
 }
 
 // renderQueueDetailPanel 某状态的任务详情 —— 与 JS renderTaskQueueDetail 一致。
@@ -355,7 +449,7 @@ func renderQueueDetailPanel(status contract.TaskStatus, d store.TasksByStatus) (
 	fmt.Fprintf(&b, "📊 任务队列 — %s (共 %d 条)\n━━━━━━━━━━━━━━━━━━━\n", label, d.Total)
 
 	if len(d.Tasks) == 0 {
-		b.WriteString("📭 该状态下暂无任务。您可以发送文件或链接来创建新任务。\n")
+		b.WriteString("📫 该状态下暂无任务。您可以发送文件或链接来创建新任务。\n")
 	} else {
 		for i, t := range d.Tasks {
 			fmt.Fprintf(&b, "<code>%d.</code> %s <code>%s</code> | 👤 <code>%s</code> | %s\n",
@@ -417,7 +511,7 @@ func (a *App) handleAdminUsersCommand(ctx context.Context, msg messageInfo) erro
 	return a.tg.EditWithButtons(ctx, msg.ChatID, msgID, text, buttons)
 }
 
-// adminUsersView 取一页用户并渲染。
+// adminUsersView 渲染用户列表某页。
 func (a *App) adminUsersView(ctx context.Context, filter string, page int) (string, [][]tgclient.Button, error) {
 	data, err := a.admin.ListUsersForAdmin(ctx, filter, page, adminUserPageSize, a.ownerID)
 	if err != nil {
@@ -444,9 +538,8 @@ func (a *App) handleAdminUsersCallback(ctx context.Context, cb tgclient.Callback
 		return nil
 	}
 
-	if data == "admin_users_back" {
-		answer("已返回", false)
-		return a.redrawStatus(ctx, cb)
+	if data == "admin_users_back" || data == "admin_dashboard_open" {
+		return a.openAdminDashboard(ctx, cb)
 	}
 
 	filter, page, ok := parseAdminUsersCallback(data)
@@ -545,7 +638,7 @@ func adminUsersButtons(data store.AdminUsersPage) [][]tgclient.Button {
 		fmt.Sprintf("au_refresh_%s_%d", f, data.Page),
 		func(p int) string { return fmt.Sprintf("au_%s_%d", f, p) },
 	)
-	back := []tgclient.Button{{Text: "↩️ 返回", Data: "admin_users_back"}}
+	back := []tgclient.Button{{Text: "🔙 返回控制台", Data: "admin_dashboard_open"}}
 
 	return [][]tgclient.Button{filterRow, secondRow, nav, back}
 }
@@ -596,8 +689,8 @@ func (a *App) handleDiagnosisCommand(ctx context.Context, msg messageInfo) error
 func (a *App) editDiagnosisReport(ctx context.Context, chatID int64, msgID int) error {
 	text := a.diagnosisReport(ctx)
 	return a.tg.EditWithButtons(ctx, chatID, msgID, text, [][]tgclient.Button{
-		{{Text: "🔄 重新诊断", Data: "diagnosis_run"}},
-		{{Text: "📊 全局队列", Data: "task_queue_open"}},
+		{{Text: "🔄 重新诊断", Data: "diagnosis_run"}, {Text: "📊 全局队列", Data: "task_queue_open"}},
+		{{Text: "🔙 返回控制台", Data: "admin_dashboard_open"}},
 	})
 }
 
@@ -785,9 +878,24 @@ func (a *App) handleModeSwitchCallback(ctx context.Context, cb tgclient.Callback
 		return nil
 	}
 
+	if data == "mode_switch_public" || data == "mode_switch_private" {
+		targetMode := strings.TrimPrefix(data, "mode_switch_")
+		label := "进入维护模式"
+		if targetMode == string(store.AccessModePublic) {
+			label = "开启公开访问"
+		}
+		answer("", false)
+		return a.tg.EditWithButtons(ctx, cb.ChatID, cb.MsgID,
+			fmt.Sprintf("⚠️ <b>确认执行此管理操作？</b>\n\n操作: <code>%s</code>\n目标: <code>服务访问模式</code>", escapeHTMLText(label)),
+			[][]tgclient.Button{
+				{{Text: "取消", Data: "mode_switch_cancel_" + targetMode}},
+				{{Text: "确认执行", Data: "mode_switch_execute_" + targetMode}},
+			})
+	}
+
 	if strings.HasPrefix(data, "mode_switch_cancel_") {
 		answer("已取消操作", false)
-		return a.redrawStatus(ctx, cb)
+		return a.openAdminDashboard(ctx, cb)
 	}
 	if !strings.HasPrefix(data, "mode_switch_execute_") {
 		return nil
@@ -810,7 +918,7 @@ func (a *App) handleModeSwitchCallback(ctx context.Context, cb tgclient.Callback
 	answer("✅ 访问模式已切换", false)
 	return a.tg.EditWithButtons(ctx, cb.ChatID, cb.MsgID,
 		fmt.Sprintf("✅ <b>访问模式已切换</b>\n\n当前模式: <code>%s</code>", escapeHTMLText(label)),
-		[][]tgclient.Button{{{Text: "📊 我的状态", Data: "status_general"}}})
+		[][]tgclient.Button{{{Text: "⚙️ 返回控制台", Data: "admin_dashboard_open"}}})
 }
 
 // senderOf 从 update 里取出「谁发的 / 回哪 / 要回应哪个 callback」。

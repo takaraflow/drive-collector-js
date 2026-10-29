@@ -606,7 +606,7 @@ func renderDupScanPage(driveName string, r dupScanResult, page int) (string, [][
 		row = append(row, tgclient.Button{Text: "下一页", Data: fmt.Sprintf("dupscan_page_%d", page+1)})
 	}
 	row = append(row, tgclient.Button{Text: "重新扫描", Data: "dupscan_scope_default"})
-	return text, [][]tgclient.Button{row}
+	return text, [][]tgclient.Button{row, {{Text: "🔙 返回网盘管理", Data: "drive_manager_back"}}}
 }
 
 // dupScanBasisNote 说明这一页的判重依据。哈希不可用时必须明说,
@@ -705,8 +705,63 @@ func (a *App) handleScanDupCommand(ctx context.Context, msg messageInfo) error {
 		Text: "🌐 扫描所有网盘",
 		Data: "dupscan_scope_all",
 	}})
+	rows = append(rows, []tgclient.Button{{
+		Text: "🔙 返回网盘管理",
+		Data: "drive_manager_back",
+	}})
 
 	return a.tg.SendWithButtons(ctx, msg.ChatID,
+		dupScanTitle+"扫描整个网盘，找出重复的文件，<b>只列清单，不会删除任何东西</b>。\n请选择扫描范围：",
+		rows)
+}
+
+// openDupScan 打开查重范围选择或当前正在进行的查重面板。
+func (a *App) openDupScan(ctx context.Context, cb tgclient.CallbackContext) error {
+	if a.cfg.Redis == nil {
+		return a.tg.EditWithButtons(ctx, cb.ChatID, cb.MsgID,
+			"⚠️ 重复文件扫描需要 Redis 记录进度，当前未配置，功能暂不可用。",
+			[][]tgclient.Button{{{Text: "🔙 返回网盘管理", Data: "drive_manager_back"}}})
+	}
+	userID := fmt.Sprintf("%d", cb.UserID)
+	st := a.readDupScanState(ctx, userID)
+	if st != nil && st.Status == "running" {
+		return a.tg.EditWithButtons(ctx, cb.ChatID, cb.MsgID,
+			"🔍 <b>已有重复文件扫描正在进行中</b>\n\n请稍候等待扫描结束，或点击下方按钮停止扫描。",
+			dupScanCancelButtons())
+	}
+
+	drives, err := a.drives.DrivesByUser(ctx, userID)
+	if err != nil {
+		a.log.Error("查询网盘列表失败", "err", err)
+		return a.tg.EditWithButtons(ctx, cb.ChatID, cb.MsgID, "❌ 查询网盘列表失败,请稍后重试。",
+			[][]tgclient.Button{{{Text: "🔙 返回网盘管理", Data: "drive_manager_back"}}})
+	}
+	if len(drives) == 0 {
+		return a.tg.EditWithButtons(ctx, cb.ChatID, cb.MsgID,
+			"🚫 <b>还没有绑定网盘</b>\n\n请先发送 /drive 绑定网盘后再使用查重功能。",
+			[][]tgclient.Button{{{Text: "🔙 返回网盘管理", Data: "drive_manager_back"}}})
+	}
+	var rows [][]tgclient.Button
+	for _, d := range drives {
+		label := fmt.Sprintf("📁 %s", driveLabel(d))
+		if d.IsDefault == 1 {
+			label += " (默认)"
+		}
+		rows = append(rows, []tgclient.Button{{
+			Text: label,
+			Data: fmt.Sprintf("dupscan_scope_drive_%s", d.ID),
+		}})
+	}
+	rows = append(rows, []tgclient.Button{{
+		Text: "🌐 扫描所有网盘",
+		Data: "dupscan_scope_all",
+	}})
+	rows = append(rows, []tgclient.Button{{
+		Text: "🔙 返回网盘管理",
+		Data: "drive_manager_back",
+	}})
+
+	return a.tg.EditWithButtons(ctx, cb.ChatID, cb.MsgID,
 		dupScanTitle+"扫描整个网盘，找出重复的文件，<b>只列清单，不会删除任何东西</b>。\n请选择扫描范围：",
 		rows)
 }
@@ -795,7 +850,7 @@ func (a *App) editScanText(ctx context.Context, cb tgclient.CallbackContext, tex
 }
 
 // resolveScanDrives 按范围选出要扫的网盘。
-func (a *App) resolveScanDrives(ctx context.Context, userID string, scope string) ([]drive.Drive, error) {
+func resolveScanDrives(a *App, ctx context.Context, userID string, scope string) ([]drive.Drive, error) {
 	if scope == "dupscan_scope_all" {
 		return a.drives.DrivesByUser(ctx, userID)
 	}
@@ -825,6 +880,10 @@ func (a *App) resolveScanDrives(ctx context.Context, userID string, scope string
 		return nil, nil
 	}
 	return []drive.Drive{*d}, nil
+}
+
+func (a *App) resolveScanDrives(ctx context.Context, userID string, scope string) ([]drive.Drive, error) {
+	return resolveScanDrives(a, ctx, userID, scope)
 }
 
 func driveLabel(d drive.Drive) string {

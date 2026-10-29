@@ -9,7 +9,7 @@
 //	                                       store         drive       rclone
 //
 // 这样每一层都能单独测:app 的测试注入假执行器,task 的测试注入
-// 内存仓储,drive 的测试只验证连接串 —— 没有任何一层需要起真 Telegram。
+// 内存存储,drive 的测试只验证连接串 —— 没有任何一层需要起真 Telegram。
 package app
 
 import (
@@ -72,11 +72,11 @@ type Config struct {
 	// RemoteBase 是网盘上的基础路径。
 	RemoteBase string
 
-	// Repo 是任务仓储。
+	// Repo 是任务存储。
 	Repo *store.Repository
 	Log  *slog.Logger
 
-	// Drives 是网盘仓储 —— 凭据按用户存在 D1,不能从环境变量读。
+	// Drives 是网盘存储 —— 凭据按用户存在 D1,不能从环境变量读。
 	Drives *store.DriveRepository
 
 	// Auth 做 RBAC 判定。为 nil 时不装配 Dispatcher,命令被静默忽略。
@@ -107,7 +107,7 @@ type App struct {
 	storage StorageGuard
 	// fetcher 是 flushMediaGroup 回源取消息的能力。
 	//
-	// 同样是因为 tg 是具体类型没法注入:媒体组缓冲只存 id,内容一律
+	// 同样是因为 tg 是具体类型没办法注入:媒体组缓冲只存 id,内容一律
 	// 现取 —— 这条「回源 → 建任务」链路是相册坏掉时唯一该测的地方,
 	// 而它此前在 app 层零覆盖。
 	fetcher MessageFetcher
@@ -119,7 +119,7 @@ type App struct {
 	rclone      Rclone
 	repo        TaskRepo
 	drives      DriveRepo
-	// admin 是管理看板(/task_queue /users)与访问模式开关用的仓储。
+	// admin 是管理看板(/task_queue /users)与访问模式开关用的存储。
 	// 与 repo 分开是因为接口面不同 —— 前者是转存主链路,后者只服务
 	// 管理员命令。测试时各自替换,互不牵连。
 	admin AdminRepo
@@ -199,7 +199,7 @@ type filesMemEntry struct {
 // New 构造 App。此时不连接 Telegram、不碰网盘。
 func New(cfg Config) (*App, error) {
 	if cfg.Repo == nil {
-		return nil, fmt.Errorf("app: 需要任务仓储")
+		return nil, fmt.Errorf("app: 需要任务存储")
 	}
 	if cfg.Session == nil {
 		return nil, fmt.Errorf("app: 需要已登录的 session")
@@ -293,7 +293,7 @@ func New(cfg Config) (*App, error) {
 	// 依赖,而 tg 是本包内部创建的。放外面就得额外导出一个构造顺序约束。
 	// 只在真的装配了 Auth 时才赋给接口字段:把 nil 的 *auth.Guard 塞进
 	// 接口会得到一个「非 nil 的接口包着 nil 指针」,于是 a.auth == nil
-	// 为假,canAdmin 会走进真调用然后在 nil 接收者上炸。
+	// 为假,canAdmin 会走进程真调用然后在 nil 接收者上炸。
 	if cfg.Auth != nil {
 		a.auth = cfg.Auth
 		a.dispatcher = dispatcher.New(dispatcher.Deps{
@@ -631,7 +631,7 @@ func (a *App) onUpdate(ctx context.Context, u tgclient.Update) error {
 			return nil
 		}
 
-		// 自己发出的消息不是用户投递,必须在任何处理之前丢弃 ——
+		// 自己发出去的消息不是用户投递,必须在任何处理之前丢弃 ——
 		// 包括那条「收到消息」日志。
 		//
 		// gotd 发消息的收尾就是 processUpdates(telegram/send_message.go),
@@ -722,6 +722,10 @@ func (a *App) routeCommand(ctx context.Context, msg messageInfo) error {
 	command := strings.ToLower(strings.Fields(text)[0])
 
 	switch command {
+	case "/admin":
+		return a.handleAdminDashboardCommand(ctx, msg)
+	case "/cancel":
+		return a.handleCancelCommand(ctx, msg)
 	case "/drive":
 		return a.handleDriveCommand(ctx, msg)
 	case "/unbind", "/logout":
@@ -792,12 +796,17 @@ func (a *App) handleDriveCommand(ctx context.Context, msg messageInfo) error {
 			d := &drives[i]
 			icon := "📁"
 			if d.IsDefault == 1 {
-				icon = "⭐️"
+				icon = "⭐"
+			}
+			folder := "根目录 (/)"
+			if d.RemoteFolder.Valid && strings.TrimSpace(d.RemoteFolder.String) != "" {
+				folder = "/" + strings.Trim(d.RemoteFolder.String, "/")
 			}
 			email := driveDisplayAccount(d)
-			text += fmt.Sprintf("\n%d. %s <b>%s</b> - %s", i+1, icon, strings.ToUpper(d.Type), escapeHTMLText(email))
+			text += fmt.Sprintf("\n%d. %s <b>%s</b> - %s\n   📂 保存目录: <code>%s</code>",
+				i+1, icon, strings.ToUpper(d.Type), escapeHTMLText(email), escapeHTMLText(folder))
 			if d.IsDefault == 1 {
-				text += " (默认)"
+				text += " <i>(默认)</i>"
 			}
 		}
 		text += "\n"
@@ -822,6 +831,12 @@ func (a *App) handleDriveCommand(ctx context.Context, msg messageInfo) error {
 			{Text: "☁️ pCloud", Data: "drive_bind_pcloud"},
 		},
 	}
+	if len(drives) > 0 {
+		buttons = append(buttons, []tgclient.Button{
+			{Text: "📂 设置保存目录", Data: "remote_folder_menu"},
+			{Text: "🔍 查找重复文件", Data: "dupscan_open"},
+		})
+	}
 	for i := range drives {
 		d := &drives[i]
 		row := []tgclient.Button{}
@@ -834,6 +849,57 @@ func (a *App) handleDriveCommand(ctx context.Context, msg messageInfo) error {
 	}
 	buttons = append(buttons, []tgclient.Button{{Text: "❌ 返回", Data: "noop"}})
 	return a.tg.SendWithButtons(ctx, msg.ChatID, text, buttons)
+}
+
+// handleCancelCommand /cancel —— 四级逃生与会话清理。
+func (a *App) handleCancelCommand(ctx context.Context, msg messageInfo) error {
+	userID := fmt.Sprintf("%d", msg.SenderID)
+
+	// Level 1: 绑定向导或外部链接会话
+	if a.bindSessions != nil {
+		sess, _ := a.bindSessions.Get(ctx, userID)
+		if sess != nil {
+			_ = a.bindSessions.Clear(ctx, userID)
+			return a.tg.SendMessage(ctx, msg.ChatID, "✅ <b>已退出当前网盘绑定流程</b>\n\n随时发送文件或链接即可开始转存。")
+		}
+	}
+
+	// Level 2: 查重扫描任务
+	if a.cfg.Redis != nil {
+		if st := a.readDupScanState(ctx, userID); st != nil && st.Status == "running" {
+			st.CancelAsked = true
+			a.writeDupScanState(ctx, userID, *st)
+			return a.tg.SendMessage(ctx, msg.ChatID, "⏹️ <b>已请求停止重复文件扫描</b>\n\n正在安全中止扫描任务，请稍候。")
+		}
+	}
+
+	// Level 3: 活跃转存任务快捷引导
+	if a.repo != nil {
+		if tasks, err := a.repo.FindActiveByUserId(ctx, userID, 3); err == nil && len(tasks) > 0 {
+			first := tasks[0]
+			name := "未命名任务"
+			if first.FileName.Valid && first.FileName.String != "" {
+				name = first.FileName.String
+			}
+			text := fmt.Sprintf("💡 <b>当前无进行中的绑定向导或扫描会话</b>\n\n"+
+				"检测到你有 <b>%d</b> 个转存任务正在进行中（如 <code>%s</code>）。\n"+
+				"如需取消转存任务，请点击下方快捷按钮，或前往 /status 管理。",
+				len(tasks), escapeHTMLText(name))
+			buttons := [][]tgclient.Button{
+				{{Text: fmt.Sprintf("🛑 取消任务: %s", shortenRunes(name, 15)), Data: fmt.Sprintf("cancel_confirm_%s", first.ID)}},
+				{{Text: "📊 前往状态看板", Data: "status_general"}},
+			}
+			return a.tg.SendWithButtons(ctx, msg.ChatID, text, buttons)
+		}
+	}
+
+	// Level 4: 闲置状态引导
+	return a.tg.SendMessage(ctx, msg.ChatID,
+		"ℹ️ <b>当前处于闲置状态，无任何进行中的会话或任务</b>\n\n"+
+			"• 发送文件或图片直接转存到网盘\n"+
+			"• 发送 /drive 管理网盘及保存目录\n"+
+			"• 发送 /status 查看任务传输状态\n"+
+			"• 发送 /help 查看完整帮助")
 }
 
 // driveDisplayAccount 从盘名里截出账号部分(JS 侧 name.split('-').slice(1) 的等价)。
@@ -859,6 +925,7 @@ func (a *App) handleUnbindCommand(ctx context.Context, msg messageInfo) error {
 func (a *App) handleRemoteFolderCommand(ctx context.Context, msg messageInfo) error {
 	userID := fmt.Sprintf("%d", msg.SenderID)
 	fields := strings.Fields(strings.TrimSpace(msg.Text))
+	backBtn := [][]tgclient.Button{{{Text: "🔙 返回网盘管理", Data: "drive_manager_back"}}}
 	if len(fields) < 2 {
 		currentFolder := a.cfg.RemoteBase
 		if currentFolder == "" {
@@ -871,12 +938,13 @@ func (a *App) handleRemoteFolderCommand(ctx context.Context, msg messageInfo) er
 				currentFolder = currentFolder + " (默认)"
 			}
 		}
-		return a.tg.SendMessage(ctx, msg.ChatID,
+		return a.tg.SendWithButtons(ctx, msg.ChatID,
 			"📂 <b>保存目录设置</b>\n\n"+
 				"当前上传目录：<code>"+escapeHTMLText(currentFolder)+"</code>\n\n"+
 				"修改目录用法：<code>/set_remote_folder /你的目录</code>\n"+
 				"重置目录用法：<code>/set_remote_folder reset</code>\n"+
-				"例如：<code>/set_remote_folder /backup</code>")
+				"例如：<code>/set_remote_folder /backup</code>",
+			backBtn)
 	}
 	folder := strings.Join(fields[1:], " ")
 	if folder == "reset" || folder == "default" {
@@ -887,14 +955,14 @@ func (a *App) handleRemoteFolderCommand(ctx context.Context, msg messageInfo) er
 	}
 	if err := a.setRemoteFolder(ctx, userID, "", folder); err != nil {
 		a.log.Error("设置保存目录失败", "err", err)
-		return a.tg.SendMessage(ctx, msg.ChatID, "❌ 设置失败:"+escapeHTMLText(err.Error()))
+		return a.tg.SendWithButtons(ctx, msg.ChatID, "❌ 设置失败:"+escapeHTMLText(err.Error()), backBtn)
 	}
 	if folder == "" {
-		return a.tg.SendMessage(ctx, msg.ChatID,
-			"✅ 保存目录已重置为默认目录")
+		return a.tg.SendWithButtons(ctx, msg.ChatID,
+			"✅ 保存目录已重置为默认目录", backBtn)
 	}
-	return a.tg.SendMessage(ctx, msg.ChatID,
-		"✅ 保存目录已设为 <code>"+escapeHTMLText(folder)+"</code>")
+	return a.tg.SendWithButtons(ctx, msg.ChatID,
+		"✅ 保存目录已设为 <code>"+escapeHTMLText(folder)+"</code>", backBtn)
 }
 
 func escapeHTMLText(s string) string {
@@ -970,9 +1038,25 @@ func (a *App) handleCallback(ctx context.Context, u tgclient.Update) error {
 		return a.handleStatusCallback(ctx, cb, data)
 
 	case data == "remote_folder_menu":
-		// /status 里的「设置保存路径」入口:告诉用户当前目录 + 怎么改。
+		// /drive 与 /status 里的「设置保存路径」入口:告诉用户当前目录 + 怎么改。
 		answer("", false)
 		return a.editRemoteFolderMenu(ctx, cb)
+
+	case data == "remote_folder_reset":
+		if err := a.setRemoteFolder(ctx, userID, "", ""); err != nil {
+			answer("重置保存目录失败", true)
+			return nil
+		}
+		answer("已重置为网盘根目录", false)
+		return a.editRemoteFolderMenu(ctx, cb)
+
+	case data == "admin_dashboard_open":
+		answer("", false)
+		return a.openAdminDashboard(ctx, cb)
+
+	case data == "dupscan_open":
+		answer("", false)
+		return a.openDupScan(ctx, cb)
 
 	// 管理看板的入口按钮(挂在 /status 顶部)与看板内部按钮。
 	case data == "task_queue_open":
@@ -1022,12 +1106,16 @@ func (a *App) editDriveManager(ctx context.Context, cb tgclient.CallbackContext)
 			d := &drives[i]
 			icon := "📁"
 			if d.IsDefault == 1 {
-				icon = "⭐️"
+				icon = "⭐"
 			}
-			text += fmt.Sprintf("\n%d. %s <b>%s</b> - %s", i+1, icon,
-				strings.ToUpper(d.Type), escapeHTMLText(driveDisplayAccount(d)))
+			folder := "根目录 (/)"
+			if d.RemoteFolder.Valid && strings.TrimSpace(d.RemoteFolder.String) != "" {
+				folder = "/" + strings.Trim(d.RemoteFolder.String, "/")
+			}
+			text += fmt.Sprintf("\n%d. %s <b>%s</b> - %s\n   📂 保存目录: <code>%s</code>", i+1, icon,
+				strings.ToUpper(d.Type), escapeHTMLText(driveDisplayAccount(d)), escapeHTMLText(folder))
 			if d.IsDefault == 1 {
-				text += " (默认)"
+				text += " <i>(默认)</i>"
 			}
 		}
 		text += "\n"
@@ -1036,6 +1124,12 @@ func (a *App) editDriveManager(ctx context.Context, cb tgclient.CallbackContext)
 	}
 
 	buttons := [][]tgclient.Button{}
+	if len(drives) > 0 {
+		buttons = append(buttons, []tgclient.Button{
+			{Text: "📂 设置保存目录", Data: "remote_folder_menu"},
+			{Text: "🔍 查找重复文件", Data: "dupscan_open"},
+		})
+	}
 	for i := range drives {
 		d := &drives[i]
 		row := []tgclient.Button{}
@@ -1231,7 +1325,7 @@ func (a *App) upload(ctx context.Context, t store.Task) error {
 	// Proton 的 session 操作必须串行 —— refresh_token 是一次性的,
 	// 并发用会导致 Code=10013 账号永久砖化(记忆里的 proton-refresh-token-race)。
 	//
-	// 锁包住【整段】:建 runtime、mkdir、上传、收割、写回。任何一步漏在
+	// 锁包住【整段】:建 runtime、mkdir、上传、收获、写回。任何一步漏在
 	// 锁外,两个同账号任务就能同时拿着同一个 refresh_token 去认证。
 	key := drive.Key(drive.Type(d.Type), t.UserID)
 	return a.locks.WithSession(ctx, key, func() error {
@@ -1241,14 +1335,14 @@ func (a *App) upload(ctx context.Context, t store.Task) error {
 		}
 		// 临时 conf 目录【无条件】清,和成功无关。
 		//
-		// harvest 里那个 defer Dispose 只在「走到收割」时才跑;任务被取消
+		// harvest 里那个 defer Dispose 只在「走到收获」时才跑;任务被取消
 		// 或中途失败时 harvest 根本不会被调用,/tmp/rclone-rt-*(内含 0600
 		// 的 session 凭据)就留在盘上。Dispose 幂等,重复调无害。
 		if cfg.Runtime != nil {
 			defer cfg.Runtime.Dispose()
 		}
 
-		// 收割也【无条件】做 —— 不只是上传成功之后。
+		// 收获也【无条件】做 —— 不只是上传成功之后。
 		//
 		// rclone 在被 kill 之前很可能已经把 refresh_token 换掉了,而
 		// 服务端那侧的旧 token 随即作废。不回写的话库里那份就是死的,
@@ -1262,11 +1356,11 @@ func (a *App) upload(ctx context.Context, t store.Task) error {
 		// 无变化时 harvest 内部直接返回,不会多写一次库。
 		if harvest != nil {
 			defer func() {
-				// 收割失败不该让任务判失败:文件要么已经传上去了,要么
+				// 收获失败不该让任务判失败:文件要么已经传上去了,要么
 				// 任务本来就是失败的。但必须显眼 —— 下一次上传就会因为
 				// session 过期而失败。
 				if err := harvest(); err != nil {
-					a.log.Error("收割 Proton session 失败,下次上传可能因 token 过期而失败",
+					a.log.Error("收获 Proton session 失败,下次上传可能因 token 过期而失败",
 						"taskId", t.ID, "err", err)
 				}
 			}()
@@ -1294,7 +1388,7 @@ func (a *App) upload(ctx context.Context, t store.Task) error {
 // buildRuntime 为这次上传准备 rclone 的运行上下文。
 //
 // 两种网盘两种走法:
-//   - 静态凭据(Mega):连接串就够,没有可收割的东西,harvest 返回 nil
+//   - 静态凭据(Mega):连接串就够,没有可收获的东西,harvest 返回 nil
 //   - 可旋转 session(Proton):必须写临时 conf,跑完把新 token 读回来
 //
 // 后者不是可选项。连接串形式没有回读的余地 —— 参数传进去就没了,
@@ -1334,7 +1428,7 @@ func (a *App) buildRuntime(ctx context.Context, d *drive.Drive) (rclone.Config, 
 		}
 		a.log.Info("Proton session 已旋转,写回数据库",
 			"user", d.UserID, "drive", d.ID)
-		// WithoutCancel:upload 现在无条件收割,包括任务被取消/上传失败的
+		// WithoutCancel:upload 现在无条件收获,包括任务被取消/上传失败的
 		// 那种 —— 那时 ctx 已经死了,拿它写库必然失败,而这次写库恰恰
 		// 是唯一能救账号的机会(旧 refresh_token 已被服务端作废)。
 		return a.drives.UpdateConfigData(context.WithoutCancel(ctx), d.ID, d.UserID, next)
