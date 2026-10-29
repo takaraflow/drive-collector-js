@@ -147,7 +147,7 @@ func renderQueueSummary(ov queueOverview) string {
 	processing := ov.counts["downloading"] + ov.counts["downloaded"] + ov.counts["uploading"]
 
 	out := statusQueueTitle + "\n"
-	out += fmt.Sprintf("🕙 排队中: %d\n", queued)
+	out += fmt.Sprintf("🕒 排队中: %d\n", queued)
 	out += fmt.Sprintf("🔄 处理中: %d\n", processing)
 
 	if len(ov.activeTasks) == 0 {
@@ -526,9 +526,15 @@ func (a *App) editRemoteFolderMenu(ctx context.Context, cb tgclient.CallbackCont
 		}
 	}
 	return a.tg.EditWithButtons(ctx, cb.ChatID, cb.MsgID,
-		fmt.Sprintf("📂 <b>保存路径</b>\n\n当前: <code>%s</code>\n\n"+
-			"修改请发送: <code>/set_remote_folder /你的目录</code>", escapeHTMLText(current)),
-		[][]tgclient.Button{{{Text: "📁 浏览文件", Data: "files_page_0"}}})
+		fmt.Sprintf("📂 <b>网盘保存目录设置</b>\n\n"+
+			"当前默认目录: <code>%s</code>\n\n"+
+			"修改保存目录：直接复制下方命令后发送\n"+
+			"<code>/set_remote_folder /你的目录</code>\n\n"+
+			"例如：<code>/set_remote_folder /AutoBackup</code>", escapeHTMLText(current)),
+		[][]tgclient.Button{
+			{{Text: "🔄 重置为根目录 (/)", Data: "remote_folder_reset"}},
+			{{Text: "📁 浏览文件", Data: "files_page_0"}, {Text: "🔙 返回网盘管理", Data: "drive_manager_back"}},
+		})
 }
 
 // can 问权限。Auth 为 nil 时一律放行 —— 与 dispatcher 装配 Dispatcher

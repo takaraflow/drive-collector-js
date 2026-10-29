@@ -7,17 +7,16 @@ import (
 
 func TestBotCommandsLists(t *testing.T) {
 	common := CommonBotCommands()
-	if len(common) != 7 {
-		t.Fatalf("expected 7 common commands, got %d", len(common))
+	if len(common) != 6 {
+		t.Fatalf("expected 6 common commands, got %d", len(common))
 	}
 	expectedCommon := map[string]string{
-		"start":         "🚀 启动机器人",
-		"drive":         "🔑 绑定或管理网盘",
-		"files":         "📁 浏览已转存文件",
-		"scan_dup":      "🔍 查找网盘重复文件",
-		"status":        "📊 查看我的任务",
-		"remote_folder": "📂 保存目录设置",
-		"help":          "📖 显示帮助菜单",
+		"start":  "🚀 启动机器人",
+		"drive":  "🔑 绑定或管理网盘",
+		"files":  "📁 浏览已转存文件",
+		"status": "📊 查看我的任务",
+		"cancel": "❌ 取消当前操作与退出会话",
+		"help":   "📖 显示帮助菜单",
 	}
 	for _, cmd := range common {
 		desc, ok := expectedCommon[cmd.Command]
@@ -29,10 +28,10 @@ func TestBotCommandsLists(t *testing.T) {
 	}
 
 	admin := AdminBotCommands()
-	if len(admin) != len(common)+9 {
-		t.Fatalf("expected %d admin commands, got %d", len(common)+9, len(admin))
+	if len(admin) != len(common)+1 {
+		t.Fatalf("expected %d admin commands, got %d", len(common)+1, len(admin))
 	}
-	adminOnlyCommands := []string{"users", "task_queue", "diagnosis", "open_service", "close_service", "ban", "unban", "pro_admin", "de_admin"}
+	adminOnlyCommands := []string{"admin"}
 	adminMap := make(map[string]bool)
 	for _, cmd := range admin {
 		adminMap[cmd.Command] = true
