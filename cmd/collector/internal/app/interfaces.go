@@ -95,6 +95,8 @@ type Rclone interface {
 	// ScanFiles 是 /scan_dup 专用:递归 + 内容哈希。判重没有哈希就退化成
 	// 「按大小猜」,所以它必须是另一个方法而不是 ListFiles 的参数。
 	ScanFiles(ctx context.Context, cfg rclone.Config, remotePath string) ([]rclone.FileEntry, error)
+	// About 查询存储空间配额与用量（rclone about --json）。
+	About(ctx context.Context, cfg rclone.Config) (*rclone.AboutInfo, error)
 }
 
 // MessageFetcher 是媒体组刷盘时重新取回消息的能力。

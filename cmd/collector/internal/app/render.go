@@ -28,6 +28,7 @@ func (a *App) Help(ctx context.Context, userID string) string {
 		"<code>/start</code>    开始使用\n" +
 		"<code>/drive</code>    网盘与保存目录管理\n" +
 		"<code>/files</code>    查看已转存文件\n" +
+		"<code>/storage</code>  查看网盘空间容量\n" +
 		"<code>/status</code>   查看传输任务状态\n" +
 		"<code>/cancel</code>   取消当前会话或正在进行的任务\n" +
 		"<code>/help</code>     查看本帮助\n\n" +
@@ -77,14 +78,18 @@ func statusIcon(status contract.TaskStatus) string {
 func formatSize(b int64) string {
 	const unit = 1024
 	if b < unit {
+		if b < 0 {
+			b = 0
+		}
 		return fmt.Sprintf("%d B", b)
 	}
+	const units = "KMGTPE"
 	div, exp := int64(unit), 0
-	for n := b / unit; n >= unit; n /= unit {
+	for n := b / unit; n >= unit && exp < len(units)-1; n /= unit {
 		div *= unit
 		exp++
 	}
-	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGT"[exp])
+	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), units[exp])
 }
 
 // 编译期断言:App 必须满足 Dispatcher 的 Renderer 接口。

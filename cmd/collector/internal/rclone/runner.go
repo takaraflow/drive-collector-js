@@ -450,6 +450,69 @@ func isDirNotFound(detail string) bool {
 		strings.Contains(d, "no such directory")
 }
 
+// AboutInfo 是 rclone about --json 的输出结果（单位：字节）。
+type AboutInfo struct {
+	Total   *int64 `json:"total,omitempty"`
+	Used    *int64 `json:"used,omitempty"`
+	Free    *int64 `json:"free,omitempty"`
+	Trashed *int64 `json:"trashed,omitempty"`
+	Other   *int64 `json:"other,omitempty"`
+	Objects *int64 `json:"objects,omitempty"`
+}
+
+// ErrAboutNotSupported 表示存储后端不支持查询容量配额。
+var ErrAboutNotSupported = errors.New("rclone: 存储后端不支持查询空间容量")
+
+// About 查询远端存储的空间配额与用量信息（rclone about --json）。
+func (r *Runner) About(ctx context.Context, cfg Config) (*AboutInfo, error) {
+	if cfg.Timeout <= 0 {
+		cfg.Timeout = 30 * time.Second
+	}
+	runCtx, cancel := context.WithTimeout(ctx, cfg.Timeout)
+	defer cancel()
+
+	args := append(cfg.execArgs(), "about", cfg.target(""), "--json")
+	cmd := exec.CommandContext(runCtx, r.Binary, args...)
+	cmd.Env = r.Env
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if runCtx.Err() != nil {
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("rclone: about 取消: %w", ctx.Err())
+		}
+		return nil, fmt.Errorf("rclone: about 超时: %w", runCtx.Err())
+	}
+	if err != nil {
+		detail := strings.TrimSpace(stderr.String())
+		if detail == "" && len(out) > 0 {
+			detail = strings.TrimSpace(string(out))
+		}
+		if detail == "" {
+			detail = err.Error()
+		}
+		if isAboutNotSupported(detail) {
+			return nil, ErrAboutNotSupported
+		}
+		return nil, fmt.Errorf("rclone: about 失败: %s", detail)
+	}
+	var info AboutInfo
+	if err := json.Unmarshal(out, &info); err != nil {
+		return nil, fmt.Errorf("rclone: 解析 about 输出失败: %w", err)
+	}
+	return &info, nil
+}
+
+func isAboutNotSupported(detail string) bool {
+	d := strings.ToLower(detail)
+	return strings.Contains(d, "doesn't support about") ||
+		strings.Contains(d, "not supported by backend") ||
+		strings.Contains(d, "not supported by webdav server") ||
+		strings.Contains(d, "not supported") ||
+		strings.Contains(d, "can't get quota") ||
+		strings.Contains(d, "command about needs")
+}
+
 // execArgs 返回这次调用该带的 --config 参数。
 //
 // 语义与 Run 里一致:不让 rclone 去读机器上碰巧存在的默认配置;

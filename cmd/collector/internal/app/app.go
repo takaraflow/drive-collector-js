@@ -181,6 +181,11 @@ type App struct {
 	// 真成了内存问题再按时间窗清理。
 	filesRefreshAt map[string]time.Time
 
+	// storageMu 保护 /storage 空间查询的内存缓存与冷却状态。
+	storageMu        sync.Mutex
+	storageMem       map[string]storageMemEntry
+	storageRefreshAt map[string]time.Time
+
 	probeURL func(ctx context.Context, targetURL string, maxBytes int64) (*externalSourceInfo, error)
 
 	// modeMu/modeCached 保护访问模式的进程内缓存 —— 全局守卫每条
@@ -734,6 +739,8 @@ func (a *App) routeCommand(ctx context.Context, msg messageInfo) error {
 		return a.handleRemoteFolderCommand(ctx, msg)
 	case "/files":
 		return a.handleFilesCommand(ctx, msg)
+	case "/storage", "/quota", "/about":
+		return a.handleStorageCommand(ctx, msg)
 	case "/status":
 		return a.handleStatusCommand(ctx, msg)
 	case "/scan_dup":
@@ -833,7 +840,10 @@ func (a *App) handleDriveCommand(ctx context.Context, msg messageInfo) error {
 	}
 	if len(drives) > 0 {
 		buttons = append(buttons, []tgclient.Button{
-			{Text: "📂 设置保存目录", Data: "remote_folder_menu"},
+			{Text: "📊 查询剩余容量", Data: "storage_check"},
+			{Text: "📁 设置保存目录", Data: "remote_folder_menu"},
+		})
+		buttons = append(buttons, []tgclient.Button{
 			{Text: "🔍 查找重复文件", Data: "dupscan_open"},
 		})
 	}
@@ -1034,6 +1044,9 @@ func (a *App) handleCallback(ctx context.Context, u tgclient.Update) error {
 		// 限流答剩余秒数)—— 这里先答会把那次回应作废。
 		return a.handleFilesCallback(ctx, cb, data)
 
+	case strings.HasPrefix(data, "storage_check"), strings.HasPrefix(data, "storage_refresh"):
+		return a.handleStorageCallback(ctx, cb, data)
+
 	case isStatusCallback(data):
 		return a.handleStatusCallback(ctx, cb, data)
 
@@ -1126,7 +1139,10 @@ func (a *App) editDriveManager(ctx context.Context, cb tgclient.CallbackContext)
 	buttons := [][]tgclient.Button{}
 	if len(drives) > 0 {
 		buttons = append(buttons, []tgclient.Button{
+			{Text: "📊 查询剩余容量", Data: "storage_check"},
 			{Text: "📂 设置保存目录", Data: "remote_folder_menu"},
+		})
+		buttons = append(buttons, []tgclient.Button{
 			{Text: "🔍 查找重复文件", Data: "dupscan_open"},
 		})
 	}
