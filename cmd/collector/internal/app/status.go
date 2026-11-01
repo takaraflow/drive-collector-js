@@ -225,6 +225,9 @@ func statusButtons(ov queueOverview, isAdmin bool) [][]tgclient.Button {
 	}
 	buttons = append(buttons, []tgclient.Button{
 		{Text: "📁 浏览文件", Data: "files_page_0"},
+		{Text: "📊 剩余空间", Data: "storage_check"},
+	})
+	buttons = append(buttons, []tgclient.Button{
 		{Text: "⚙️ 设置保存路径", Data: "remote_folder_menu"},
 	})
 	if isAdmin {

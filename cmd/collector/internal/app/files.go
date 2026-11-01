@@ -444,7 +444,12 @@ func renderFilesPage(folder string, files []rclone.FileEntry, page int) (string,
 			tgclient.Button{Text: "⏭️ 末页", Data: fmt.Sprintf("files_page_%d", last)},
 		)
 	}
-	return b.String(), [][]tgclient.Button{row}
+	rows := [][]tgclient.Button{row}
+	rows = append(rows, []tgclient.Button{
+		{Text: "📊 剩余空间", Data: "storage_check"},
+		{Text: "⚙️ 网盘管理", Data: "drive_manager_back"},
+	})
+	return b.String(), rows
 }
 
 // modTimeOf 解析 lsjson 的 ModTime;解析不了给零值(排在最后)。

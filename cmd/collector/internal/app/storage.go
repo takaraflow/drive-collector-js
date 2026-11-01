@@ -35,6 +35,7 @@ type storageMemEntry struct {
 	unsupported bool
 	errStr      string
 	expires     time.Time
+	updatedAt   time.Time
 }
 
 type storageCacheBlob struct {
@@ -52,58 +53,70 @@ func storageCacheKey(d *drive.Drive) string {
 	return fmt.Sprintf("storage_%s_%s", d.UserID, id)
 }
 
-func (a *App) storageMemGet(key string) (*rclone.AboutInfo, bool, string, bool) {
+func (a *App) storageMemGet(key string) (*rclone.AboutInfo, bool, string, time.Time, bool) {
 	a.storageMu.Lock()
 	defer a.storageMu.Unlock()
 	e, ok := a.storageMem[key]
 	if !ok || time.Now().After(e.expires) {
-		return nil, false, "", false
+		return nil, false, "", time.Time{}, false
 	}
-	return e.info, e.unsupported, e.errStr, true
+	return e.info, e.unsupported, e.errStr, e.updatedAt, true
 }
 
-func (a *App) storageMemSet(key string, info *rclone.AboutInfo, unsupported bool, errStr string, ttl time.Duration) {
+func (a *App) storageMemSet(key string, info *rclone.AboutInfo, unsupported bool, errStr string, updatedAt time.Time, ttl time.Duration) {
 	a.storageMu.Lock()
 	defer a.storageMu.Unlock()
 	if a.storageMem == nil {
 		a.storageMem = map[string]storageMemEntry{}
 	}
+	if updatedAt.IsZero() {
+		updatedAt = time.Now()
+	}
 	a.storageMem[key] = storageMemEntry{
 		info:        info,
 		unsupported: unsupported,
 		errStr:      errStr,
+		updatedAt:   updatedAt,
 		expires:     time.Now().Add(ttl),
 	}
 }
 
-func (a *App) storageRedisGet(ctx context.Context, key string) (*rclone.AboutInfo, bool, string, bool) {
+func (a *App) storageRedisGet(ctx context.Context, key string) (*rclone.AboutInfo, bool, string, time.Time, bool) {
 	if a.cfg.Redis == nil {
-		return nil, false, "", false
+		return nil, false, "", time.Time{}, false
 	}
 	raw, err := a.cfg.Redis.Get(ctx, key).Result()
 	if err != nil {
 		if err != redis.Nil {
 			a.log.Warn("storage 缓存读取失败", "key", key, "err", err)
 		}
-		return nil, false, "", false
+		return nil, false, "", time.Time{}, false
 	}
 	var blob storageCacheBlob
 	if err := json.Unmarshal([]byte(raw), &blob); err != nil {
 		a.log.Warn("storage 缓存解析失败", "key", key, "err", err)
-		return nil, false, "", false
+		return nil, false, "", time.Time{}, false
 	}
-	return blob.Info, blob.Unsupported, blob.ErrStr, true
+	t := time.Now()
+	if blob.Timestamp > 0 {
+		t = time.UnixMilli(blob.Timestamp)
+	}
+	return blob.Info, blob.Unsupported, blob.ErrStr, t, true
 }
 
-func (a *App) storageRedisSet(ctx context.Context, key string, info *rclone.AboutInfo, unsupported bool, errStr string, ttl time.Duration) {
+func (a *App) storageRedisSet(ctx context.Context, key string, info *rclone.AboutInfo, unsupported bool, errStr string, updatedAt time.Time, ttl time.Duration) {
 	if a.cfg.Redis == nil {
 		return
+	}
+	ts := updatedAt.UnixMilli()
+	if ts <= 0 {
+		ts = time.Now().UnixMilli()
 	}
 	blob, err := json.Marshal(storageCacheBlob{
 		Info:        info,
 		Unsupported: unsupported,
 		ErrStr:      errStr,
-		Timestamp:   time.Now().UnixMilli(),
+		Timestamp:   ts,
 	})
 	if err != nil {
 		a.log.Warn("storage 缓存序列化失败", "key", key, "err", err)
@@ -258,8 +271,8 @@ func (a *App) storageLoadAndEdit(userID string, chatID int64, msgID int, driveID
 		}
 	}
 
-	info, unsupported, errDetail, qErr := a.getDriveStorage(ctx, target, force)
-	text, buttons := renderStorageView(target, info, unsupported, errDetail, drives)
+	info, unsupported, errDetail, updatedAt, qErr := a.getDriveStorage(ctx, target, force)
+	text, buttons := renderStorageView(target, info, unsupported, errDetail, drives, updatedAt)
 
 	if len(buttons) == 0 {
 		_ = a.tg.EditMessage(ctx, chatID, msgID, text)
@@ -273,20 +286,20 @@ func (a *App) storageLoadAndEdit(userID string, chatID int64, msgID int, driveID
 }
 
 // getDriveStorage 读取网盘空间，带内存与 Redis 两级缓存与 Proton session lock。
-func (a *App) getDriveStorage(ctx context.Context, d *drive.Drive, force bool) (*rclone.AboutInfo, bool, string, error) {
+func (a *App) getDriveStorage(ctx context.Context, d *drive.Drive, force bool) (*rclone.AboutInfo, bool, string, time.Time, error) {
 	key := storageCacheKey(d)
 	if !force {
-		if info, unsupported, errStr, ok := a.storageMemGet(key); ok {
-			return info, unsupported, errStr, nil
+		if info, unsupported, errStr, updatedAt, ok := a.storageMemGet(key); ok {
+			return info, unsupported, errStr, updatedAt, nil
 		}
-		if info, unsupported, errStr, ok := a.storageRedisGet(ctx, key); ok {
-			a.storageMemSet(key, info, unsupported, errStr, storageDefaultTTL)
-			return info, unsupported, errStr, nil
+		if info, unsupported, errStr, updatedAt, ok := a.storageRedisGet(ctx, key); ok {
+			a.storageMemSet(key, info, unsupported, errStr, updatedAt, storageDefaultTTL)
+			return info, unsupported, errStr, updatedAt, nil
 		}
 	}
 
 	if a.rclone == nil {
-		return nil, false, "rclone 执行器未配置", errors.New("rclone 未配置")
+		return nil, false, "rclone 执行器未配置", time.Time{}, errors.New("rclone 未配置")
 	}
 
 	executeAbout := func() (*rclone.AboutInfo, error) {
@@ -332,29 +345,52 @@ func (a *App) getDriveStorage(ctx context.Context, d *drive.Drive, force bool) (
 		errStr = err.Error()
 	}
 
+	updatedAt := time.Now()
 	// 仅成功或明确不支持配额的后端才写入缓存，避免网络偶发超时造成负向缓存中毒
 	if err == nil || unsupported {
-		a.storageMemSet(key, info, unsupported, errStr, storageDefaultTTL)
-		a.storageRedisSet(ctx, key, info, unsupported, errStr, storageDefaultTTL)
+		a.storageMemSet(key, info, unsupported, errStr, updatedAt, storageDefaultTTL)
+		a.storageRedisSet(ctx, key, info, unsupported, errStr, updatedAt, storageDefaultTTL)
 	}
-	return info, unsupported, errStr, err
+	return info, unsupported, errStr, updatedAt, err
 }
 
-func renderStorageView(d *drive.Drive, info *rclone.AboutInfo, unsupported bool, errStr string, allDrives []drive.Drive) (string, [][]tgclient.Button) {
+func driveTypeIcon(driveType string) string {
+	switch strings.ToLower(driveType) {
+	case "mega":
+		return "🟢"
+	case "protondrive", "proton":
+		return "🛡️"
+	case "webdav":
+		return "🌐"
+	case "oss", "s3":
+		return "📦"
+	case "pikpak":
+		return "⚡"
+	case "filen":
+		return "🔒"
+	case "pcloud":
+		return "☁️"
+	default:
+		return "📁"
+	}
+}
+
+func renderStorageView(d *drive.Drive, info *rclone.AboutInfo, unsupported bool, errStr string, allDrives []drive.Drive, updatedAt time.Time) (string, [][]tgclient.Button) {
 	var sb strings.Builder
 	sb.WriteString("📊 <b>网盘空间概况</b>\n\n")
 
-	icon := "📁"
-	if d.IsDefault == 1 {
-		icon = "⭐"
-	}
+	icon := driveTypeIcon(d.Type)
 	folder := "根目录 (/)"
 	if d.RemoteFolder.Valid && strings.TrimSpace(d.RemoteFolder.String) != "" {
 		folder = "/" + strings.Trim(d.RemoteFolder.String, "/")
 	}
 	account := driveDisplayAccount(d)
 
-	sb.WriteString(fmt.Sprintf("%s <b>网盘类型:</b> <b>%s</b>\n", icon, strings.ToUpper(d.Type)))
+	typeLabel := strings.ToUpper(d.Type)
+	if d.IsDefault == 1 {
+		typeLabel += " (默认)"
+	}
+	sb.WriteString(fmt.Sprintf("%s <b>网盘类型:</b> <b>%s</b>\n", icon, typeLabel))
 	sb.WriteString(fmt.Sprintf("👤 <b>账号标识:</b> <code>%s</code>\n", escapeHTMLText(account)))
 	sb.WriteString(fmt.Sprintf("📂 <b>保存目录:</b> <code>%s</code>\n", escapeHTMLText(folder)))
 	sb.WriteString("──────────────────\n")
@@ -390,18 +426,37 @@ func renderStorageView(d *drive.Drive, info *rclone.AboutInfo, unsupported bool,
 			sb.WriteString(fmt.Sprintf("📈 <b>已使用:</b> <code>%s</code> (%.1f%%)\n", formatSize(used), usedRatio*100))
 			sb.WriteString(fmt.Sprintf("📉 <b>剩余可用:</b> <code>%s</code> (%.1f%%)\n", formatSize(free), freeRatio*100))
 			sb.WriteString(fmt.Sprintf("📊 <b>使用率:</b> %s\n", renderProgressBar(usedRatio, 10)))
+
+			// 智能健康状态判断
+			sb.WriteString("──────────────────\n")
+			switch {
+			case usedRatio >= 0.95:
+				sb.WriteString(fmt.Sprintf("🚨 <b>存储空间严重告急 (已用 %.1f%%)</b>\n<i>剩余容量不足 5%%，后续文件转存极易失败，请尽快扩容或清理！</i>\n", usedRatio*100))
+			case usedRatio >= 0.85:
+				sb.WriteString(fmt.Sprintf("⚠️ <b>存储空间偏紧 (已用 %.1f%%)</b>\n<i>剩余容量不足 15%%，建议关注空间用量。</i>\n", usedRatio*100))
+			default:
+				sb.WriteString("🟢 <b>空间状态充裕 (健康)</b>\n")
+			}
 		} else if info.Used != nil {
 			sb.WriteString(fmt.Sprintf("📈 <b>已使用容量:</b> <code>%s</code>\n", formatSize(*info.Used)))
 		}
 
 		if info.Trashed != nil && *info.Trashed > 0 {
 			sb.WriteString(fmt.Sprintf("🗑️ <b>回收站占用:</b> <code>%s</code>\n", formatSize(*info.Trashed)))
+			if *info.Trashed >= 200*1024*1024 { // 大于 200MB 给出温馨减负提示
+				sb.WriteString("💡 <i>提示: 回收站占用较多空间，可在网盘网页端彻底清空以释放容量。</i>\n")
+			}
 		}
 		if info.Objects != nil && *info.Objects > 0 {
 			sb.WriteString(fmt.Sprintf("📄 <b>对象/文件数:</b> <code>%d</code> 个\n", *info.Objects))
 		}
 	} else {
 		sb.WriteString("暂无空间信息\n")
+	}
+
+	if !updatedAt.IsZero() {
+		sb.WriteString("──────────────────\n")
+		sb.WriteString(fmt.Sprintf("🕒 <i>统计时间: %s</i>\n", updatedAt.Format("15:04:05")))
 	}
 
 	buttons := [][]tgclient.Button{}
@@ -413,20 +468,23 @@ func renderStorageView(d *drive.Drive, info *rclone.AboutInfo, unsupported bool,
 	}
 	buttons = append(buttons, []tgclient.Button{refreshBtn})
 
-	// 操作行 2：如果有多盘，允许快捷切换查看其它盘
+	// 操作行 2：如果有多盘，允许快捷切换查看其它盘（每行 2 个，排版更美观、防截断）
 	if len(allDrives) > 1 {
 		driveRow := []tgclient.Button{}
 		for i := range allDrives {
 			od := &allDrives[i]
-			label := fmt.Sprintf("%d. %s", i+1, strings.ToUpper(od.Type))
+			tIcon := driveTypeIcon(od.Type)
+			label := fmt.Sprintf("%s %d. %s", tIcon, i+1, strings.ToUpper(od.Type))
 			if od.ID == d.ID {
 				label = "👉 " + label
+			} else if od.IsDefault == 1 {
+				label = label + " ⭐"
 			}
 			driveRow = append(driveRow, tgclient.Button{
 				Text: label,
 				Data: "storage_check_" + od.ID,
 			})
-			if len(driveRow) == 3 {
+			if len(driveRow) == 2 {
 				buttons = append(buttons, driveRow)
 				driveRow = []tgclient.Button{}
 			}
