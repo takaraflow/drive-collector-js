@@ -1,0 +1,446 @@
+package app
+
+// /storage —— 查询网盘剩余空间与容量配额。
+//
+// 对应 rclone about --json，支持 MEGA、Proton Drive、PikPak、Filen 以及实现了
+// RFC 4331 的 WebDAV 网盘。对于 S3/OSS 等不支持配额查询的后端做优雅降级展示。
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/redis/go-redis/v9"
+	"github.com/youngsx/drive-collector/cmd/collector/internal/drive"
+	"github.com/youngsx/drive-collector/cmd/collector/internal/rclone"
+	tgclient "github.com/youngsx/drive-collector/cmd/collector/internal/telegram"
+)
+
+const (
+	storageLoadTimeout  = 45 * time.Second
+	storageRefreshDelay = 400 * time.Millisecond
+	storageDefaultTTL   = 2 * time.Minute
+
+	storagePlaceholder = "⏳ <b>正在查询网盘空间信息...</b>\n\n请稍候，通常需要数秒完成。"
+	storageSyncing     = "🔄 <b>正在重新查询网盘空间信息...</b>"
+	storageRefreshOK   = "容量信息已刷新"
+)
+
+type storageMemEntry struct {
+	info        *rclone.AboutInfo
+	unsupported bool
+	errStr      string
+	expires     time.Time
+}
+
+type storageCacheBlob struct {
+	Info        *rclone.AboutInfo `json:"info,omitempty"`
+	Unsupported bool              `json:"unsupported,omitempty"`
+	ErrStr      string            `json:"errStr,omitempty"`
+	Timestamp   int64             `json:"timestamp"`
+}
+
+func storageCacheKey(d *drive.Drive) string {
+	id := d.ID
+	if id == "" {
+		id = d.Type
+	}
+	return fmt.Sprintf("storage_%s_%s", d.UserID, id)
+}
+
+func (a *App) storageMemGet(key string) (*rclone.AboutInfo, bool, string, bool) {
+	a.storageMu.Lock()
+	defer a.storageMu.Unlock()
+	e, ok := a.storageMem[key]
+	if !ok || time.Now().After(e.expires) {
+		return nil, false, "", false
+	}
+	return e.info, e.unsupported, e.errStr, true
+}
+
+func (a *App) storageMemSet(key string, info *rclone.AboutInfo, unsupported bool, errStr string, ttl time.Duration) {
+	a.storageMu.Lock()
+	defer a.storageMu.Unlock()
+	if a.storageMem == nil {
+		a.storageMem = map[string]storageMemEntry{}
+	}
+	a.storageMem[key] = storageMemEntry{
+		info:        info,
+		unsupported: unsupported,
+		errStr:      errStr,
+		expires:     time.Now().Add(ttl),
+	}
+}
+
+func (a *App) storageRedisGet(ctx context.Context, key string) (*rclone.AboutInfo, bool, string, bool) {
+	if a.cfg.Redis == nil {
+		return nil, false, "", false
+	}
+	raw, err := a.cfg.Redis.Get(ctx, key).Result()
+	if err != nil {
+		if err != redis.Nil {
+			a.log.Warn("storage 缓存读取失败", "key", key, "err", err)
+		}
+		return nil, false, "", false
+	}
+	var blob storageCacheBlob
+	if err := json.Unmarshal([]byte(raw), &blob); err != nil {
+		a.log.Warn("storage 缓存解析失败", "key", key, "err", err)
+		return nil, false, "", false
+	}
+	return blob.Info, blob.Unsupported, blob.ErrStr, true
+}
+
+func (a *App) storageRedisSet(ctx context.Context, key string, info *rclone.AboutInfo, unsupported bool, errStr string, ttl time.Duration) {
+	if a.cfg.Redis == nil {
+		return
+	}
+	blob, err := json.Marshal(storageCacheBlob{
+		Info:        info,
+		Unsupported: unsupported,
+		ErrStr:      errStr,
+		Timestamp:   time.Now().UnixMilli(),
+	})
+	if err != nil {
+		a.log.Warn("storage 缓存序列化失败", "key", key, "err", err)
+		return
+	}
+	if err := a.cfg.Redis.Set(ctx, key, blob, ttl).Err(); err != nil {
+		a.log.Warn("storage 缓存写入失败", "key", key, "err", err)
+	}
+}
+
+// storageRefreshGated 刷新冷却控制。
+func (a *App) storageRefreshGated(userID int64, msgID int) (waitSec int, gated bool) {
+	a.storageMu.Lock()
+	defer a.storageMu.Unlock()
+	key := fmt.Sprintf("%d:%d", userID, msgID)
+	if a.storageRefreshAt == nil {
+		a.storageRefreshAt = map[string]time.Time{}
+	}
+	last, ok := a.storageRefreshAt[key]
+	if !ok {
+		a.storageRefreshAt[key] = time.Now()
+		return 0, false
+	}
+	elapsed := time.Since(last)
+	const window = 10 * time.Second
+	if elapsed < window {
+		return int((window-elapsed)/time.Second) + 1, true
+	}
+	a.storageRefreshAt[key] = time.Now()
+	return 0, false
+}
+
+// handleStorageCommand /storage [drive_num] —— 发占位消息并后台拉取容量信息。
+func (a *App) handleStorageCommand(ctx context.Context, msg messageInfo) error {
+	userID := fmt.Sprintf("%d", msg.SenderID)
+	targetDriveID := ""
+	if fields := strings.Fields(msg.Text); len(fields) > 1 {
+		targetDriveID = strings.TrimSpace(fields[1])
+	}
+
+	placeholderID, err := a.tg.SendMessageWithID(ctx, msg.ChatID, storagePlaceholder)
+	if err != nil {
+		return err
+	}
+	go a.storageLoadAndEdit(userID, msg.ChatID, placeholderID, targetDriveID, false, 0)
+	return nil
+}
+
+// handleStorageCallback 处理容量查询与刷新回调按钮。
+func (a *App) handleStorageCallback(ctx context.Context, cb tgclient.CallbackContext, data string) error {
+	userID := fmt.Sprintf("%d", cb.UserID)
+	targetDriveID := ""
+	isRefresh := strings.HasPrefix(data, "storage_refresh")
+	if strings.HasPrefix(data, "storage_check_") {
+		targetDriveID = strings.TrimPrefix(data, "storage_check_")
+	} else if strings.HasPrefix(data, "storage_refresh_") {
+		targetDriveID = strings.TrimPrefix(data, "storage_refresh_")
+	}
+
+	if isRefresh {
+		if wait, gated := a.storageRefreshGated(cb.UserID, cb.MsgID); gated {
+			return a.tg.AnswerCallback(ctx, cb.CallbackID,
+				fmt.Sprintf("⏳ 刷新太快了，请 %d 秒后再试", wait), false)
+		}
+		if err := a.tg.EditMessage(ctx, cb.ChatID, cb.MsgID, storageSyncing); err != nil {
+			a.log.Warn("/storage 刷新提示编辑失败", "msgId", cb.MsgID, "err", err)
+		}
+		time.Sleep(storageRefreshDelay)
+	}
+
+	go a.storageLoadAndEdit(userID, cb.ChatID, cb.MsgID, targetDriveID, isRefresh, cb.CallbackID)
+	return nil
+}
+
+// storageLoadAndEdit 后台查询容量、格式化并更新 Telegram 消息。
+func (a *App) storageLoadAndEdit(userID string, chatID int64, msgID int, driveID string, force bool, callbackID int64) {
+	defer func() {
+		if r := recover(); r != nil {
+			a.log.Error("storageLoadAndEdit 发生异常恢复", "panic", r)
+		}
+	}()
+
+	var (
+		answerText string
+		answerAlert bool
+	)
+	if callbackID != 0 {
+		defer func() {
+			actx, acancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer acancel()
+			if aerr := a.tg.AnswerCallback(actx, callbackID, answerText, answerAlert); aerr != nil {
+				a.log.Warn("回应容量刷新按钮失败", "err", aerr)
+			}
+		}()
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), storageLoadTimeout)
+	defer cancel()
+
+	drives, err := a.drivesList(ctx, userID)
+	if err != nil {
+		a.log.Error("/storage 读取网盘列表失败", "userId", userID, "err", err)
+		_ = a.tg.EditMessage(ctx, chatID, msgID, "❌ 加载网盘信息失败，请稍后重试。")
+		return
+	}
+	if len(drives) == 0 {
+		buttons := [][]tgclient.Button{
+			{
+				{Text: "🟢 Mega", Data: "drive_bind_mega"},
+				{Text: "🛡️ Proton Drive", Data: "drive_bind_protondrive"},
+			},
+			{
+				{Text: "🌐 WebDAV", Data: "drive_bind_webdav"},
+				{Text: "📦 S3 / OSS", Data: "drive_bind_oss"},
+			},
+			{
+				{Text: "⚡ PikPak", Data: "drive_bind_pikpak"},
+				{Text: "🔒 Filen", Data: "drive_bind_filen"},
+			},
+			{
+				{Text: "☁️ pCloud", Data: "drive_bind_pcloud"},
+			},
+		}
+		_ = a.tg.EditWithButtons(ctx, chatID, msgID, noDriveHint, buttons)
+		return
+	}
+
+	var target *drive.Drive
+	if driveID != "" {
+		// 优先按序号匹配（如 /storage 1）
+		if idx, err := strconv.Atoi(driveID); err == nil && idx >= 1 && idx <= len(drives) {
+			target = &drives[idx-1]
+		} else {
+			// 按 driveID 精确匹配
+			for i := range drives {
+				if drives[i].ID == driveID {
+					target = &drives[i]
+					break
+				}
+			}
+		}
+	}
+	if target == nil {
+		for i := range drives {
+			if drives[i].IsDefault == 1 {
+				target = &drives[i]
+				break
+			}
+		}
+		if target == nil {
+			target = &drives[0]
+		}
+	}
+
+	info, unsupported, errDetail, qErr := a.getDriveStorage(ctx, target, force)
+	text, buttons := renderStorageView(target, info, unsupported, errDetail, drives)
+
+	if len(buttons) == 0 {
+		_ = a.tg.EditMessage(ctx, chatID, msgID, text)
+	} else if err := a.tg.EditWithButtons(ctx, chatID, msgID, text, buttons); err != nil {
+		a.log.Warn("/storage 编辑消息失败", "msgId", msgID, "err", err)
+	}
+
+	if force && qErr == nil {
+		answerText = storageRefreshOK
+	}
+}
+
+// getDriveStorage 读取网盘空间，带内存与 Redis 两级缓存与 Proton session lock。
+func (a *App) getDriveStorage(ctx context.Context, d *drive.Drive, force bool) (*rclone.AboutInfo, bool, string, error) {
+	key := storageCacheKey(d)
+	if !force {
+		if info, unsupported, errStr, ok := a.storageMemGet(key); ok {
+			return info, unsupported, errStr, nil
+		}
+		if info, unsupported, errStr, ok := a.storageRedisGet(ctx, key); ok {
+			a.storageMemSet(key, info, unsupported, errStr, storageDefaultTTL)
+			return info, unsupported, errStr, nil
+		}
+	}
+
+	if a.rclone == nil {
+		return nil, false, "rclone 执行器未配置", errors.New("rclone 未配置")
+	}
+
+	executeAbout := func() (*rclone.AboutInfo, error) {
+		cfg, harvest, bErr := a.buildRuntime(ctx, d)
+		if bErr != nil {
+			return nil, bErr
+		}
+		if cfg.Runtime != nil {
+			defer cfg.Runtime.Dispose()
+		}
+		if harvest != nil {
+			defer func() {
+				if herr := harvest(); herr != nil {
+					a.log.Error("收割 Proton session 失败", "err", herr)
+				}
+			}()
+		}
+		cfg.Timeout = 30 * time.Second
+		return a.rclone.About(ctx, cfg)
+	}
+
+	var info *rclone.AboutInfo
+	var err error
+
+	// 仅 Proton 等需维护一次性 Session 的后端才加锁；静态网盘不锁，避免大文件上传阻塞容量查询
+	if d.WritableRuntime() {
+		lockKey := drive.Key(drive.Type(d.Type), d.UserID)
+		err = a.locks.WithSession(ctx, lockKey, func() error {
+			var qErr error
+			info, qErr = executeAbout()
+			return qErr
+		})
+	} else {
+		info, err = executeAbout()
+	}
+
+	unsupported := false
+	errStr := ""
+	if errors.Is(err, rclone.ErrAboutNotSupported) {
+		unsupported = true
+		err = nil
+	} else if err != nil {
+		errStr = err.Error()
+	}
+
+	// 仅成功或明确不支持配额的后端才写入缓存，避免网络偶发超时造成负向缓存中毒
+	if err == nil || unsupported {
+		a.storageMemSet(key, info, unsupported, errStr, storageDefaultTTL)
+		a.storageRedisSet(ctx, key, info, unsupported, errStr, storageDefaultTTL)
+	}
+	return info, unsupported, errStr, err
+}
+
+func renderStorageView(d *drive.Drive, info *rclone.AboutInfo, unsupported bool, errStr string, allDrives []drive.Drive) (string, [][]tgclient.Button) {
+	var sb strings.Builder
+	sb.WriteString("📊 <b>网盘空间概况</b>\n\n")
+
+	icon := "📁"
+	if d.IsDefault == 1 {
+		icon = "⭐"
+	}
+	folder := "根目录 (/)"
+	if d.RemoteFolder.Valid && strings.TrimSpace(d.RemoteFolder.String) != "" {
+		folder = "/" + strings.Trim(d.RemoteFolder.String, "/")
+	}
+	account := driveDisplayAccount(d)
+
+	sb.WriteString(fmt.Sprintf("%s <b>网盘类型:</b> <b>%s</b>\n", icon, strings.ToUpper(d.Type)))
+	sb.WriteString(fmt.Sprintf("👤 <b>账号标识:</b> <code>%s</code>\n", escapeHTMLText(account)))
+	sb.WriteString(fmt.Sprintf("📂 <b>保存目录:</b> <code>%s</code>\n", escapeHTMLText(folder)))
+	sb.WriteString("──────────────────\n")
+
+	if unsupported {
+		sb.WriteString("⚠️ <b>该存储类型不支持查询剩余空间配额</b>\n")
+		sb.WriteString("<i>后端协议（如 S3/OSS 或部分 WebDAV 端点）未提供容量上限与用量查询接口，不影响日常文件正常转存。</i>\n")
+	} else if errStr != "" {
+		sb.WriteString("❌ <b>空间信息查询失败</b>\n")
+		sb.WriteString(fmt.Sprintf("<code>%s</code>\n", escapeHTMLText(errStr)))
+	} else if info != nil {
+		if info.Total != nil && *info.Total > 0 {
+			total := *info.Total
+			used := int64(0)
+			if info.Used != nil {
+				used = *info.Used
+				if used < 0 {
+					used = 0
+				}
+			}
+			free := total - used
+			if info.Free != nil {
+				free = *info.Free
+			}
+			if free < 0 {
+				free = 0
+			}
+
+			usedRatio := float64(used) / float64(total)
+			freeRatio := float64(free) / float64(total)
+
+			sb.WriteString(fmt.Sprintf("📦 <b>总容量:</b> <code>%s</code>\n", formatSize(total)))
+			sb.WriteString(fmt.Sprintf("📈 <b>已使用:</b> <code>%s</code> (%.1f%%)\n", formatSize(used), usedRatio*100))
+			sb.WriteString(fmt.Sprintf("📉 <b>剩余可用:</b> <code>%s</code> (%.1f%%)\n", formatSize(free), freeRatio*100))
+			sb.WriteString(fmt.Sprintf("📊 <b>使用率:</b> %s\n", renderProgressBar(usedRatio, 10)))
+		} else if info.Used != nil {
+			sb.WriteString(fmt.Sprintf("📈 <b>已使用容量:</b> <code>%s</code>\n", formatSize(*info.Used)))
+		}
+
+		if info.Trashed != nil && *info.Trashed > 0 {
+			sb.WriteString(fmt.Sprintf("🗑️ <b>回收站占用:</b> <code>%s</code>\n", formatSize(*info.Trashed)))
+		}
+		if info.Objects != nil && *info.Objects > 0 {
+			sb.WriteString(fmt.Sprintf("📄 <b>对象/文件数:</b> <code>%d</code> 个\n", *info.Objects))
+		}
+	} else {
+		sb.WriteString("暂无空间信息\n")
+	}
+
+	buttons := [][]tgclient.Button{}
+
+	// 操作行 1：刷新
+	refreshBtn := tgclient.Button{
+		Text: "🔄 刷新容量",
+		Data: "storage_refresh_" + d.ID,
+	}
+	buttons = append(buttons, []tgclient.Button{refreshBtn})
+
+	// 操作行 2：如果有多盘，允许快捷切换查看其它盘
+	if len(allDrives) > 1 {
+		driveRow := []tgclient.Button{}
+		for i := range allDrives {
+			od := &allDrives[i]
+			label := fmt.Sprintf("%d. %s", i+1, strings.ToUpper(od.Type))
+			if od.ID == d.ID {
+				label = "👉 " + label
+			}
+			driveRow = append(driveRow, tgclient.Button{
+				Text: label,
+				Data: "storage_check_" + od.ID,
+			})
+			if len(driveRow) == 3 {
+				buttons = append(buttons, driveRow)
+				driveRow = []tgclient.Button{}
+			}
+		}
+		if len(driveRow) > 0 {
+			buttons = append(buttons, driveRow)
+		}
+	}
+
+	// 导航行：返回文件列表 / 网盘管理
+	buttons = append(buttons, []tgclient.Button{
+		{Text: "📁 查看文件", Data: "files_page_0"},
+		{Text: "⚙️ 网盘管理", Data: "drive_manager_back"},
+	})
+
+	return sb.String(), buttons
+}

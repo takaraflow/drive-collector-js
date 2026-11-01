@@ -211,6 +211,10 @@ type fakeRclone struct {
 	// scanCalls 记录 ScanFiles 拿到的路径 —— 断言扫的是网盘根(空串)。
 	scanCalls []string
 	scanErr   error
+	// about/aboutErr 是 About 的预设结果 —— /storage 的测试用。
+	about      *rclone.AboutInfo
+	aboutErr   error
+	aboutCalls int
 }
 
 func (f *fakeRclone) Mkdir(_ context.Context, _ rclone.Config, remotePath string) error {
@@ -243,6 +247,11 @@ func (f *fakeRclone) ListFiles(_ context.Context, _ rclone.Config, remotePath st
 func (f *fakeRclone) ScanFiles(_ context.Context, _ rclone.Config, remotePath string) ([]rclone.FileEntry, error) {
 	f.scanCalls = append(f.scanCalls, remotePath)
 	return f.scan, f.scanErr
+}
+
+func (f *fakeRclone) About(_ context.Context, _ rclone.Config) (*rclone.AboutInfo, error) {
+	f.aboutCalls++
+	return f.about, f.aboutErr
 }
 
 // fakeDrives 代替网盘仓储。

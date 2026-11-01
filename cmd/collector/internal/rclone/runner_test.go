@@ -478,3 +478,64 @@ func TestRunStreamAndRcat(t *testing.T) {
 		t.Errorf("expected %q, got %q", data, string(got))
 	}
 }
+
+func TestAboutSuccess(t *testing.T) {
+	bin := fakeRclone(t, `cat <<'EOF'
+{
+  "total": 107374182400,
+  "used": 25232932864,
+  "free": 82141249536,
+  "trashed": 1288490188
+}
+EOF
+`)
+
+	r := quietRunner(bin)
+	info, err := r.About(context.Background(), Config{Connection: ":test:"})
+	if err != nil {
+		t.Fatalf("About 失败: %v", err)
+	}
+	if info == nil {
+		t.Fatal("info is nil")
+	}
+	if info.Total == nil || *info.Total != 107374182400 {
+		t.Errorf("Total = %v, want 107374182400", info.Total)
+	}
+	if info.Used == nil || *info.Used != 25232932864 {
+		t.Errorf("Used = %v, want 25232932864", info.Used)
+	}
+	if info.Free == nil || *info.Free != 82141249536 {
+		t.Errorf("Free = %v, want 82141249536", info.Free)
+	}
+	if info.Trashed == nil || *info.Trashed != 1288490188 {
+		t.Errorf("Trashed = %v, want 1288490188", info.Trashed)
+	}
+}
+
+func TestAboutNotSupported(t *testing.T) {
+	cases := []string{
+		`echo "Command about needs 1 arguments: ... not supported by backend" >&2; exit 1`,
+		`echo "Error: couldn't about: ... doesn't support about" >&2; exit 1`,
+		`echo "can't read about: can't get quota: not supported by WebDAV server" >&2; exit 1`,
+	}
+	for i, script := range cases {
+		bin := fakeRclone(t, script)
+		r := quietRunner(bin)
+		_, err := r.About(context.Background(), Config{Connection: ":s3:"})
+		if !errors.Is(err, ErrAboutNotSupported) {
+			t.Errorf("case %d: expected ErrAboutNotSupported, got: %v", i, err)
+		}
+	}
+}
+
+func TestAboutFailure(t *testing.T) {
+	bin := fakeRclone(t, `echo "fatal network timeout" >&2; exit 1`)
+	r := quietRunner(bin)
+	_, err := r.About(context.Background(), Config{Connection: ":test:"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "fatal network timeout") {
+		t.Errorf("expected stderr detail in error, got: %v", err)
+	}
+}
