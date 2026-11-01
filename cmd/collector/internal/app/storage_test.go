@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/youngsx/drive-collector/cmd/collector/internal/drive"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/rclone"
@@ -56,7 +57,7 @@ func TestGetDriveStorageSuccessAndCaching(t *testing.T) {
 	app := newStorageApp(rc, &fakeDrives{drive: &d, all: []drive.Drive{d}})
 
 	// 第一次查询：命中 rclone
-	info, unsupported, errStr, err := app.getDriveStorage(context.Background(), &d, false)
+	info, unsupported, errStr, _, err := app.getDriveStorage(context.Background(), &d, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -74,7 +75,7 @@ func TestGetDriveStorageSuccessAndCaching(t *testing.T) {
 	}
 
 	// 第二次非强制查询：应命中内存缓存，不应产生新的 rclone 进程
-	infoCached, _, _, _ := app.getDriveStorage(context.Background(), &d, false)
+	infoCached, _, _, _, _ := app.getDriveStorage(context.Background(), &d, false)
 	if infoCached == nil || *infoCached.Total != total {
 		t.Fatalf("cached info mismatch: %+v", infoCached)
 	}
@@ -83,13 +84,14 @@ func TestGetDriveStorageSuccessAndCaching(t *testing.T) {
 	}
 
 	// 第三次 force 强制查询：应绕过缓存
-	_, _, _, _ = app.getDriveStorage(context.Background(), &d, true)
+	_, _, _, _, _ = app.getDriveStorage(context.Background(), &d, true)
 	if rc.aboutCalls != 2 {
 		t.Fatalf("expected force call to increase rclone calls to 2, got %d", rc.aboutCalls)
 	}
 
 	// 校验文本渲染
-	text, buttons := renderStorageView(&d, info, false, "", []drive.Drive{d})
+	now := time.Now()
+	text, buttons := renderStorageView(&d, info, false, "", []drive.Drive{d}, now)
 	if !strings.Contains(text, "MEGA") {
 		t.Errorf("expected MEGA in text: %s", text)
 	}
@@ -104,6 +106,12 @@ func TestGetDriveStorageSuccessAndCaching(t *testing.T) {
 	}
 	if !strings.Contains(text, "345") {
 		t.Errorf("expected objects count in text: %s", text)
+	}
+	if !strings.Contains(text, "🟢 <b>空间状态充裕 (健康)</b>") {
+		t.Errorf("expected healthy status in text: %s", text)
+	}
+	if !strings.Contains(text, "统计时间:") {
+		t.Errorf("expected timestamp in text: %s", text)
 	}
 
 	// 校验按钮
@@ -128,7 +136,7 @@ func TestGetDriveStorageUnsupported(t *testing.T) {
 	}
 	app := newStorageApp(rc, &fakeDrives{drive: &d, all: []drive.Drive{d}})
 
-	info, unsupported, errStr, err := app.getDriveStorage(context.Background(), &d, false)
+	info, unsupported, errStr, _, err := app.getDriveStorage(context.Background(), &d, false)
 	if err != nil {
 		t.Fatalf("expected err == nil for unsupported, got: %v", err)
 	}
@@ -142,7 +150,7 @@ func TestGetDriveStorageUnsupported(t *testing.T) {
 		t.Fatalf("expected empty errStr, got: %s", errStr)
 	}
 
-	text, _ := renderStorageView(&d, nil, true, "", []drive.Drive{d})
+	text, _ := renderStorageView(&d, nil, true, "", []drive.Drive{d}, time.Time{})
 	if !strings.Contains(text, "不支持查询剩余空间配额") {
 		t.Errorf("expected unsupported notice in text: %s", text)
 	}
@@ -155,7 +163,7 @@ func TestGetDriveStorageFailure(t *testing.T) {
 	}
 	app := newStorageApp(rc, &fakeDrives{drive: &d, all: []drive.Drive{d}})
 
-	_, unsupported, errStr, err := app.getDriveStorage(context.Background(), &d, false)
+	_, unsupported, errStr, _, err := app.getDriveStorage(context.Background(), &d, false)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -166,7 +174,7 @@ func TestGetDriveStorageFailure(t *testing.T) {
 		t.Fatalf("expected error detail in errStr, got: %s", errStr)
 	}
 
-	text, _ := renderStorageView(&d, nil, false, errStr, []drive.Drive{d})
+	text, _ := renderStorageView(&d, nil, false, errStr, []drive.Drive{d}, time.Time{})
 	if !strings.Contains(text, "空间信息查询失败") {
 		t.Errorf("expected failure header in text: %s", text)
 	}
@@ -175,7 +183,37 @@ func TestGetDriveStorageFailure(t *testing.T) {
 	}
 }
 
+func TestRenderStorageViewHealthAlerts(t *testing.T) {
+	d := testDrive("d1", "mega", "u1@mega.nz", "", 1)
+	total := int64(100 * 1024 * 1024 * 1024)
 
+	// Case 1: 96% used -> Critical Alert
+	usedCritical := int64(96 * 1024 * 1024 * 1024)
+	trashed := int64(500 * 1024 * 1024) // 500MB
+	infoCritical := &rclone.AboutInfo{
+		Total:   &total,
+		Used:    &usedCritical,
+		Trashed: &trashed,
+	}
+	textCritical, _ := renderStorageView(&d, infoCritical, false, "", []drive.Drive{d}, time.Now())
+	if !strings.Contains(textCritical, "🚨 <b>存储空间严重告急") {
+		t.Errorf("expected critical alert in text: %s", textCritical)
+	}
+	if !strings.Contains(textCritical, "💡 <i>提示: 回收站占用较多空间") {
+		t.Errorf("expected trash cleanup advisory: %s", textCritical)
+	}
+
+	// Case 2: 88% used -> Warning
+	usedWarning := int64(88 * 1024 * 1024 * 1024)
+	infoWarning := &rclone.AboutInfo{
+		Total: &total,
+		Used:  &usedWarning,
+	}
+	textWarning, _ := renderStorageView(&d, infoWarning, false, "", []drive.Drive{d}, time.Now())
+	if !strings.Contains(textWarning, "⚠️ <b>存储空间偏紧") {
+		t.Errorf("expected warning in text: %s", textWarning)
+	}
+}
 
 func TestMultipleDrivesButtons(t *testing.T) {
 	d1 := testDrive("d1", "mega", "u1@mega.nz", "", 1)
@@ -183,21 +221,29 @@ func TestMultipleDrivesButtons(t *testing.T) {
 	d3 := testDrive("d3", "pikpak", "u3@pikpak.com", "", 0)
 	drives := []drive.Drive{d1, d2, d3}
 
-	_, buttons := renderStorageView(&d1, nil, true, "", drives)
+	_, buttons := renderStorageView(&d1, nil, true, "", drives, time.Now())
 	// buttons[0] 是刷新
-	// buttons[1] 是网盘选择行
-	// buttons[2] 是导航行
-	if len(buttons) < 3 {
-		t.Fatalf("expected at least 3 rows, got %d", len(buttons))
+	// buttons[1] 是网盘选择行 1 (2个按钮: d1, d2)
+	// buttons[2] 是网盘选择行 2 (1个按钮: d3)
+	// buttons[3] 是导航行 (查看文件 / 网盘管理)
+	if len(buttons) != 4 {
+		t.Fatalf("expected 4 rows for 3 drives (2-column layout), got %d", len(buttons))
 	}
-	driveRow := buttons[1]
-	if len(driveRow) != 3 {
-		t.Fatalf("expected 3 drive buttons, got %d", len(driveRow))
+	driveRow1 := buttons[1]
+	if len(driveRow1) != 2 {
+		t.Fatalf("expected 2 drive buttons in first drive row, got %d", len(driveRow1))
 	}
-	if !strings.Contains(driveRow[0].Text, "👉 1. MEGA") {
-		t.Errorf("active drive button should have indicator: %s", driveRow[0].Text)
+	if !strings.Contains(driveRow1[0].Text, "👉 🟢 1. MEGA") {
+		t.Errorf("active drive button should have pointer and icon: %s", driveRow1[0].Text)
 	}
-	if !strings.Contains(driveRow[1].Text, "2. PROTONDRIVE") {
-		t.Errorf("second drive button text mismatch: %s", driveRow[1].Text)
+	if !strings.Contains(driveRow1[1].Text, "🛡️ 2. PROTONDRIVE") {
+		t.Errorf("second drive button text mismatch: %s", driveRow1[1].Text)
+	}
+	driveRow2 := buttons[2]
+	if len(driveRow2) != 1 {
+		t.Fatalf("expected 1 drive button in second drive row, got %d", len(driveRow2))
+	}
+	if !strings.Contains(driveRow2[0].Text, "⚡ 3. PIKPAK") {
+		t.Errorf("third drive button text mismatch: %s", driveRow2[0].Text)
 	}
 }
