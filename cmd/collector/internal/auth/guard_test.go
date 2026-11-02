@@ -75,7 +75,7 @@ func TestRoleOrderM(t *testing.T) {
 func TestCommandPermissionsMatchJS(t *testing.T) {
 	// 这些必须受控 —— 少一条就意味着普通用户能执行管理命令。
 	mustGuard := []string{
-		"/drive", "/unbind", "/logout",
+		"/drive", "/reauth", "/rebind", "/unbind", "/logout",
 		"/diagnosis", "/open_service", "/close_service", "/task_queue",
 		"/users", "/ban", "/unban", "/pro_admin", "/de_admin",
 	}

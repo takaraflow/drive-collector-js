@@ -74,7 +74,7 @@ func (a *App) bindStart(ctx context.Context, chatID int64, userID, typeStr strin
 func (a *App) reauthStart(ctx context.Context, chatID int64, userID string, d *drive.Drive) error {
 	t := drive.Type(d.Type)
 	if !drive.IsSupported(t) {
-		return a.sendSafe(ctx, chatID, "⚠️ 暂不支持该网盘类型。当前可用:Mega、Proton Drive、WebDAV、S3/OSS、PikPak、Filen、Google Drive、OneDrive、Dropbox。")
+		return a.sendSafe(ctx, chatID, "⚠️ 暂不支持该网盘类型。当前可用:Mega、Proton Drive、WebDAV、S3/OSS、PikPak、Filen、pCloud。")
 	}
 	step := drive.FirstStep(t)
 	if step == "" {
@@ -243,6 +243,7 @@ func (a *App) createBoundDrive(ctx context.Context, userID string, t drive.Type,
 				return a.drives.UpdateConfigData(ctx, d.ID, d.UserID, *res.Config)
 			}
 		}
+		return fmt.Errorf("目标网盘 %s 不存在或已被解绑", preferredID)
 	}
 	for i := range existing {
 		d := &existing[i]
