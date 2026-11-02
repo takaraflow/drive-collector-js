@@ -76,6 +76,8 @@ var ACL = map[Action][]Role{
 var CommandPermissions = map[string]Action{
 	// 网盘管理(高危)
 	"/drive":             ActionDriveEdit,
+	"/reauth":            ActionDriveEdit,
+	"/rebind":            ActionDriveEdit,
 	"/logout":            ActionDriveEdit,
 	"/unbind":            ActionDriveEdit,
 	"/remote_folder":     ActionDriveEdit,

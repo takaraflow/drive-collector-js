@@ -176,3 +176,34 @@ func TestNoticeFallsBackToNewMessage(t *testing.T) {
 			notices.edits, notices.sent)
 	}
 }
+
+// TestNotifyOutcomeAuthInvalidProvidesReauthButton 验证网盘凭证失效时提供重新更新凭证引导与按钮。
+func TestNotifyOutcomeAuthInvalidProvidesReauthButton(t *testing.T) {
+	task := noticeTask("failed", "rclone: couldn't login: invalid password or session expired")
+	notices := &fakeNotices{}
+	a, _ := newTestApp(t, &fakeDL{content: "x"}, &fakeRepo{byID: &task}, boundDrive())
+	a.notices = notices
+
+	a.notifyOutcome(context.Background(), task.ID, true)
+
+	got := strings.Join(notices.edits, "\n")
+	if !strings.Contains(got, "登录已失效") && !strings.Contains(got, "凭证已过期") {
+		t.Errorf("期望友好提示凭证已过期/失效，实际输出: %q", got)
+	}
+	if len(notices.editBtns) == 0 || len(notices.editBtns[0]) == 0 {
+		t.Fatal("网盘凭证失效时必须提供操作按钮")
+	}
+	hasReauth := false
+	for _, row := range notices.editBtns[0] {
+		for _, b := range row {
+			if b.Data == "drive_reauth" {
+				hasReauth = true
+				break
+			}
+		}
+	}
+	if !hasReauth {
+		t.Errorf("期望包含 drive_reauth 按钮，实际按钮: %v", notices.editBtns[0])
+	}
+}
+

@@ -80,6 +80,11 @@ func formatUploadFailText(err error, taskID string) (string, [][]tgclient.Button
 	}
 
 	var buttons [][]tgclient.Button
+	if cls.Code == rclone.CodeDriveAuthInvalid {
+		buttons = append(buttons, []tgclient.Button{
+			{Text: "🔑 重新更新凭证", Data: "drive_reauth"},
+		})
+	}
 	if cls.UserRetryable {
 		buttons = append(buttons, []tgclient.Button{
 			{Text: noticeRetryBtn, Data: "retry_confirm_" + taskID},
