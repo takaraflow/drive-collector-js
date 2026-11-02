@@ -149,11 +149,13 @@ func (a *App) storageRefreshGated(userID int64, msgID int) (waitSec int, gated b
 	return 0, false
 }
 
-// storageInvalidate 清除指定网盘在内存与 Redis 中的空间容量缓存（如凭证更新后强制刷新）。
+// storageInvalidate 清除指定网盘在内存与 Redis 中的空间容量缓存及刷新冷却（如凭证更新后强制刷新）。
 func (a *App) storageInvalidate(userID, driveID string) {
 	key := fmt.Sprintf("storage_%s_%s", userID, driveID)
+	coolKey := fmt.Sprintf("refresh_%s_%s", userID, driveID)
 	a.storageMu.Lock()
 	delete(a.storageMem, key)
+	delete(a.storageRefreshAt, coolKey)
 	a.storageMu.Unlock()
 	if a.cfg.Redis != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

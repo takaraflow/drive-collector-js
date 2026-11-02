@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/youngsx/drive-collector/cmd/collector/internal/d1"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/drive"
@@ -540,5 +541,116 @@ func TestReauthFlow_CreateBoundDriveUpdatesExisting(t *testing.T) {
 		t.Errorf("期望更新 drv-target 的配置")
 	}
 }
+
+// TestReauthFlow_CreateBoundDriveNonexistentTargetFails 验证目标网盘 ID 不存在时严禁 Fallthrough 误改其它盘。
+func TestReauthFlow_CreateBoundDriveNonexistentTargetFails(t *testing.T) {
+	d1c := mockD1WithRows([]map[string]any{
+		{
+			"id":            "drv-other",
+			"user_id":       "42",
+			"type":          "mega",
+			"name":          "mega-other@example.com",
+			"status":        "active",
+			"is_default":    float64(1),
+			"remote_folder": "OtherFolder",
+			"config_data":   `{"pass":"pass"}`,
+		},
+	})
+	app := &App{
+		d1c:    d1c,
+		drives: store.NewDriveRepository(d1c),
+		log:    quietApp(),
+	}
+
+	newCfg := drive.DriveConfig{Pass: "new_secret_pass"}
+	res := drive.BindResult{
+		Success:   true,
+		DriveName: "mega-other@example.com",
+		Config:    &newCfg,
+	}
+
+	err := app.createBoundDrive(context.Background(), "42", drive.TypeMega, res, "drv-ghost")
+	if err == nil || !strings.Contains(err.Error(), "不存在或已被解绑") {
+		t.Fatalf("指定不存在的盘 ID 时必须报错阻止 Fallthrough, 实际返回: %v", err)
+	}
+}
+
+// TestReauthCallback_NonexistentDrive 验证回调携带已解绑网盘 ID 时给出友好拦截。
+func TestReauthCallback_NonexistentDrive(t *testing.T) {
+	app := &App{
+		bindSessions: newFakeMemorySession(),
+		d1c:          mockD1WithRows(nil),
+		log:          quietApp(),
+	}
+	tg := withFakeTG(app)
+
+	if err := app.handleCallback(context.Background(), callbackUpdate(42, "drive_reauth_ghost")); err != nil {
+		t.Fatalf("handleCallback 报错: %v", err)
+	}
+
+	if len(tg.sent) != 1 || !strings.Contains(tg.sent[0], "未找到对应网盘") {
+		t.Errorf("期望返回未找到对应网盘提示, 实际输出: %v", tg.sent)
+	}
+}
+
+// TestStorageInvalidate_ClearsMemoryAndCooldown 验证凭证更新后清理容量缓存及冷却时间。
+func TestStorageInvalidate_ClearsMemoryAndCooldown(t *testing.T) {
+	app := &App{
+		storageMem:       map[string]storageMemEntry{"storage_42_drv-1": {}},
+		storageRefreshAt: map[string]time.Time{"refresh_42_drv-1": time.Now()},
+		log:              quietApp(),
+	}
+
+	app.storageInvalidate("42", "drv-1")
+
+	if _, ok := app.storageMem["storage_42_drv-1"]; ok {
+		t.Errorf("storageMem 缓存未被清理")
+	}
+	if _, ok := app.storageRefreshAt["refresh_42_drv-1"]; ok {
+		t.Errorf("storageRefreshAt 刷新冷却未被清理")
+	}
+}
+
+// TestRebindAliasCommand 验证 /rebind 命令与 /reauth 行为一致。
+func TestRebindAliasCommand(t *testing.T) {
+	app := &App{
+		bindSessions: newFakeMemorySession(),
+		d1c: mockD1WithRows([]map[string]any{
+			{
+				"id":         "drv-1",
+				"user_id":    "42",
+				"type":       "mega",
+				"name":       "mega-alice@example.com",
+				"status":     "active",
+				"is_default": float64(1),
+			},
+		}),
+		log: quietApp(),
+	}
+	tg := withFakeTG(app)
+
+	msg := messageInfo{
+		ChatID:   1001,
+		SenderID: 42,
+		Text:     "/rebind",
+	}
+
+	if err := app.routeCommand(context.Background(), msg); err != nil {
+		t.Fatalf("/rebind 执行报错: %v", err)
+	}
+
+	if len(tg.sent) == 0 {
+		t.Errorf("期望发送提示消息")
+	}
+
+	sess, err := app.bindSessions.Get(context.Background(), "42")
+	if err != nil || sess == nil {
+		t.Fatalf("未成功启动会话: %v", err)
+	}
+	if sess.Data["is_reauth"] != "true" || sess.Data["reauth_drive_id"] != "drv-1" {
+		t.Errorf("会话参数不符合预期: %+v", sess)
+	}
+}
+
 
 

@@ -1171,6 +1171,12 @@ func (a *App) handleReauthCommand(ctx context.Context, msg messageInfo) error {
 	if len(drives) == 1 {
 		return a.reauthStart(ctx, msg.ChatID, userID, &drives[0])
 	}
+	text, buttons := renderReauthMenuView(drives)
+	return a.tg.SendWithButtons(ctx, msg.ChatID, text, buttons)
+}
+
+// renderReauthMenuView 生成多网盘更新凭证选择面板的内容与按钮。
+func renderReauthMenuView(drives []drive.Drive) (string, [][]tgclient.Button) {
 	text := "🔑 <b>更新网盘凭证</b>\n\n检测到您绑定了多个网盘，请选择需要重新更新凭证的网盘："
 	var buttons [][]tgclient.Button
 	for i := range drives {
@@ -1191,7 +1197,7 @@ func (a *App) handleReauthCommand(ctx context.Context, msg messageInfo) error {
 	buttons = append(buttons, []tgclient.Button{
 		{Text: "🔙 返回网盘管理", Data: "drive_manager_back"},
 	})
-	return a.tg.SendWithButtons(ctx, msg.ChatID, text, buttons)
+	return text, buttons
 }
 
 // handleReauthEntry 处理未指定盘 ID 的凭证更新入口（如转存失败消息中的「🔑 重新更新凭证」按钮）。
@@ -1238,26 +1244,7 @@ func (a *App) handleReauthDrive(ctx context.Context, cb tgclient.CallbackContext
 
 // editDriveReauthMenu 展示选择要更新凭证的网盘面板。
 func (a *App) editDriveReauthMenu(ctx context.Context, cb tgclient.CallbackContext, drives []drive.Drive) error {
-	text := "🔑 <b>更新网盘凭证</b>\n\n检测到您绑定了多个网盘，请选择需要重新更新凭证的网盘："
-	var buttons [][]tgclient.Button
-	for i := range drives {
-		d := &drives[i]
-		tIcon := driveTypeIcon(d.Type)
-		acc := driveDisplayAccount(d)
-		label := fmt.Sprintf("%s %d. %s", tIcon, i+1, strings.ToUpper(d.Type))
-		if acc != "" {
-			label += fmt.Sprintf(" (%s)", acc)
-		}
-		if d.IsDefault == 1 {
-			label += " ★"
-		}
-		buttons = append(buttons, []tgclient.Button{
-			{Text: label, Data: "drive_reauth_" + d.ID},
-		})
-	}
-	buttons = append(buttons, []tgclient.Button{
-		{Text: "🔙 返回网盘管理", Data: "drive_manager_back"},
-	})
+	text, buttons := renderReauthMenuView(drives)
 	if err := a.tg.EditWithButtons(ctx, cb.ChatID, cb.MsgID, text, buttons); err != nil {
 		return a.tg.SendWithButtons(ctx, cb.ChatID, text, buttons)
 	}
