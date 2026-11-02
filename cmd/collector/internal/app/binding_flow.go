@@ -31,6 +31,28 @@ func encodeStep(t drive.Type, step string) string {
 	return strings.ToUpper(string(t)) + ":" + step
 }
 
+// bindStepPrompt 返回对应网盘类型第一步的提示文案。
+func bindStepPrompt(t drive.Type) string {
+	switch t {
+	case drive.TypeMega:
+		return "📧 <b>请输入您的 Mega 登录邮箱</b>：\n\n发送 /cancel 或输入 取消 可随时退出绑定流程。"
+	case drive.TypeProton:
+		return "👤 <b>请输入 Proton 账号用户名</b>\n\n通常是邮箱，例如 <code>you@proton.me</code>。\n\n发送 /cancel 或输入 取消 可随时退出绑定流程。\n\n🔐 提示:涉及密码的输入在提交后会被立即删除。"
+	case drive.TypeWebDAV:
+		return "🌐 <b>请输入 WebDAV 服务器地址</b>（以 http:// 或 https:// 开头）：\n\n例如：<code>https://dav.example.com/dav/</code>\n\n发送 /cancel 或输入 取消 可随时退出绑定流程。"
+	case drive.TypeOSS:
+		return "📦 <b>请输入 S3 / OSS Endpoint 地址</b>：\n\n例如：<code>https://oss-cn-hangzhou.aliyuncs.com</code> 或 <code>https://<id>.r2.cloudflarestorage.com</code>\n\n发送 /cancel 或输入 取消 可随时退出绑定流程。"
+	case drive.TypePikPak:
+		return "⚡ <b>请输入 PikPak 账号/邮箱</b>：\n\n发送 /cancel 或输入 取消 可随时退出绑定流程。"
+	case drive.TypeFilen:
+		return "🔐 <b>请输入 Filen 账号邮箱</b>：\n\n发送 /cancel 或输入 取消 可随时退出绑定流程。"
+	case drive.TypePCloud:
+		return "☁️ <b>请输入 pCloud 账号邮箱</b>：\n\n发送 /cancel 或输入 取消 可随时退出绑定流程。"
+	default:
+		return "请输入您的网盘凭证："
+	}
+}
+
 // bindStart 开始一次绑定:建会话,发第一步提示。
 func (a *App) bindStart(ctx context.Context, chatID int64, userID, typeStr string) error {
 	t := drive.Type(typeStr)
@@ -45,25 +67,35 @@ func (a *App) bindStart(ctx context.Context, chatID int64, userID, typeStr strin
 		return fmt.Errorf("启动绑定会话失败: %w", err)
 	}
 
-	var prompt string
-	switch t {
-	case drive.TypeMega:
-		prompt = "📧 <b>请输入您的 Mega 登录邮箱</b>：\n\n发送 /cancel 或输入 取消 可随时退出绑定流程。"
-	case drive.TypeProton:
-		prompt = "👤 <b>请输入 Proton 账号用户名</b>\n\n通常是邮箱，例如 <code>you@proton.me</code>。\n\n发送 /cancel 或输入 取消 可随时退出绑定流程。" +
-			"\n\n🔐 提示:涉及密码的输入在提交后会被立即删除。"
-	case drive.TypeWebDAV:
-		prompt = "🌐 <b>请输入 WebDAV 服务器地址</b>（以 http:// 或 https:// 开头）：\n\n例如：<code>https://dav.example.com/dav/</code>\n\n发送 /cancel 或输入 取消 可随时退出绑定流程。"
-	case drive.TypeOSS:
-		prompt = "📦 <b>请输入 S3 / OSS Endpoint 地址</b>：\n\n例如：<code>https://oss-cn-hangzhou.aliyuncs.com</code> 或 <code>https://<id>.r2.cloudflarestorage.com</code>\n\n发送 /cancel 或输入 取消 可随时退出绑定流程。"
-	case drive.TypePikPak:
-		prompt = "⚡ <b>请输入 PikPak 账号/邮箱</b>：\n\n发送 /cancel 或输入 取消 可随时退出绑定流程。"
-	case drive.TypeFilen:
-		prompt = "🔐 <b>请输入 Filen 账号邮箱</b>：\n\n发送 /cancel 或输入 取消 可随时退出绑定流程。"
-	case drive.TypePCloud:
-		prompt = "☁️ <b>请输入 pCloud 账号邮箱</b>：\n\n发送 /cancel 或输入 取消 可随时退出绑定流程。"
+	return a.tg.SendMessage(ctx, chatID, bindStepPrompt(t))
+}
+
+// reauthStart 针对已绑定的网盘开启更新凭证向导：保留原有目录和配置，重新录入并更新登录凭证。
+func (a *App) reauthStart(ctx context.Context, chatID int64, userID string, d *drive.Drive) error {
+	t := drive.Type(d.Type)
+	if !drive.IsSupported(t) {
+		return a.sendSafe(ctx, chatID, "⚠️ 暂不支持该网盘类型。当前可用:Mega、Proton Drive、WebDAV、S3/OSS、PikPak、Filen、Google Drive、OneDrive、Dropbox。")
 	}
-	return a.tg.SendMessage(ctx, chatID, prompt)
+	step := drive.FirstStep(t)
+	if step == "" {
+		return a.sendSafe(ctx, chatID, "⚠️ 暂不支持该网盘类型。")
+	}
+	initData := map[string]string{
+		"is_reauth":       "true",
+		"reauth_drive_id": d.ID,
+		"drive_name":      d.Name,
+		"drive_type":      d.Type,
+	}
+	if err := a.bindSessions.Start(ctx, userID, strings.ToUpper(d.Type)+":"+step, initData); err != nil {
+		return fmt.Errorf("启动更新凭证会话失败: %w", err)
+	}
+
+	account := driveDisplayAccount(d)
+	header := fmt.Sprintf("🔄 <b>重新更新网盘凭证 - %s</b>\n\n网盘: <b>%s</b>\n当前账号: <code>%s</code>\n\n⚠️ 登录凭证可能已失效或过期。请按照下方引导重新输入新凭证（更新成功后将自动恢复可用，并保留保存目录等配置）：\n\n",
+		strings.ToUpper(d.Type), escapeHTMLText(d.Name), escapeHTMLText(account))
+
+	prompt := bindStepPrompt(t)
+	return a.tg.SendMessage(ctx, chatID, header+prompt)
 }
 
 // handleBindInput 处理绑定会话中的文本输入。返回 true 表示消息被
@@ -94,8 +126,13 @@ func (a *App) handleBindInput(ctx context.Context, msg messageInfo, text string)
 		if isSensitiveStep(step) {
 			_ = a.tg.DeleteMessages(ctx, msg.ChatID, []int64{int64(msg.ID)})
 		}
+		isReauth := sess.Data["is_reauth"] == "true"
 		_ = a.bindSessions.Clear(ctx, userID)
-		_ = a.tg.SendMessage(ctx, msg.ChatID, "✅ 已取消并退出网盘绑定流程。随时发送 /drive 可重新发起绑定。")
+		if isReauth {
+			_ = a.tg.SendMessage(ctx, msg.ChatID, "✅ 已取消网盘凭证更新。随时发送 /drive 或 /reauth 可重新发起。")
+		} else {
+			_ = a.tg.SendMessage(ctx, msg.ChatID, "✅ 已取消并退出网盘绑定流程。随时发送 /drive 可重新发起绑定。")
+		}
 		return true
 	}
 
@@ -154,16 +191,34 @@ func (a *App) handleBindInput(ctx context.Context, msg messageInfo, text string)
 		return true
 	}
 
+	targetDriveID := sess.Data["reauth_drive_id"]
+	isReauth := sess.Data["is_reauth"] == "true"
+	driveName := sess.Data["drive_name"]
+
 	// 成功:落库,清会话。
-	if err := a.createBoundDrive(ctx, userID, driveType, res); err != nil {
+	if err := a.createBoundDrive(ctx, userID, driveType, res, targetDriveID); err != nil {
 		_ = a.bindSessions.Clear(ctx, userID)
 		a.log.Error("绑定落库失败", "userId", userID, "err", err)
 		a.sendSafe(ctx, msg.ChatID, "❌ <b>绑定失败</b>\n\n保存配置时出错,请稍后重试。")
 		return true
 	}
 	_ = a.bindSessions.Clear(ctx, userID)
-	_ = a.tg.SendWithButtons(ctx, msg.ChatID, res.Message, [][]tgclient.Button{
-		{{Text: "📁 浏览文件", Data: "files_page_0"}},
+
+	if targetDriveID != "" {
+		a.storageInvalidate(userID, targetDriveID)
+	}
+
+	successMsg := res.Message
+	if isReauth {
+		driveDisplayName := strings.ToUpper(string(driveType))
+		if driveName != "" {
+			driveDisplayName = driveName
+		}
+		successMsg = fmt.Sprintf("✅ <b>网盘凭证更新成功！</b>\n\n网盘: <b>%s</b>\n登录凭证已成功刷新并验证生效，原有保存目录等配置保持不变。\n现在可以继续正常转存文件。", escapeHTMLText(driveDisplayName))
+	}
+
+	_ = a.tg.SendWithButtons(ctx, msg.ChatID, successMsg, [][]tgclient.Button{
+		{{Text: "📁 浏览文件", Data: "files_page_0"}, {Text: "🛠️ 网盘管理", Data: "drive_manager_back"}},
 	})
 	return true
 }
@@ -172,10 +227,22 @@ func (a *App) handleBindInput(ctx context.Context, msg messageInfo, text string)
 //
 // 与 JS DriveRepository.create 对齐:同类型已有 active 盘时复用那行
 // (更新凭据),否则新插入;首个盘自动设为默认。
-func (a *App) createBoundDrive(ctx context.Context, userID string, t drive.Type, res drive.BindResult) error {
+func (a *App) createBoundDrive(ctx context.Context, userID string, t drive.Type, res drive.BindResult, targetDriveID ...string) error {
 	existing, err := a.drivesList(ctx, userID)
 	if err != nil {
 		return err
+	}
+	preferredID := ""
+	if len(targetDriveID) > 0 {
+		preferredID = targetDriveID[0]
+	}
+	if preferredID != "" {
+		for i := range existing {
+			d := &existing[i]
+			if d.ID == preferredID {
+				return a.drives.UpdateConfigData(ctx, d.ID, d.UserID, *res.Config)
+			}
+		}
 	}
 	for i := range existing {
 		d := &existing[i]

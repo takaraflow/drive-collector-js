@@ -135,7 +135,7 @@ func IsProtonRefreshTokenDead(errorText string) bool {
 func UserErrorMessage(code ErrorCode) string {
 	switch code {
 	case CodeDriveAuthInvalid:
-		return "当前绑定的网盘无法登录。请重新绑定网盘后再重试。"
+		return "当前绑定的网盘登录已失效或凭证已过期。请重新更新网盘凭证后再重试。"
 	case CodeDriveConfigInvalid:
 		return "当前网盘绑定配置不完整。请重新绑定网盘后再重试。"
 	case CodeDriveRemoteNotFound:

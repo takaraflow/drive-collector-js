@@ -733,6 +733,8 @@ func (a *App) routeCommand(ctx context.Context, msg messageInfo) error {
 		return a.handleCancelCommand(ctx, msg)
 	case "/drive":
 		return a.handleDriveCommand(ctx, msg)
+	case "/reauth", "/rebind":
+		return a.handleReauthCommand(ctx, msg)
 	case "/unbind", "/logout":
 		return a.handleUnbindCommand(ctx, msg)
 	case "/set_remote_folder", "/remote_folder":
@@ -843,7 +845,9 @@ func renderDriveManagerView(drives []drive.Drive) (string, [][]tgclient.Button) 
 		})
 		for i := range drives {
 			d := &drives[i]
-			row := []tgclient.Button{}
+			row := []tgclient.Button{
+				{Text: fmt.Sprintf("%d 🔑 更新凭证", i+1), Data: "drive_reauth_" + d.ID},
+			}
 			if d.IsDefault != 1 {
 				row = append(row, tgclient.Button{
 					Text: fmt.Sprintf("%d 设为默认", i+1), Data: "drive_set_default_" + d.ID})
@@ -1010,6 +1014,15 @@ func (a *App) handleCallback(ctx context.Context, u tgclient.Update) error {
 	}
 
 	switch {
+	case data == "drive_reauth":
+		answer("准备更新网盘凭证...", false)
+		return a.handleReauthEntry(ctx, cb)
+
+	case strings.HasPrefix(data, "drive_reauth_"):
+		driveID := strings.TrimPrefix(data, "drive_reauth_")
+		answer("准备更新网盘凭证...", false)
+		return a.handleReauthDrive(ctx, cb, driveID)
+
 	case data == "drive_bind_menu":
 		answer("请选择网盘", false)
 		return a.editDriveBindMenu(ctx, cb)
@@ -1140,6 +1153,115 @@ func (a *App) editDriveBindMenu(ctx context.Context, cb tgclient.CallbackContext
 		{Text: "🔙 返回网盘管理", Data: "drive_manager_back"},
 	})
 	return a.tg.EditWithButtons(ctx, cb.ChatID, cb.MsgID, text, buttons)
+}
+
+// handleReauthCommand /reauth —— 重新更新网盘凭证指令。
+func (a *App) handleReauthCommand(ctx context.Context, msg messageInfo) error {
+	userID := fmt.Sprintf("%d", msg.SenderID)
+	if !a.bindDriveReady() {
+		return a.tg.SendMessage(ctx, msg.ChatID,
+			"⚠️ 网盘绑定在当前服务上暂不可用，请稍后再试或联系管理员。")
+	}
+
+	drives, err := a.drivesList(ctx, userID)
+	if err != nil || len(drives) == 0 {
+		return a.tg.SendWithButtons(ctx, msg.ChatID,
+			"目前尚未绑定任何网盘。请选择下方服务开始绑定：", driveBindButtons())
+	}
+	if len(drives) == 1 {
+		return a.reauthStart(ctx, msg.ChatID, userID, &drives[0])
+	}
+	text := "🔑 <b>更新网盘凭证</b>\n\n检测到您绑定了多个网盘，请选择需要重新更新凭证的网盘："
+	var buttons [][]tgclient.Button
+	for i := range drives {
+		d := &drives[i]
+		tIcon := driveTypeIcon(d.Type)
+		acc := driveDisplayAccount(d)
+		label := fmt.Sprintf("%s %d. %s", tIcon, i+1, strings.ToUpper(d.Type))
+		if acc != "" {
+			label += fmt.Sprintf(" (%s)", acc)
+		}
+		if d.IsDefault == 1 {
+			label += " ★"
+		}
+		buttons = append(buttons, []tgclient.Button{
+			{Text: label, Data: "drive_reauth_" + d.ID},
+		})
+	}
+	buttons = append(buttons, []tgclient.Button{
+		{Text: "🔙 返回网盘管理", Data: "drive_manager_back"},
+	})
+	return a.tg.SendWithButtons(ctx, msg.ChatID, text, buttons)
+}
+
+// handleReauthEntry 处理未指定盘 ID 的凭证更新入口（如转存失败消息中的「🔑 重新更新凭证」按钮）。
+func (a *App) handleReauthEntry(ctx context.Context, cb tgclient.CallbackContext) error {
+	userID := fmt.Sprintf("%d", cb.UserID)
+	if !a.bindDriveReady() {
+		return a.tg.SendMessage(ctx, cb.ChatID,
+			"⚠️ 网盘服务暂不可用，请稍后再试。")
+	}
+	drives, err := a.drivesList(ctx, userID)
+	if err != nil || len(drives) == 0 {
+		return a.tg.SendWithButtons(ctx, cb.ChatID,
+			"未找到已绑定的网盘。请选择下方服务开始绑定：", driveBindButtons())
+	}
+	if len(drives) == 1 {
+		return a.reauthStart(ctx, cb.ChatID, userID, &drives[0])
+	}
+	return a.editDriveReauthMenu(ctx, cb, drives)
+}
+
+// handleReauthDrive 处理指定盘 ID 的凭证更新回调。
+func (a *App) handleReauthDrive(ctx context.Context, cb tgclient.CallbackContext, driveID string) error {
+	userID := fmt.Sprintf("%d", cb.UserID)
+	if !a.bindDriveReady() {
+		return a.tg.SendMessage(ctx, cb.ChatID,
+			"⚠️ 网盘服务暂不可用，请稍后再试。")
+	}
+	drives, err := a.drivesList(ctx, userID)
+	if err != nil {
+		return a.tg.SendMessage(ctx, cb.ChatID, "获取网盘信息失败，请稍后重试。")
+	}
+	var target *drive.Drive
+	for i := range drives {
+		if drives[i].ID == driveID {
+			target = &drives[i]
+			break
+		}
+	}
+	if target == nil {
+		return a.tg.SendMessage(ctx, cb.ChatID, "⚠️ 未找到对应网盘，可能已被解绑。")
+	}
+	return a.reauthStart(ctx, cb.ChatID, userID, target)
+}
+
+// editDriveReauthMenu 展示选择要更新凭证的网盘面板。
+func (a *App) editDriveReauthMenu(ctx context.Context, cb tgclient.CallbackContext, drives []drive.Drive) error {
+	text := "🔑 <b>更新网盘凭证</b>\n\n检测到您绑定了多个网盘，请选择需要重新更新凭证的网盘："
+	var buttons [][]tgclient.Button
+	for i := range drives {
+		d := &drives[i]
+		tIcon := driveTypeIcon(d.Type)
+		acc := driveDisplayAccount(d)
+		label := fmt.Sprintf("%s %d. %s", tIcon, i+1, strings.ToUpper(d.Type))
+		if acc != "" {
+			label += fmt.Sprintf(" (%s)", acc)
+		}
+		if d.IsDefault == 1 {
+			label += " ★"
+		}
+		buttons = append(buttons, []tgclient.Button{
+			{Text: label, Data: "drive_reauth_" + d.ID},
+		})
+	}
+	buttons = append(buttons, []tgclient.Button{
+		{Text: "🔙 返回网盘管理", Data: "drive_manager_back"},
+	})
+	if err := a.tg.EditWithButtons(ctx, cb.ChatID, cb.MsgID, text, buttons); err != nil {
+		return a.tg.SendWithButtons(ctx, cb.ChatID, text, buttons)
+	}
+	return nil
 }
 
 // noDriveHint 与 JS 侧 STRINGS.drive.no_drive_found 逐字一致。

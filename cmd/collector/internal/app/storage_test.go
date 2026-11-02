@@ -174,12 +174,27 @@ func TestGetDriveStorageFailure(t *testing.T) {
 		t.Fatalf("expected error detail in errStr, got: %s", errStr)
 	}
 
-	text, _ := renderStorageView(&d, nil, false, errStr, []drive.Drive{d}, time.Time{})
+	text, buttons := renderStorageView(&d, nil, false, errStr, []drive.Drive{d}, time.Time{})
 	if !strings.Contains(text, "空间信息查询失败") {
 		t.Errorf("expected failure header in text: %s", text)
 	}
 	if !strings.Contains(text, "invalid login credentials") {
 		t.Errorf("expected failure detail in text: %s", text)
+	}
+	if !strings.Contains(text, "网盘登录凭证已失效或过期") {
+		t.Errorf("expected auth invalid warning in text: %s", text)
+	}
+	foundReauth := false
+	for _, row := range buttons {
+		for _, b := range row {
+			if b.Data == "drive_reauth_"+d.ID {
+				foundReauth = true
+				break
+			}
+		}
+	}
+	if !foundReauth {
+		t.Errorf("expected reauth button for drive %s", d.ID)
 	}
 }
 

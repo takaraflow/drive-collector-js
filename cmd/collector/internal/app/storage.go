@@ -149,6 +149,19 @@ func (a *App) storageRefreshGated(userID int64, msgID int) (waitSec int, gated b
 	return 0, false
 }
 
+// storageInvalidate 清除指定网盘在内存与 Redis 中的空间容量缓存（如凭证更新后强制刷新）。
+func (a *App) storageInvalidate(userID, driveID string) {
+	key := fmt.Sprintf("storage_%s_%s", userID, driveID)
+	a.storageMu.Lock()
+	delete(a.storageMem, key)
+	a.storageMu.Unlock()
+	if a.cfg.Redis != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = a.cfg.Redis.Del(ctx, key).Err()
+	}
+}
+
 // handleStorageCommand /storage [drive_num] —— 发占位消息并后台拉取容量信息。
 func (a *App) handleStorageCommand(ctx context.Context, msg messageInfo) error {
 	userID := fmt.Sprintf("%d", msg.SenderID)
@@ -378,11 +391,16 @@ func renderStorageView(d *drive.Drive, info *rclone.AboutInfo, unsupported bool,
 	sb.WriteString(fmt.Sprintf("📂 <b>保存目录:</b> <code>%s</code>\n", escapeHTMLText(folder)))
 	sb.WriteString("──────────────────\n")
 
+	cls := rclone.ClassifyError(errStr)
 	if unsupported {
 		sb.WriteString("⚠️ <b>该存储类型不支持查询剩余空间配额</b>\n")
 		sb.WriteString("<i>后端协议（如 S3/OSS 或部分 WebDAV 端点）未提供容量上限与用量查询接口，不影响日常文件正常转存。</i>\n")
 	} else if errStr != "" {
 		sb.WriteString("❌ <b>空间信息查询失败</b>\n")
+		if cls.Code == rclone.CodeDriveAuthInvalid {
+			sb.WriteString("⚠️ <b>网盘登录凭证已失效或过期</b>\n")
+			sb.WriteString("<i>当前网盘身份验证失败，请重新更新凭证以恢复正常转存。</i>\n")
+		}
 		sb.WriteString(fmt.Sprintf("<code>%s</code>\n", escapeHTMLText(errStr)))
 	} else if info != nil {
 		if info.Total != nil && *info.Total > 0 {
@@ -444,12 +462,19 @@ func renderStorageView(d *drive.Drive, info *rclone.AboutInfo, unsupported bool,
 
 	buttons := [][]tgclient.Button{}
 
-	// 操作行 1：刷新
+	// 操作行 1：刷新与凭证更新
 	refreshBtn := tgclient.Button{
 		Text: "🔄 刷新容量",
 		Data: "storage_refresh_" + d.ID,
 	}
-	buttons = append(buttons, []tgclient.Button{refreshBtn})
+	row1 := []tgclient.Button{refreshBtn}
+	if errStr != "" && cls.Code == rclone.CodeDriveAuthInvalid {
+		row1 = append(row1, tgclient.Button{
+			Text: "🔑 立即更新凭证",
+			Data: "drive_reauth_" + d.ID,
+		})
+	}
+	buttons = append(buttons, row1)
 
 	// 操作行 2：如果有多盘，允许快捷切换查看其它盘（每行 2 个，排版更美观、防截断）
 	if len(allDrives) > 1 {

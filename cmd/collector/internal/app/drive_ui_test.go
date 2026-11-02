@@ -12,6 +12,7 @@ import (
 
 	"github.com/youngsx/drive-collector/cmd/collector/internal/d1"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/drive"
+	"github.com/youngsx/drive-collector/cmd/collector/internal/store"
 	tgclient "github.com/youngsx/drive-collector/cmd/collector/internal/telegram"
 )
 
@@ -258,3 +259,286 @@ func TestDriveBindProviderCallback(t *testing.T) {
 		t.Errorf("未向用户发送 WebDAV 提示信息: sent=%v", tg.sent)
 	}
 }
+
+// TestDriveManagerView_ReauthButtons 验证网盘管理中心每个已绑定网盘均包含「🔑 更新凭证」按钮。
+func TestDriveManagerView_ReauthButtons(t *testing.T) {
+	drives := []drive.Drive{
+		{
+			ID:        "drv-1",
+			UserID:    "42",
+			Type:      "mega",
+			Name:      "mega-alice@example.com",
+			IsDefault: 1,
+		},
+		{
+			ID:        "drv-2",
+			UserID:    "42",
+			Type:      "webdav",
+			Name:      "webdav-bob",
+			IsDefault: 0,
+		},
+	}
+
+	_, buttons := renderDriveManagerView(drives)
+	if !hasButton(buttons, "drive_reauth_drv-1") {
+		t.Errorf("网盘管理面板缺失 drv-1 重新更新凭证按钮")
+	}
+	if !hasButton(buttons, "drive_reauth_drv-2") {
+		t.Errorf("网盘管理面板缺失 drv-2 重新更新凭证按钮")
+	}
+
+	// 验证按钮文案
+	foundText1, foundText2 := false, false
+	for _, row := range buttons {
+		for _, b := range row {
+			if b.Data == "drive_reauth_drv-1" && strings.Contains(b.Text, "更新凭证") {
+				foundText1 = true
+			}
+			if b.Data == "drive_reauth_drv-2" && strings.Contains(b.Text, "更新凭证") {
+				foundText2 = true
+			}
+		}
+	}
+	if !foundText1 || !foundText2 {
+		t.Errorf("凭证更新按钮文案不正确: found1=%v, found2=%v", foundText1, foundText2)
+	}
+}
+
+// TestReauthCallback_SingleDrive 验证单盘场景下点击更新凭证直达向导并保留原有目录。
+func TestReauthCallback_SingleDrive(t *testing.T) {
+	app := &App{
+		bindSessions: newFakeMemorySession(),
+		d1c: mockD1WithRows([]map[string]any{
+			{
+				"id":            "drv-1",
+				"user_id":       "42",
+				"type":          "mega",
+				"name":          "mega-alice@example.com",
+				"status":        "active",
+				"is_default":    float64(1),
+				"remote_folder": "Photos",
+				"config_data":   "{}",
+			},
+		}),
+		log: quietApp(),
+	}
+	tg := withFakeTG(app)
+
+	// 点击通用的 drive_reauth 入口
+	if err := app.handleCallback(context.Background(), callbackUpdate(42, "drive_reauth")); err != nil {
+		t.Fatalf("handleCallback(drive_reauth) 报错: %v", err)
+	}
+
+	sess, err := app.bindSessions.Get(context.Background(), "42")
+	if err != nil || sess == nil {
+		t.Fatalf("未成功启动会话: %v", err)
+	}
+	if sess.Data["is_reauth"] != "true" {
+		t.Errorf("期望 is_reauth 为 true, 实际: %s", sess.Data["is_reauth"])
+	}
+	if sess.Data["reauth_drive_id"] != "drv-1" {
+		t.Errorf("期望 reauth_drive_id 为 drv-1, 实际: %s", sess.Data["reauth_drive_id"])
+	}
+
+	if len(tg.sent) != 1 {
+		t.Fatalf("期望发送 1 条提示消息, 实际: %d", len(tg.sent))
+	}
+	prompt := tg.sent[0]
+	if !strings.Contains(prompt, "重新更新网盘凭证") || !strings.Contains(prompt, "保留保存目录等配置") {
+		t.Errorf("引导文案未包含重设凭证及保留目录提示: %s", prompt)
+	}
+}
+
+// TestReauthCallback_MultiDriveMenu 验证多网盘时点击 drive_reauth 弹出网盘选择面板。
+func TestReauthCallback_MultiDriveMenu(t *testing.T) {
+	app := &App{
+		bindSessions: newFakeMemorySession(),
+		d1c: mockD1WithRows([]map[string]any{
+			{
+				"id":         "drv-1",
+				"user_id":    "42",
+				"type":       "mega",
+				"name":       "mega-alice@example.com",
+				"status":     "active",
+				"is_default": float64(1),
+			},
+			{
+				"id":         "drv-2",
+				"user_id":    "42",
+				"type":       "webdav",
+				"name":       "webdav-bob",
+				"status":     "active",
+				"is_default": float64(0),
+			},
+		}),
+		log: quietApp(),
+	}
+	tg := withFakeTG(app)
+
+	// 点击通用的 drive_reauth 入口
+	if err := app.handleCallback(context.Background(), callbackUpdate(42, "drive_reauth")); err != nil {
+		t.Fatalf("handleCallback(drive_reauth) 报错: %v", err)
+	}
+
+	if len(tg.edits) == 0 && len(tg.sent) == 0 {
+		t.Fatalf("期望呈现选择面板，但未发送或编辑消息")
+	}
+
+	var menuBtns [][]tgclient.Button
+	if len(tg.editBtns) > 0 {
+		menuBtns = tg.editBtns[0]
+	} else if len(tg.sendBtns) > 0 {
+		menuBtns = tg.sendBtns[0]
+	}
+
+	if !hasButton(menuBtns, "drive_reauth_drv-1") || !hasButton(menuBtns, "drive_reauth_drv-2") {
+		t.Errorf("多盘选择菜单缺失对应网盘选项: %v", menuBtns)
+	}
+}
+
+// TestReauthCommand 验证 /reauth 指令能够顺利路由并触发凭证更新。
+func TestReauthCommand(t *testing.T) {
+	app := &App{
+		bindSessions: newFakeMemorySession(),
+		d1c: mockD1WithRows([]map[string]any{
+			{
+				"id":         "drv-1",
+				"user_id":    "42",
+				"type":       "protondrive",
+				"name":       "proton-user@proton.me",
+				"status":     "active",
+				"is_default": float64(1),
+			},
+		}),
+		log: quietApp(),
+	}
+	tg := withFakeTG(app)
+
+	msg := messageInfo{
+		ChatID:   1001,
+		SenderID: 42,
+		Text:     "/reauth",
+	}
+
+	if err := app.routeCommand(context.Background(), msg); err != nil {
+		t.Fatalf("/reauth 执行报错: %v", err)
+	}
+
+	sess, err := app.bindSessions.Get(context.Background(), "42")
+	if err != nil || sess == nil {
+		t.Fatalf("未成功启动会话: %v", err)
+	}
+	if sess.Data["is_reauth"] != "true" || sess.Data["reauth_drive_id"] != "drv-1" {
+		t.Errorf("会话参数不符合预期: %+v", sess)
+	}
+	if len(tg.sent) != 1 || !strings.Contains(tg.sent[0], "PROTONDRIVE") {
+		t.Errorf("未正确向用户展示 Proton 更新凭证提示: %v", tg.sent)
+	}
+}
+
+// TestReauthCancel 验证在重新更新凭证流程中发送 /cancel 能友好退出并清理会话。
+func TestReauthCancel(t *testing.T) {
+	memSession := newFakeMemorySession()
+	_ = memSession.Start(context.Background(), "42", "MEGA:WAIT_USER", map[string]string{
+		"is_reauth":       "true",
+		"reauth_drive_id": "drv-1",
+	})
+
+	app := &App{
+		bindSessions: memSession,
+		d1c:          mockD1WithRows(nil),
+		log:          quietApp(),
+	}
+	tg := withFakeTG(app)
+
+	msg := messageInfo{
+		ChatID:   1001,
+		SenderID: 42,
+		Text:     "/cancel",
+	}
+
+	consumed := app.handleBindInput(context.Background(), msg, msg.Text)
+	if !consumed {
+		t.Fatalf("handleBindInput 应该消费 /cancel 指令")
+	}
+
+	sess, _ := app.bindSessions.Get(context.Background(), "42")
+	if sess != nil {
+		t.Errorf("取消后会话应被清理，实际仍存在: %+v", sess)
+	}
+
+	if len(tg.sent) != 1 || !strings.Contains(tg.sent[0], "已取消网盘凭证更新") {
+		t.Errorf("未收到凭证更新取消提示: %v", tg.sent)
+	}
+}
+
+// TestReauthFlow_CreateBoundDriveUpdatesExisting 验证重新更新凭证时，更新指定目标网盘的 config_data 而不是新建记录。
+func TestReauthFlow_CreateBoundDriveUpdatesExisting(t *testing.T) {
+	updatedTarget := false
+	hc := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			bodyBytes, _ := io.ReadAll(req.Body)
+			bodyStr := string(bodyBytes)
+			if strings.Contains(bodyStr, "UPDATE drives SET config_data") && strings.Contains(bodyStr, "drv-target") {
+				updatedTarget = true
+			}
+			resp := map[string]any{
+				"result": []map[string]any{
+					{
+						"results": []map[string]any{
+							{
+								"id":            "drv-target",
+								"user_id":       "42",
+								"type":          "mega",
+								"name":          "mega-old@example.com",
+								"status":        "active",
+								"is_default":    float64(1),
+								"remote_folder": "MyFolder",
+								"config_data":   `{"pass":"old_pass"}`,
+							},
+						},
+						"success": true,
+					},
+				},
+				"success": true,
+				"errors":  []any{},
+			}
+			respBody, _ := json.Marshal(resp)
+			return &http.Response{
+				StatusCode: 200,
+				Body:       io.NopCloser(bytes.NewReader(respBody)),
+				Header:     make(http.Header),
+			}, nil
+		}),
+	}
+	d1c, _ := d1.New(d1.Config{
+		AccountID:  "ui-acc",
+		DatabaseID: "ui-db",
+		Token:      "ui-tok",
+		HTTPClient: hc,
+	})
+
+	app := &App{
+		d1c:    d1c,
+		drives: store.NewDriveRepository(d1c),
+		log:    quietApp(),
+	}
+
+	newCfg := drive.DriveConfig{Pass: "new_secret_pass"}
+	res := drive.BindResult{
+		Success:   true,
+		DriveName: "mega-new@example.com",
+		Config:    &newCfg,
+	}
+
+	err := app.createBoundDrive(context.Background(), "42", drive.TypeMega, res, "drv-target")
+	if err != nil {
+		t.Fatalf("createBoundDrive 报错: %v", err)
+	}
+
+	if !updatedTarget {
+		t.Errorf("期望更新 drv-target 的配置")
+	}
+}
+
+
