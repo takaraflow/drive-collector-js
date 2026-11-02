@@ -784,18 +784,29 @@ func (a *App) routeCommand(ctx context.Context, msg messageInfo) error {
 	return nil
 }
 
-// handleDriveCommand /drive —— 发绑定面板(带类型选择按钮)。
-func (a *App) handleDriveCommand(ctx context.Context, msg messageInfo) error {
-	userID := fmt.Sprintf("%d", msg.SenderID)
-	if !a.bindDriveReady() {
-		return a.tg.SendMessage(ctx, msg.ChatID,
-			"⚠️ 网盘绑定在新服务上暂不可用,请稍后再试或联系管理员。")
+// driveBindButtons 返回支持绑定的网盘服务按钮列表。
+func driveBindButtons() [][]tgclient.Button {
+	return [][]tgclient.Button{
+		{
+			{Text: "🟢 Mega", Data: "drive_bind_mega"},
+			{Text: "🛡️ Proton Drive", Data: "drive_bind_protondrive"},
+		},
+		{
+			{Text: "🌐 WebDAV", Data: "drive_bind_webdav"},
+			{Text: "📦 S3 / OSS", Data: "drive_bind_oss"},
+		},
+		{
+			{Text: "⚡ PikPak", Data: "drive_bind_pikpak"},
+			{Text: "🔒 Filen", Data: "drive_bind_filen"},
+		},
+		{
+			{Text: "☁️ pCloud", Data: "drive_bind_pcloud"},
+		},
 	}
+}
 
-	drives, err := a.drivesList(ctx, userID)
-	if err != nil {
-		a.log.Error("查询网盘失败", "err", err)
-	}
+// renderDriveManagerView 渲染网盘管理面板文案与操作按钮。
+func renderDriveManagerView(drives []drive.Drive) (string, [][]tgclient.Button) {
 	text := "🛠️ <b>网盘管理中心</b>\n\n"
 	if len(drives) > 0 {
 		text += "已绑定的网盘:\n"
@@ -821,23 +832,7 @@ func (a *App) handleDriveCommand(ctx context.Context, msg messageInfo) error {
 		text += "目前尚未绑定任何网盘。请选择下方服务开始绑定："
 	}
 
-	buttons := [][]tgclient.Button{
-		{
-			{Text: "🟢 Mega", Data: "drive_bind_mega"},
-			{Text: "🛡️ Proton Drive", Data: "drive_bind_protondrive"},
-		},
-		{
-			{Text: "🌐 WebDAV", Data: "drive_bind_webdav"},
-			{Text: "📦 S3 / OSS", Data: "drive_bind_oss"},
-		},
-		{
-			{Text: "⚡ PikPak", Data: "drive_bind_pikpak"},
-			{Text: "🔒 Filen", Data: "drive_bind_filen"},
-		},
-		{
-			{Text: "☁️ pCloud", Data: "drive_bind_pcloud"},
-		},
-	}
+	var buttons [][]tgclient.Button
 	if len(drives) > 0 {
 		buttons = append(buttons, []tgclient.Button{
 			{Text: "📊 查询剩余容量", Data: "storage_check"},
@@ -846,18 +841,36 @@ func (a *App) handleDriveCommand(ctx context.Context, msg messageInfo) error {
 		buttons = append(buttons, []tgclient.Button{
 			{Text: "🔍 查找重复文件", Data: "dupscan_open"},
 		})
-	}
-	for i := range drives {
-		d := &drives[i]
-		row := []tgclient.Button{}
-		if d.IsDefault != 1 {
-			row = append(row, tgclient.Button{
-				Text: fmt.Sprintf("%d 设为默认", i+1), Data: "drive_set_default_" + d.ID})
+		for i := range drives {
+			d := &drives[i]
+			row := []tgclient.Button{}
+			if d.IsDefault != 1 {
+				row = append(row, tgclient.Button{
+					Text: fmt.Sprintf("%d 设为默认", i+1), Data: "drive_set_default_" + d.ID})
+			}
+			row = append(row, tgclient.Button{Text: fmt.Sprintf("%d ❌ 解绑", i+1), Data: "drive_unbind_confirm_" + d.ID})
+			buttons = append(buttons, row)
 		}
-		row = append(row, tgclient.Button{Text: fmt.Sprintf("%d ❌ 解绑", i+1), Data: "drive_unbind_confirm_" + d.ID})
-		buttons = append(buttons, row)
+		buttons = append(buttons, []tgclient.Button{{Text: "➕ 绑定其他网盘", Data: "drive_bind_menu"}})
+	} else {
+		buttons = driveBindButtons()
 	}
-	buttons = append(buttons, []tgclient.Button{{Text: "❌ 返回", Data: "noop"}})
+	return text, buttons
+}
+
+// handleDriveCommand /drive —— 发绑定面板(带类型选择按钮)。
+func (a *App) handleDriveCommand(ctx context.Context, msg messageInfo) error {
+	userID := fmt.Sprintf("%d", msg.SenderID)
+	if !a.bindDriveReady() {
+		return a.tg.SendMessage(ctx, msg.ChatID,
+			"⚠️ 网盘绑定在新服务上暂不可用,请稍后再试或联系管理员。")
+	}
+
+	drives, err := a.drivesList(ctx, userID)
+	if err != nil {
+		a.log.Error("查询网盘失败", "err", err)
+	}
+	text, buttons := renderDriveManagerView(drives)
 	return a.tg.SendWithButtons(ctx, msg.ChatID, text, buttons)
 }
 
@@ -997,6 +1010,10 @@ func (a *App) handleCallback(ctx context.Context, u tgclient.Update) error {
 	}
 
 	switch {
+	case data == "drive_bind_menu":
+		answer("请选择网盘", false)
+		return a.editDriveBindMenu(ctx, cb)
+
 	case strings.HasPrefix(data, "drive_bind_"):
 		answer("开始绑定", false)
 		return a.bindStart(ctx, cb.ChatID, userID, strings.TrimPrefix(data, "drive_bind_"))
@@ -1112,50 +1129,16 @@ func (a *App) editDriveManager(ctx context.Context, cb tgclient.CallbackContext)
 	if err != nil {
 		return a.tg.EditMessage(ctx, cb.ChatID, cb.MsgID, "加载网盘列表失败,请重试。")
 	}
-	text := "🛠️ <b>网盘管理中心</b>\n\n"
-	if len(drives) > 0 {
-		text += "已绑定的网盘:\n"
-		for i := range drives {
-			d := &drives[i]
-			icon := "📁"
-			if d.IsDefault == 1 {
-				icon = "⭐"
-			}
-			folder := "根目录 (/)"
-			if d.RemoteFolder.Valid && strings.TrimSpace(d.RemoteFolder.String) != "" {
-				folder = "/" + strings.Trim(d.RemoteFolder.String, "/")
-			}
-			text += fmt.Sprintf("\n%d. %s <b>%s</b> - %s\n   📂 保存目录: <code>%s</code>", i+1, icon,
-				strings.ToUpper(d.Type), escapeHTMLText(driveDisplayAccount(d)), escapeHTMLText(folder))
-			if d.IsDefault == 1 {
-				text += " <i>(默认)</i>"
-			}
-		}
-		text += "\n"
-	} else {
-		text += "目前尚未绑定任何网盘。请选择下方服务开始绑定："
-	}
+	text, buttons := renderDriveManagerView(drives)
+	return a.tg.EditWithButtons(ctx, cb.ChatID, cb.MsgID, text, buttons)
+}
 
-	buttons := [][]tgclient.Button{}
-	if len(drives) > 0 {
-		buttons = append(buttons, []tgclient.Button{
-			{Text: "📊 查询剩余容量", Data: "storage_check"},
-			{Text: "📂 设置保存目录", Data: "remote_folder_menu"},
-		})
-		buttons = append(buttons, []tgclient.Button{
-			{Text: "🔍 查找重复文件", Data: "dupscan_open"},
-		})
-	}
-	for i := range drives {
-		d := &drives[i]
-		row := []tgclient.Button{}
-		if d.IsDefault != 1 {
-			row = append(row, tgclient.Button{Text: fmt.Sprintf("%d 设为默认", i+1), Data: "drive_set_default_" + d.ID})
-		}
-		row = append(row, tgclient.Button{Text: fmt.Sprintf("%d ❌ 解绑", i+1), Data: "drive_unbind_confirm_" + d.ID})
-		buttons = append(buttons, row)
-	}
-	buttons = append(buttons, []tgclient.Button{{Text: "➕ 绑定其他网盘", Data: "noop"}})
+// editDriveBindMenu 展示绑定网盘服务选择面板。
+func (a *App) editDriveBindMenu(ctx context.Context, cb tgclient.CallbackContext) error {
+	text := "➕ <b>绑定网盘</b>\n\n请选择下方服务开始绑定："
+	buttons := append(driveBindButtons(), []tgclient.Button{
+		{Text: "🔙 返回网盘管理", Data: "drive_manager_back"},
+	})
 	return a.tg.EditWithButtons(ctx, cb.ChatID, cb.MsgID, text, buttons)
 }
 

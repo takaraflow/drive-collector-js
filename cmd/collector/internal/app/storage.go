@@ -223,24 +223,7 @@ func (a *App) storageLoadAndEdit(userID string, chatID int64, msgID int, driveID
 		return
 	}
 	if len(drives) == 0 {
-		buttons := [][]tgclient.Button{
-			{
-				{Text: "🟢 Mega", Data: "drive_bind_mega"},
-				{Text: "🛡️ Proton Drive", Data: "drive_bind_protondrive"},
-			},
-			{
-				{Text: "🌐 WebDAV", Data: "drive_bind_webdav"},
-				{Text: "📦 S3 / OSS", Data: "drive_bind_oss"},
-			},
-			{
-				{Text: "⚡ PikPak", Data: "drive_bind_pikpak"},
-				{Text: "🔒 Filen", Data: "drive_bind_filen"},
-			},
-			{
-				{Text: "☁️ pCloud", Data: "drive_bind_pcloud"},
-			},
-		}
-		_ = a.tg.EditWithButtons(ctx, chatID, msgID, noDriveHint, buttons)
+		_ = a.tg.EditWithButtons(ctx, chatID, msgID, noDriveHint, driveBindButtons())
 		return
 	}
 
