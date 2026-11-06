@@ -114,6 +114,11 @@ func (a *App) handleBindInput(ctx context.Context, msg messageInfo, text string)
 		return false
 	}
 
+	// 排除交互确认类会话（如 Gofile 选择面板或 External URL 确认），避免普通文本误清掉用户的交互会话
+	if sess.CurrentStep == "GOFILE_SELECT" || strings.HasPrefix(sess.CurrentStep, "EXTERNAL_URL_") {
+		return false
+	}
+
 	driveType, step, ok := stepType(sess.CurrentStep)
 	if !ok {
 		// 坏会话:清掉,别让用户永远卡在向导里。
