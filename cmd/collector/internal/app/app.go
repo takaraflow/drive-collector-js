@@ -33,6 +33,7 @@ import (
 	"github.com/youngsx/drive-collector/cmd/collector/internal/d1"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/dispatcher"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/drive"
+	"github.com/youngsx/drive-collector/cmd/collector/internal/gofile"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/instance"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/rclone"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/streampipe"
@@ -193,6 +194,10 @@ type App struct {
 	modeMu       sync.Mutex
 	modeCached   string
 	modeCachedAt time.Time
+
+	gofileClient *gofile.Client
+	gofileReqMu  sync.Mutex
+	gofileReqs   map[string]time.Time
 }
 
 // filesMemEntry 是内存缓存的一条。
@@ -247,6 +252,8 @@ func New(cfg Config) (*App, error) {
 		pending:        make(chan string, pendingQueueSize),
 		filesMem:       map[string]filesMemEntry{},
 		filesRefreshAt: map[string]time.Time{},
+		gofileClient:   gofile.NewClient(),
+		gofileReqs:     map[string]time.Time{},
 	}
 
 	// 绑定向导:Redis(会话存储)和 D1(落库)都在才装配。
@@ -690,6 +697,10 @@ func (a *App) onUpdate(ctx context.Context, u tgclient.Update) error {
 			return nil
 		}
 
+		if a.handleGofileMessage(ctx, msg) {
+			return nil
+		}
+
 		if a.handleExternalURLMessage(ctx, msg) {
 			return nil
 		}
@@ -1128,6 +1139,9 @@ func (a *App) handleCallback(ctx context.Context, u tgclient.Update) error {
 
 	case strings.HasPrefix(data, "external_url_cancel_"), strings.HasPrefix(data, "external_url_execute_"):
 		return a.handleExternalURLCallback(ctx, cb, data)
+
+	case strings.HasPrefix(data, "gofile_"):
+		return a.handleGofileCallback(ctx, cb, data)
 	}
 
 	a.log.Debug("收到未处理的按钮点击", "data", data)

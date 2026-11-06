@@ -15,11 +15,12 @@ import (
 )
 
 type externalSourceRef struct {
-	URL      string `json:"url"`
-	WebURL   string `json:"web_url,omitempty"`
-	UseYtDlp bool   `json:"use_yt_dlp,omitempty"`
-	Quality  string `json:"quality,omitempty"`
-	Platform string `json:"platform,omitempty"`
+	URL      string            `json:"url"`
+	WebURL   string            `json:"web_url,omitempty"`
+	UseYtDlp bool              `json:"use_yt_dlp,omitempty"`
+	Quality  string            `json:"quality,omitempty"`
+	Platform string            `json:"platform,omitempty"`
+	Headers  map[string]string `json:"headers,omitempty"`
 }
 
 // handleSocialMediaMessage 检查并处理包含社媒链接的消息（X/Twitter、TikTok、抖音、IG、Threads 等）。
@@ -126,8 +127,11 @@ func (a *App) downloadExternal(ctx context.Context, t store.Task) error {
 		}
 	} else {
 		// 优先走 HTTP 直链流式下载
-		err := a.downloadHTTP(ctx, ref.URL, dest, t.FileSize, progressFunc)
+		err := a.downloadHTTP(ctx, ref.URL, dest, t.FileSize, ref.Headers, progressFunc)
 		if err != nil {
+			if ref.Platform == "gofile" {
+				return fmt.Errorf("gofile 直链下载失败: %w", err)
+			}
 			a.log.Warn("直接 HTTP 下载失败，尝试 yt-dlp 回退", "url", ref.URL, "err", err)
 			targetURL := ref.WebURL
 			if targetURL == "" {
@@ -166,7 +170,7 @@ func (p *extProgressWriter) Write(b []byte) (int, error) {
 	return n, err
 }
 
-func (a *App) downloadHTTP(ctx context.Context, fileURL, destPath string, totalSize int64, progress func(ratio float64)) error {
+func (a *App) downloadHTTP(ctx context.Context, fileURL, destPath string, totalSize int64, headers map[string]string, progress func(ratio float64)) error {
 	tmp, err := os.CreateTemp(filepath.Dir(destPath), ".dl-ext-*")
 	if err != nil {
 		return fmt.Errorf("创建临时文件失败: %w", err)
@@ -186,6 +190,9 @@ func (a *App) downloadHTTP(ctx context.Context, fileURL, destPath string, totalS
 		return err
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {

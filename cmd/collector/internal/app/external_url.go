@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/youngsx/drive-collector/cmd/collector/internal/auth"
+	"github.com/youngsx/drive-collector/cmd/collector/internal/gofile"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/social"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/store"
 	tgclient "github.com/youngsx/drive-collector/cmd/collector/internal/telegram"
@@ -66,6 +67,10 @@ func extractExternalHTTPURLs(text string) []string {
 		}
 		// 社媒链接由 social media parser 专门处理
 		if len(social.ExtractSocialMediaURLs(cleaned)) > 0 {
+			continue
+		}
+		// Gofile 链接由专门的 Gofile 流程处理，避免走通用 HTTP HEAD 嗅探探测成 SPA HTML
+		if gofile.IsGofileURL(cleaned) {
 			continue
 		}
 		if isTorrentURL(u) {
