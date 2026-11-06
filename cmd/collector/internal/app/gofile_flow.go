@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -111,6 +112,7 @@ func (a *App) handleGofileMessage(ctx context.Context, msg messageInfo) bool {
 			"account_token": res.AccountToken,
 			"page":          "0",
 			"files":         string(filesData),
+			"queued":        "",
 		}
 		if err := a.bindSessions.Start(ctx, userID, "GOFILE_SELECT", sessData); err != nil {
 			a.log.Warn("保存 Gofile 交互会话失败", "err", err)
@@ -120,7 +122,7 @@ func (a *App) handleGofileMessage(ctx context.Context, msg messageInfo) bool {
 	}
 
 	// 5. 渲染首页面板
-	text, buttons := renderGofileFolderView(res.Name, res.Files, 0, nonce)
+	text, buttons := renderGofileFolderView(res.Name, res.Files, 0, nonce, nil)
 	_ = a.tg.SendWithButtons(ctx, msg.ChatID, text, buttons)
 	return true
 }
@@ -131,7 +133,35 @@ func newGofileNonce() string {
 	return hex.EncodeToString(b)
 }
 
-func renderGofileFolderView(folderName string, files []gofile.FileItem, page int, nonce string) (string, [][]tgclient.Button) {
+func parseQueuedIDs(raw string) map[string]bool {
+	m := make(map[string]bool)
+	if raw == "" {
+		return m
+	}
+	for _, id := range strings.Split(raw, ",") {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			m[id] = true
+		}
+	}
+	return m
+}
+
+func encodeQueuedIDs(m map[string]bool) string {
+	var list []string
+	for id, ok := range m {
+		if ok {
+			list = append(list, id)
+		}
+	}
+	sort.Strings(list)
+	return strings.Join(list, ",")
+}
+
+func renderGofileFolderView(folderName string, files []gofile.FileItem, page int, nonce string, queued map[string]bool) (string, [][]tgclient.Button) {
+	if queued == nil {
+		queued = make(map[string]bool)
+	}
 	totalFiles := len(files)
 	var totalBytes int64
 	for _, f := range files {
@@ -164,25 +194,56 @@ func renderGofileFolderView(folderName string, files []gofile.FileItem, page int
 	}
 	sb.WriteString(fmt.Sprintf("📁 <b>Gofile 资源文件夹: %s</b>\n", escapeHTMLText(dispName)))
 	sb.WriteString(fmt.Sprintf("📊 包含 <code>%d</code> 个文件 | 总容量: <code>%s</code>\n", totalFiles, formatBytes(totalBytes)))
-	sb.WriteString("-----------------------------------------\n")
+
+	queuedCount := len(queued)
+	if queuedCount > 0 {
+		var queuedBytes int64
+		for _, f := range files {
+			if queued[f.ID] {
+				queuedBytes += f.Size
+			}
+		}
+		sb.WriteString(fmt.Sprintf("📥 <b>已提交转存:</b> <code>%d</code> 个文件 (%s)\n", queuedCount, formatBytes(queuedBytes)))
+	}
+	sb.WriteString("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n")
 
 	for i, f := range pageFiles {
 		globalIdx := start + i + 1
-		sb.WriteString(fmt.Sprintf("<b>%d.</b> <code>%s</code> (%s)\n",
+		isQueued := queued[f.ID]
+		icon := "🎬"
+		statusTag := ""
+		if isQueued {
+			icon = "✅"
+			statusTag = " <i>[已提交]</i>"
+		}
+		sb.WriteString(fmt.Sprintf("%s <b>%d.</b> <code>%s</code> (%s)%s\n",
+			icon,
 			globalIdx,
-			escapeHTMLText(shortenRunes(f.Name, 26)),
+			escapeHTMLText(shortenRunes(f.Name, 24)),
 			formatBytes(f.Size),
+			statusTag,
 		))
 	}
-	sb.WriteString("-----------------------------------------\n")
-	sb.WriteString(fmt.Sprintf("📄 第 <b>%d</b> / <b>%d</b> 页\n请选择需要转存的文件：", page+1, totalPages))
+	sb.WriteString("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n")
+	sb.WriteString(fmt.Sprintf("📄 <i>第 <b>%d</b> / <b>%d</b> 页</i>\n", page+1, totalPages))
+	if queuedCount > 0 {
+		sb.WriteString("💡 <i>提示: 点击未提交文件可继续添加；选完请点击「完成选择」或直接关闭。</i>")
+	} else {
+		sb.WriteString("💡 <i>提示: 可点选单个/多个文件转存，或点击「全部转存」。</i>")
+	}
 
 	var buttons [][]tgclient.Button
 
-	// 1. 当前页的文件单选项
+	// 1. 当前页的文件按钮（支持连续点选，已提交的显示标记）
 	for i, f := range pageFiles {
 		globalIdx := start + i
-		btnText := fmt.Sprintf("%d. %s (%s)", start+i+1, shortenRunes(f.Name, 18), formatBytes(f.Size))
+		isQueued := queued[f.ID]
+		var btnText string
+		if isQueued {
+			btnText = fmt.Sprintf("✅ %d. %s (已提交)", start+i+1, shortenRunes(f.Name, 15))
+		} else {
+			btnText = fmt.Sprintf("%d. %s (%s)", start+i+1, shortenRunes(f.Name, 18), formatBytes(f.Size))
+		}
 		buttons = append(buttons, []tgclient.Button{
 			{Text: btnText, Data: fmt.Sprintf("gofile_pick_%d_%s", globalIdx, nonce)},
 		})
@@ -210,18 +271,40 @@ func renderGofileFolderView(folderName string, files []gofile.FileItem, page int
 		buttons = append(buttons, navRow)
 	}
 
-	// 3. 全部转存操作行
-	buttons = append(buttons, []tgclient.Button{
-		{
-			Text: fmt.Sprintf("📥 全部转存 (共 %d 个文件 / %s)", totalFiles, formatBytes(totalBytes)),
-			Data: "gofile_all_" + nonce,
-		},
-	})
+	// 3. 批量转存操作行
+	if queuedCount < totalFiles {
+		remainingCount := totalFiles - queuedCount
+		var remainingBytes int64
+		for _, f := range files {
+			if !queued[f.ID] {
+				remainingBytes += f.Size
+			}
+		}
+		var allText string
+		if queuedCount == 0 {
+			allText = fmt.Sprintf("📥 全部转存 (%d 个文件 / %s)", totalFiles, formatBytes(totalBytes))
+		} else {
+			allText = fmt.Sprintf("📥 转存剩余全部 (%d 个文件 / %s)", remainingCount, formatBytes(remainingBytes))
+		}
+		buttons = append(buttons, []tgclient.Button{
+			{
+				Text: allText,
+				Data: "gofile_all_" + nonce,
+			},
+		})
+	}
 
-	// 4. 取消按钮
-	buttons = append(buttons, []tgclient.Button{
-		{Text: "❌ 取消", Data: "gofile_cancel_" + nonce},
-	})
+	// 4. 退出 / 完成操作行
+	if queuedCount > 0 {
+		buttons = append(buttons, []tgclient.Button{
+			{Text: fmt.Sprintf("✅ 完成选择 (%d)", queuedCount), Data: "gofile_done_" + nonce},
+			{Text: "❌ 关闭面板", Data: "gofile_cancel_" + nonce},
+		})
+	} else {
+		buttons = append(buttons, []tgclient.Button{
+			{Text: "❌ 取消", Data: "gofile_cancel_" + nonce},
+		})
+	}
 
 	return sb.String(), buttons
 }
@@ -261,15 +344,42 @@ func (a *App) handleGofileCallback(ctx context.Context, cb tgclient.CallbackCont
 		return nil
 	}
 
-	// 分支 A：取消
+	queued := parseQueuedIDs(sess.Data["queued"])
+
+	// 分支 A：取消 / 关闭面板
 	if strings.HasPrefix(data, "gofile_cancel_") {
 		_ = a.bindSessions.Clear(ctx, userID)
-		answer("已取消转存", false)
-		_ = a.tg.EditMessage(ctx, cb.ChatID, cb.MsgID, "🚫 <b>已取消 Gofile 文件转存。</b>")
+		if len(queued) > 0 {
+			answer("已关闭面板", false)
+			_ = a.tg.EditMessage(ctx, cb.ChatID, cb.MsgID, fmt.Sprintf(
+				"✅ <b>Gofile 文件选择已结束</b>\n\n📁 文件夹: <code>%s</code>\n已提交的 <code>%d 个文件</code> 正在后台正常处理中。",
+				escapeHTMLText(folderName), len(queued),
+			))
+		} else {
+			answer("已取消转存", false)
+			_ = a.tg.EditMessage(ctx, cb.ChatID, cb.MsgID, "🚫 <b>已取消 Gofile 文件转存。</b>")
+		}
 		return nil
 	}
 
-	// 分支 B：当前页码指示（防重复编辑）
+	// 分支 B：完成选择
+	if strings.HasPrefix(data, "gofile_done_") {
+		_ = a.bindSessions.Clear(ctx, userID)
+		var totalQueuedBytes int64
+		for _, f := range files {
+			if queued[f.ID] {
+				totalQueuedBytes += f.Size
+			}
+		}
+		answer("已完成转存配置", false)
+		_ = a.tg.EditMessage(ctx, cb.ChatID, cb.MsgID, fmt.Sprintf(
+			"🎉 <b>Gofile 转存任务已创建</b>\n\n📁 文件夹: <code>%s</code>\n📥 已提交转存: <code>%d 个文件</code> (%s)\n\n后台正在排队下载并同步至您的网盘，完成后将发送通知。",
+			escapeHTMLText(folderName), len(queued), formatBytes(totalQueuedBytes),
+		))
+		return nil
+	}
+
+	// 分支 C：当前页码指示（防重复编辑）
 	if strings.HasPrefix(data, "gofile_noop_") {
 		currentPage, _ := strconv.Atoi(sess.Data["page"])
 		totalPages := (len(files) + gofilePageSize - 1) / gofilePageSize
@@ -280,7 +390,7 @@ func (a *App) handleGofileCallback(ctx context.Context, cb tgclient.CallbackCont
 		return nil
 	}
 
-	// 分支 C：翻页
+	// 分支 D：翻页
 	if strings.HasPrefix(data, "gofile_page_") {
 		// gofile_page_{page}_{nonce}
 		parts := strings.Split(data, "_")
@@ -288,18 +398,15 @@ func (a *App) handleGofileCallback(ctx context.Context, cb tgclient.CallbackCont
 			newPage, _ := strconv.Atoi(parts[2])
 			sess.Data["page"] = strconv.Itoa(newPage)
 			_ = a.bindSessions.Update(ctx, userID, "GOFILE_SELECT", sess.Data)
-			text, buttons := renderGofileFolderView(folderName, files, newPage, expectedNonce)
+			text, buttons := renderGofileFolderView(folderName, files, newPage, expectedNonce, queued)
 			_ = a.tg.EditWithButtons(ctx, cb.ChatID, cb.MsgID, text, buttons)
 			answer("", false)
 			return nil
 		}
 	}
 
-	// 分支 D：单文件转存
+	// 分支 E：单文件点选转存（连续多选不消失！）
 	if strings.HasPrefix(data, "gofile_pick_") {
-		// 单次防抖消费：原子清除会话
-		_ = a.bindSessions.Clear(ctx, userID)
-
 		parts := strings.Split(data, "_")
 		if len(parts) < 4 {
 			answer("参数错误", true)
@@ -312,6 +419,12 @@ func (a *App) handleGofileCallback(ctx context.Context, cb tgclient.CallbackCont
 		}
 		target := files[idx]
 
+		// 检查是否已经在队列中
+		if queued[target.ID] {
+			answer(fmt.Sprintf("ℹ️「%s」已在转存队列中", shortenRunes(target.Name, 16)), false)
+			return nil
+		}
+
 		// 权限二次检查
 		if !a.can(ctx, userID, auth.ActionExternalLink) {
 			answer("无权执行此操作", true)
@@ -321,32 +434,63 @@ func (a *App) handleGofileCallback(ctx context.Context, cb tgclient.CallbackCont
 		// 容量预检
 		if a.storage != nil {
 			if err := a.storage.AssertCapacity(a.cfg.DownloadDir, target.Size, fmt.Sprintf("gofile %s", target.Name)); err != nil {
-				answer("磁盘空间不足", true)
-				_ = a.tg.EditMessage(ctx, cb.ChatID, cb.MsgID, fmt.Sprintf("⚠️ <b>磁盘空间不足</b>\n\n转存文件 <code>%s</code> 需要 %s，当前磁盘可用空间不足，请先清理或等待任务完成。",
-					escapeHTMLText(target.Name), formatBytes(target.Size)))
+				answer(fmt.Sprintf("⚠️ 磁盘空间不足: 需要 %s", formatBytes(target.Size)), true)
 				return nil
 			}
 		}
 
-		answer("已加入转存队列", false)
-		_ = a.tg.EditMessage(ctx, cb.ChatID, cb.MsgID, fmt.Sprintf(
-			"✅ <b>已加入转存队列</b>\n\n📄 名称: <code>%s</code>\n📦 大小: <code>%s</code>\n正在排队下载...",
-			escapeHTMLText(target.Name), formatBytes(target.Size),
-		))
-
+		// 立即排队入库
 		a.enqueueGofileItem(ctx, userID, cb.ChatID, cb.MsgID, target, accountToken, true)
+
+		// 标记该文件已入队并持久化会话
+		queued[target.ID] = true
+		sess.Data["queued"] = encodeQueuedIDs(queued)
+		_ = a.bindSessions.Update(ctx, userID, "GOFILE_SELECT", sess.Data)
+
+		currentPage, _ := strconv.Atoi(sess.Data["page"])
+		text, buttons := renderGofileFolderView(folderName, files, currentPage, expectedNonce, queued)
+		_ = a.tg.EditWithButtons(ctx, cb.ChatID, cb.MsgID, text, buttons)
+
+		answer(fmt.Sprintf("✅ 已加入队列: %s", shortenRunes(target.Name, 16)), false)
 		return nil
 	}
 
-	// 分支 E：全部转存
+	// 分支 F：全部转存（或转存剩余全部）
 	if strings.HasPrefix(data, "gofile_all_") {
-		// 单次防抖消费：原子清除会话
-		_ = a.bindSessions.Clear(ctx, userID)
-
 		// 权限二次检查
 		if !a.can(ctx, userID, auth.ActionExternalLink) {
 			answer("无权执行此操作", true)
 			return nil
+		}
+
+		var remaining []gofile.FileItem
+		var remainingBytes int64
+		for _, f := range files {
+			if !queued[f.ID] {
+				remaining = append(remaining, f)
+				remainingBytes += f.Size
+			}
+		}
+
+		if len(remaining) == 0 {
+			answer("所有文件均已在转存队列中", false)
+			return nil
+		}
+
+		// 容量预检
+		if a.storage != nil {
+			if err := a.storage.AssertCapacity(a.cfg.DownloadDir, remainingBytes, fmt.Sprintf("gofile all %s", folderName)); err != nil {
+				answer(fmt.Sprintf("⚠️ 磁盘空间不足: 需要 %s", formatBytes(remainingBytes)), true)
+				return nil
+			}
+		}
+
+		// 全部转存成功后清理会话
+		_ = a.bindSessions.Clear(ctx, userID)
+
+		withNotice := len(remaining) <= 3
+		for _, item := range remaining {
+			a.enqueueGofileItem(ctx, userID, cb.ChatID, cb.MsgID, item, accountToken, withNotice)
 		}
 
 		var totalBytes int64
@@ -354,27 +498,11 @@ func (a *App) handleGofileCallback(ctx context.Context, cb tgclient.CallbackCont
 			totalBytes += f.Size
 		}
 
-		// 容量预检
-		if a.storage != nil {
-			if err := a.storage.AssertCapacity(a.cfg.DownloadDir, totalBytes, fmt.Sprintf("gofile all %s", folderName)); err != nil {
-				answer("磁盘空间不足", true)
-				_ = a.tg.EditMessage(ctx, cb.ChatID, cb.MsgID, fmt.Sprintf("⚠️ <b>磁盘空间不足</b>\n\n全部转存需要 %s，当前磁盘可用空间不足，请分批单选转存或清理后重试。",
-					formatBytes(totalBytes)))
-				return nil
-			}
-		}
-
-		answer(fmt.Sprintf("已将全部 %d 个文件加入队列", len(files)), false)
+		answer(fmt.Sprintf("已将剩余 %d 个文件加入队列", len(remaining)), false)
 		_ = a.tg.EditMessage(ctx, cb.ChatID, cb.MsgID, fmt.Sprintf(
-			"✅ <b>已将全部文件加入转存队列</b>\n\n📁 文件夹: <code>%s</code>\n📊 数量: <code>%d 个文件</code>\n📦 总容量: <code>%s</code>\n正在排队依次下载...",
+			"✅ <b>已将全部文件加入转存队列</b>\n\n📁 文件夹: <code>%s</code>\n📊 数量: <code>%d 个文件</code>\n📦 总容量: <code>%s</code>\n\n正在排队依次下载并同步至您的网盘...",
 			escapeHTMLText(folderName), len(files), formatBytes(totalBytes),
 		))
-
-		// 批量入队：文件多于 3 个时不逐个发送 Telegram 捕获消息，防止群聊刷屏及触发 Telegram 限频
-		withNotice := len(files) <= 3
-		for _, item := range files {
-			a.enqueueGofileItem(ctx, userID, cb.ChatID, cb.MsgID, item, accountToken, withNotice)
-		}
 		return nil
 	}
 
