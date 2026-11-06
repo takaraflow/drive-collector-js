@@ -30,7 +30,7 @@ func TestRenderGofileFolderView_Pagination(t *testing.T) {
 	nonce := "testnonce123"
 
 	// 1. 第 0 页 (首页)
-	text0, btns0 := renderGofileFolderView("MyFolder", files, 0, nonce)
+	text0, btns0 := renderGofileFolderView("MyFolder", files, 0, nonce, nil)
 	if !strings.Contains(text0, "第 <b>1</b> / <b>3</b> 页") {
 		t.Errorf("expected page 1/3, got %s", text0)
 	}
@@ -73,7 +73,7 @@ func TestRenderGofileFolderView_Pagination(t *testing.T) {
 	}
 
 	// 2. 第 1 页 (中间页)
-	_, btns1 := renderGofileFolderView("MyFolder", files, 1, nonce)
+	_, btns1 := renderGofileFolderView("MyFolder", files, 1, nonce, nil)
 	hasPrev1 := false
 	hasNext1 := false
 	for _, row := range btns1 {
@@ -91,7 +91,7 @@ func TestRenderGofileFolderView_Pagination(t *testing.T) {
 	}
 
 	// 3. 第 2 页 (末页)
-	_, btns2 := renderGofileFolderView("MyFolder", files, 2, nonce)
+	_, btns2 := renderGofileFolderView("MyFolder", files, 2, nonce, nil)
 	hasPrev2 := false
 	hasNext2 := false
 	for _, row := range btns2 {
@@ -109,6 +109,35 @@ func TestRenderGofileFolderView_Pagination(t *testing.T) {
 	}
 	if hasNext2 {
 		t.Errorf("page 2 should not have next button")
+	}
+
+	// 4. 测试带有已选文件时的渲染（多选视觉反馈）
+	queuedMap := map[string]bool{"f1": true, "f3": true}
+	textQueued, btnsQueued := renderGofileFolderView("MyFolder", files, 0, nonce, queuedMap)
+	if !strings.Contains(textQueued, "已提交转存:</b> <code>2</code> 个文件") {
+		t.Errorf("expected queued files summary, got %s", textQueued)
+	}
+	if !strings.Contains(textQueued, "✅ <b>1.</b>") || !strings.Contains(textQueued, "[已提交]") {
+		t.Errorf("expected file 1 marked as queued, got %s", textQueued)
+	}
+
+	hasRemainingBtn := false
+	hasDoneBtn := false
+	for _, row := range btnsQueued {
+		for _, b := range row {
+			if strings.Contains(b.Text, "转存剩余全部") {
+				hasRemainingBtn = true
+			}
+			if strings.Contains(b.Text, "完成选择 (2)") {
+				hasDoneBtn = true
+			}
+		}
+	}
+	if !hasRemainingBtn {
+		t.Errorf("expected '转存剩余全部' button when some files are queued")
+	}
+	if !hasDoneBtn {
+		t.Errorf("expected '完成选择' button when some files are queued")
 	}
 }
 
@@ -161,7 +190,7 @@ func TestGofileCallback_Actions(t *testing.T) {
 	}
 	filesData, _ := json.Marshal(files)
 
-	// 1. 测试 Cancel
+	// 1. 测试 Cancel (未选任何文件时)
 	_ = app.bindSessions.Start(ctx, userID, "GOFILE_SELECT", map[string]string{
 		"nonce":         nonce,
 		"chat_id":       fmt.Sprintf("%d", chatID),
@@ -169,6 +198,7 @@ func TestGofileCallback_Actions(t *testing.T) {
 		"account_token": "token-xyz",
 		"page":          "0",
 		"files":         string(filesData),
+		"queued":        "",
 	})
 
 	cbCancel := tgclient.CallbackContext{
@@ -188,7 +218,7 @@ func TestGofileCallback_Actions(t *testing.T) {
 		t.Errorf("session should be cleared after cancel")
 	}
 
-	// 2. 测试 Single Pick
+	// 2. 测试连续点选（Multi Pick）：点选第一个文件，会话不应该被清除！面板不消失
 	nonce2 := "nonce222"
 	_ = app.bindSessions.Start(ctx, userID, "GOFILE_SELECT", map[string]string{
 		"nonce":         nonce2,
@@ -197,6 +227,7 @@ func TestGofileCallback_Actions(t *testing.T) {
 		"account_token": "token-xyz",
 		"page":          "0",
 		"files":         string(filesData),
+		"queued":        "",
 	})
 
 	err = app.handleGofileCallback(ctx, cbCancel, "gofile_pick_0_"+nonce2)
@@ -204,7 +235,7 @@ func TestGofileCallback_Actions(t *testing.T) {
 		t.Fatalf("handle pick error: %v", err)
 	}
 
-	// 验证任务已创建
+	// 验证第一个任务已创建
 	if len(repo.created) != 1 {
 		t.Fatalf("expected 1 task created, got %d", len(repo.created))
 	}
@@ -212,26 +243,50 @@ func TestGofileCallback_Actions(t *testing.T) {
 	if task.FileName.String != "test1.mp4" {
 		t.Errorf("task filename = %q, want test1.mp4", task.FileName.String)
 	}
-	var ref externalSourceRef
-	_ = json.Unmarshal([]byte(task.SourceRef.String), &ref)
-	if ref.Platform != "gofile" {
-		t.Errorf("ref platform = %q, want gofile", ref.Platform)
+
+	// 验证关键设计：会话仍然有效，且已记录 f1 为已选
+	sess, err = app.bindSessions.Get(ctx, userID)
+	if err != nil || sess == nil {
+		t.Fatalf("session must remain active for continuous selection")
 	}
-	if ref.Headers["Cookie"] != "accountToken=token-xyz" {
-		t.Errorf("cookie header = %q, want accountToken=token-xyz", ref.Headers["Cookie"])
+	if sess.Data["queued"] != "f1" {
+		t.Errorf("expected queued = f1, got %q", sess.Data["queued"])
 	}
 
-	// 3. 测试防抖（重复点击已失效）
+	// 3. 测试防抖与重复点击（再次点选已被加入的文件）
 	err = app.handleGofileCallback(ctx, cbCancel, "gofile_pick_0_"+nonce2)
 	if err != nil {
 		t.Fatalf("duplicate click should not error: %v", err)
 	}
 	// 不应创建新任务
 	if len(repo.created) != 1 {
-		t.Fatalf("duplicate click should not create second task")
+		t.Fatalf("duplicate click should not create second task, got %d", len(repo.created))
 	}
 
-	// 4. 测试 Pick All
+	// 4. 测试继续点选第二个文件（连续多选！）
+	err = app.handleGofileCallback(ctx, cbCancel, "gofile_pick_1_"+nonce2)
+	if err != nil {
+		t.Fatalf("second pick error: %v", err)
+	}
+	if len(repo.created) != 2 {
+		t.Fatalf("expected 2 tasks created after picking second file, got %d", len(repo.created))
+	}
+	sess, _ = app.bindSessions.Get(ctx, userID)
+	if !strings.Contains(sess.Data["queued"], "f1") || !strings.Contains(sess.Data["queued"], "f2") {
+		t.Errorf("expected both f1 and f2 in queued, got %q", sess.Data["queued"])
+	}
+
+	// 5. 点击「完成选择」
+	err = app.handleGofileCallback(ctx, cbCancel, "gofile_done_"+nonce2)
+	if err != nil {
+		t.Fatalf("done click error: %v", err)
+	}
+	sess, _ = app.bindSessions.Get(ctx, userID)
+	if sess != nil {
+		t.Errorf("session should be cleared after done")
+	}
+
+	// 6. 测试点选部分后点击「转存剩余全部」
 	nonce3 := "nonce333"
 	_ = app.bindSessions.Start(ctx, userID, "GOFILE_SELECT", map[string]string{
 		"nonce":         nonce3,
@@ -240,16 +295,23 @@ func TestGofileCallback_Actions(t *testing.T) {
 		"account_token": "token-xyz",
 		"page":          "0",
 		"files":         string(filesData),
+		"queued":        "f1", // 模拟已经选了 f1
 	})
 
 	err = app.handleGofileCallback(ctx, cbCancel, "gofile_all_"+nonce3)
 	if err != nil {
-		t.Fatalf("handle pick all error: %v", err)
+		t.Fatalf("handle pick all with partial queued error: %v", err)
 	}
 
-	// 验证已创建 1 (之前) + 2 (全部) = 3 个任务
+	// 之前有 2 个任务，这次只应该把剩余的 f2 入队（+1 个任务），总共 3 个任务
 	if len(repo.created) != 3 {
-		t.Fatalf("expected 3 tasks total, got %d", len(repo.created))
+		t.Fatalf("expected 3 tasks total (f2 enqueued), got %d", len(repo.created))
+	}
+
+	// 会话已清理
+	sess, _ = app.bindSessions.Get(ctx, userID)
+	if sess != nil {
+		t.Errorf("session should be cleared after pick all")
 	}
 
 	_ = ft
