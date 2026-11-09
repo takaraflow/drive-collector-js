@@ -10,6 +10,7 @@ var (
 	ErrPasswordRequired = errors.New("gofile: 该文件夹设有密码保护")
 	ErrRateLimited      = errors.New("gofile: 官方服务繁忙(触发频率限制)，请稍后重试")
 	ErrNotPremium       = errors.New("gofile: 访客凭证权限不足")
+	ErrWrongToken       = errors.New("gofile: 访客凭证无效或已过期")
 	ErrNoMedia          = errors.New("gofile: 文件夹中未发现可转存的文件")
 )
 

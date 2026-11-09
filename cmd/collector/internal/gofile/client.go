@@ -22,16 +22,20 @@ const (
 	DefaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 	defaultTokenFile = "/tmp/gofile_token_cache.json"
 	defaultSalt      = "12af056dacea0b"
+	defaultTokenTTL  = 12 * time.Hour
 )
 
 type Client struct {
 	http           *http.Client
+	baseURL        string
 	userAgent      string
 	tokenCacheFile string
+	tokenTTL       time.Duration
 	salt           string
 
-	mu         sync.Mutex
-	tokenCache string
+	mu           sync.Mutex
+	tokenCache   string
+	tokenCreated time.Time
 }
 
 func NewClient() *Client {
@@ -39,8 +43,10 @@ func NewClient() *Client {
 		http: &http.Client{
 			Timeout: 15 * time.Second,
 		},
+		baseURL:        "https://api.gofile.io",
 		userAgent:      DefaultUserAgent,
 		tokenCacheFile: defaultTokenFile,
+		tokenTTL:       defaultTokenTTL,
 		salt:           defaultSalt,
 	}
 }
@@ -55,7 +61,17 @@ func (c *Client) GetAccountToken(ctx context.Context) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.tokenCache != "" {
+	// 0. 支持环境变量静态配置优先（如用户配置了专属的 GOFILE_TOKEN）
+	if envToken := strings.TrimSpace(os.Getenv("GOFILE_TOKEN")); envToken != "" {
+		return envToken, nil
+	}
+
+	ttl := c.tokenTTL
+	if ttl <= 0 {
+		ttl = defaultTokenTTL
+	}
+
+	if c.tokenCache != "" && (c.tokenCreated.IsZero() || time.Since(c.tokenCreated) < ttl) {
 		return c.tokenCache, nil
 	}
 
@@ -64,14 +80,24 @@ func (c *Client) GetAccountToken(ctx context.Context) (string, error) {
 		if data, err := os.ReadFile(c.tokenCacheFile); err == nil {
 			var cached cachedTokenData
 			if err := json.Unmarshal(data, &cached); err == nil && cached.Token != "" {
-				c.tokenCache = cached.Token
-				return c.tokenCache, nil
+				// 检查缓存有效时长，未设置创建时间或超过 TTL 均视为失效
+				if cached.CreatedAt > 0 && time.Since(time.Unix(cached.CreatedAt, 0)) < ttl {
+					c.tokenCache = cached.Token
+					c.tokenCreated = time.Unix(cached.CreatedAt, 0)
+					return c.tokenCache, nil
+				}
+				// 缓存已过期，主动清除旧文件
+				_ = os.Remove(c.tokenCacheFile)
 			}
 		}
 	}
 
-	// 2. 缓存不存在，调用 API 创建新访客账号
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.gofile.io/accounts", nil)
+	// 2. 缓存不存在或已过期，调用 API 创建新访客账号
+	baseURL := c.baseURL
+	if baseURL == "" {
+		baseURL = "https://api.gofile.io"
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/accounts", nil)
 	if err != nil {
 		return "", err
 	}
@@ -110,13 +136,14 @@ func (c *Client) GetAccountToken(ctx context.Context) (string, error) {
 	}
 
 	c.tokenCache = res.Data.Token
+	c.tokenCreated = time.Now()
 
 	// 保存到本地缓存
 	if c.tokenCacheFile != "" {
 		_ = os.MkdirAll(filepath.Dir(c.tokenCacheFile), 0755)
 		toSave, _ := json.Marshal(cachedTokenData{
 			Token:     c.tokenCache,
-			CreatedAt: time.Now().Unix(),
+			CreatedAt: c.tokenCreated.Unix(),
 		})
 		_ = os.WriteFile(c.tokenCacheFile, toSave, 0644)
 	}
@@ -124,11 +151,12 @@ func (c *Client) GetAccountToken(ctx context.Context) (string, error) {
 	return c.tokenCache, nil
 }
 
-// InvalidateToken 清除当前 Token 缓存（当遇到 error-notPremium 时调用）。
+// InvalidateToken 清除当前 Token 缓存（当遇到 error-notPremium 或 error-wrongToken 时调用）。
 func (c *Client) InvalidateToken() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.tokenCache = ""
+	c.tokenCreated = time.Time{}
 	if c.tokenCacheFile != "" {
 		_ = os.Remove(c.tokenCacheFile)
 	}
@@ -252,14 +280,18 @@ func (c *Client) Resolve(ctx context.Context, contentID, password string) (*Fold
 	}
 
 	result, err := c.queryContent(ctx, contentID, token, password)
-	if errors.Is(err, ErrNotPremium) {
-		// 凭证过期或无效，重置缓存并重试一次
+	if errors.Is(err, ErrNotPremium) || errors.Is(err, ErrWrongToken) {
+		// 凭证过期或无效，重置缓存并重新获取凭证重试一次
 		c.InvalidateToken()
 		token, err = c.GetAccountToken(ctx)
 		if err != nil {
 			return nil, err
 		}
 		result, err = c.queryContent(ctx, contentID, token, password)
+		if errors.Is(err, ErrNotPremium) || errors.Is(err, ErrWrongToken) {
+			// 若重试后依然报凭证错误，再次清理缓存避免残留无效凭证
+			c.InvalidateToken()
+		}
 	}
 
 	return result, err
@@ -268,7 +300,11 @@ func (c *Client) Resolve(ctx context.Context, contentID, password string) (*Fold
 func (c *Client) queryContent(ctx context.Context, contentID, token, password string) (*FolderResult, error) {
 	wt := c.GenerateWebsiteToken(ctx, token)
 
-	apiURL := fmt.Sprintf("https://api.gofile.io/contents/%s?wt=%s", contentID, wt)
+	baseURL := c.baseURL
+	if baseURL == "" {
+		baseURL = "https://api.gofile.io"
+	}
+	apiURL := fmt.Sprintf("%s/contents/%s?wt=%s", baseURL, contentID, wt)
 	if password != "" {
 		apiURL += fmt.Sprintf("&password=%s", password)
 	}
@@ -319,6 +355,8 @@ func (c *Client) queryContent(ctx context.Context, contentID, token, password st
 		return nil, ErrNotFound
 	case "error-notPremium":
 		return nil, ErrNotPremium
+	case "error-wrongToken":
+		return nil, ErrWrongToken
 	default:
 		return nil, fmt.Errorf("gofile: 接口返回错误: %s", res.Status)
 	}
