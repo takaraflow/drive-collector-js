@@ -86,6 +86,8 @@ func (a *App) handleGofileMessage(ctx context.Context, msg messageInfo) bool {
 			userTip = "❌ <b>该 Gofile 资源不存在或已被作者删除</b>"
 		case errors.Is(err, gofile.ErrNoMedia):
 			userTip = "⚠️ <b>该文件夹中未发现可转存的媒体文件</b>"
+		case errors.Is(err, gofile.ErrWrongToken), errors.Is(err, gofile.ErrNotPremium):
+			userTip = "❌ <b>Gofile 凭证验证失败</b>\n\n系统已自动重置凭证缓存，请稍后重试。"
 		default:
 			userTip = fmt.Sprintf("❌ <b>Gofile 解析失败</b>\n\n原因: %s", escapeHTMLText(err.Error()))
 		}
