@@ -1698,6 +1698,10 @@ func (a *App) streamTransfer(ctx context.Context, t store.Task) error {
 			return err
 		}
 
+		if a.repo != nil && stats.TotalBytes > 0 {
+			_ = a.repo.UpdateFileMetadata(ctx, t.ID, res.TargetFileName, stats.TotalBytes)
+		}
+
 		a.log.Info("零磁盘管道直传成功",
 			"taskId", t.ID,
 			"bytes", stats.TotalBytes,
