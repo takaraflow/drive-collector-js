@@ -14,6 +14,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"io"
@@ -1425,6 +1426,14 @@ func (a *App) upload(ctx context.Context, t store.Task) error {
 	// 留着那份没有任何用处,只会随着失败次数一路堆积。
 	defer func() { _ = os.Remove(local) }()
 
+	localStat, statErr := os.Stat(local)
+	var localSize int64
+	if statErr == nil {
+		localSize = localStat.Size()
+	} else if t.FileSize > 0 {
+		localSize = t.FileSize
+	}
+
 	// 凭据从 D1 按用户取 —— 每个用户的网盘凭据不同,存在
 	// drives.config_data 里(明文 JSON,不是加密的)。
 	// 不能从环境变量读:生产没有 DRIVE_USER/DRIVE_PASS 这类变量。
@@ -1442,7 +1451,6 @@ func (a *App) upload(ctx context.Context, t store.Task) error {
 	// 在调用方拼的话每个调用点都要记得拼一次,漏一个就会把网盘路径
 	// 当成本地目录,报出来却是「permission denied」那种误导性错误。
 	remoteBase := d.RemotePath(a.cfg.RemoteBase)
-	remote := path.Join(remoteBase, t.FileName.String)
 
 	// Proton 的 session 操作必须串行 —— refresh_token 是一次性的,
 	// 并发用会导致 Code=10013 账号永久砖化(记忆里的 proton-refresh-token-race)。
@@ -1491,7 +1499,35 @@ func (a *App) upload(ctx context.Context, t store.Task) error {
 		if err := a.rclone.Mkdir(ctx, cfg, remoteBase); err != nil {
 			return fmt.Errorf("创建远端目录失败: %w", err)
 		}
-		if err := a.rclone.Upload(ctx, cfg, local, remote, nil); err != nil {
+
+		// 同名防静默覆盖与秒传检测：先列出远端目录内容
+		desiredName := t.FileName.String
+		remoteFiles, listErr := a.rclone.ListFiles(ctx, cfg, remoteBase)
+		if listErr != nil && !errors.Is(listErr, rclone.ErrDirNotFound) {
+			a.log.Warn("上传前列出远端目录失败,降级使用原文件名继续上传",
+				"taskId", t.ID, "remoteBase", remoteBase, "err", listErr)
+		}
+
+		res := resolveUploadConflict(remoteFiles, desiredName, localSize)
+		if res.ShouldSkip {
+			a.log.Info("远端已存在同名且大小一致的文件,跳过上传(命中秒传)",
+				"taskId", t.ID, "targetName", res.TargetFileName, "size", localSize)
+			if res.TargetFileName != desiredName && a.repo != nil {
+				_ = a.repo.UpdateFileMetadata(ctx, t.ID, res.TargetFileName, localSize)
+			}
+			return nil
+		}
+
+		if res.IsRenamed {
+			a.log.Info("远端存在同名但不同内容文件,自动重命名消解冲突",
+				"taskId", t.ID, "original", desiredName, "resolved", res.TargetFileName, "localSize", localSize)
+			if a.repo != nil {
+				_ = a.repo.UpdateFileMetadata(ctx, t.ID, res.TargetFileName, localSize)
+			}
+		}
+
+		targetRemote := path.Join(remoteBase, res.TargetFileName)
+		if err := a.rclone.Upload(ctx, cfg, local, targetRemote, nil); err != nil {
 			return fmt.Errorf("上传失败: %w", err)
 		}
 
@@ -1592,7 +1628,6 @@ func (a *App) streamTransfer(ctx context.Context, t store.Task) error {
 	}
 
 	remoteBase := d.RemotePath(a.cfg.RemoteBase)
-	remote := path.Join(remoteBase, t.FileName.String)
 
 	key := drive.Key(drive.Type(d.Type), t.UserID)
 	return a.locks.WithSession(ctx, key, func() error {
@@ -1615,12 +1650,40 @@ func (a *App) streamTransfer(ctx context.Context, t store.Task) error {
 			return fmt.Errorf("创建远端目录失败: %w", err)
 		}
 
+		// 同名防静默覆盖与秒传检测：先列出远端目录内容
+		desiredName := t.FileName.String
+		remoteFiles, listErr := a.rclone.ListFiles(ctx, cfg, remoteBase)
+		if listErr != nil && !errors.Is(listErr, rclone.ErrDirNotFound) {
+			a.log.Warn("管道直传前列出远端目录失败,降级使用原文件名直传",
+				"taskId", t.ID, "remoteBase", remoteBase, "err", listErr)
+		}
+
+		res := resolveUploadConflict(remoteFiles, desiredName, t.FileSize)
+		if res.ShouldSkip {
+			a.log.Info("远端已存在同名且大小一致的文件,管道直传跳过(命中秒传)",
+				"taskId", t.ID, "targetName", res.TargetFileName, "size", t.FileSize)
+			if res.TargetFileName != desiredName && a.repo != nil {
+				_ = a.repo.UpdateFileMetadata(ctx, t.ID, res.TargetFileName, t.FileSize)
+			}
+			return nil
+		}
+
+		if res.IsRenamed {
+			a.log.Info("远端存在同名但不同内容文件,管道直传自动重命名消解冲突",
+				"taskId", t.ID, "original", desiredName, "resolved", res.TargetFileName, "size", t.FileSize)
+			if a.repo != nil {
+				_ = a.repo.UpdateFileMetadata(ctx, t.ID, res.TargetFileName, t.FileSize)
+			}
+		}
+
+		targetRemote := path.Join(remoteBase, res.TargetFileName)
+
 		producer := func(w io.Writer) error {
 			return a.downloader.DownloadStream(ctx, chatID, msgID, w, nil)
 		}
 
 		consumer := func(r io.Reader) error {
-			return a.rclone.Rcat(ctx, cfg, remote, r, nil)
+			return a.rclone.Rcat(ctx, cfg, targetRemote, r, nil)
 		}
 
 		opts := streampipe.PipeOptions{
