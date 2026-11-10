@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -589,6 +590,77 @@ func TestUploadPropagatesRcloneFailure(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "上传失败") {
 		t.Errorf("错误信息应说明是上传失败,得到 %q", err.Error())
+	}
+}
+
+// TestUpload_ConflictResolution_SameNameDifferentSize_AutoRenames 测试远端同名但不同大小时自动重命名消解冲突，防止静默覆盖
+func TestUpload_ConflictResolution_SameNameDifferentSize_AutoRenames(t *testing.T) {
+	repo := &fakeRepo{}
+	rc := &fakeRclone{
+		list: []rclone.FileEntry{
+			{Name: "photo.jpg", Size: 200, IsDir: false},
+		},
+	}
+	a, dir := newTestApp(t, &fakeDL{}, repo, &fakeDrives{
+		drive: &drive.Drive{
+			Type: "mega", Config: drive.DriveConfig{User: "u@x.com", Pass: "p"},
+		},
+	})
+	a.rclone = rc
+
+	// 创建本地待上传文件，大小为 10 字节（与远端 200 字节不同）
+	localPath := filepath.Join(dir, "photo.jpg")
+	if err := os.WriteFile(localPath, []byte("0123456789"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := a.upload(context.Background(), store.Task{
+		ID: "t1", UserID: "u1", FileName: sqlStr("photo.jpg"), FileSize: 10,
+	}); err != nil {
+		t.Fatalf("上传发生意外错误: %v", err)
+	}
+
+	if len(rc.uploadCalls) != 1 {
+		t.Fatalf("期望发生 1 次上传, 实际: %d", len(rc.uploadCalls))
+	}
+	expectedRemote := "/global/photo (1).jpg"
+	if rc.uploadCalls[0] != expectedRemote {
+		t.Errorf("期望上传目标路径 %q, 实际: %q", expectedRemote, rc.uploadCalls[0])
+	}
+	if repo.fileName != "photo (1).jpg" {
+		t.Errorf("期望任务元数据更新为新文件名 %q, 实际: %q", "photo (1).jpg", repo.fileName)
+	}
+}
+
+// TestUpload_ConflictResolution_SameNameSameSize_DedupeSkips 测试远端存在同名且大小一致的文件时秒传跳过实际上传
+func TestUpload_ConflictResolution_SameNameSameSize_DedupeSkips(t *testing.T) {
+	repo := &fakeRepo{}
+	rc := &fakeRclone{
+		list: []rclone.FileEntry{
+			{Name: "photo.jpg", Size: 10, IsDir: false},
+		},
+	}
+	a, dir := newTestApp(t, &fakeDL{}, repo, &fakeDrives{
+		drive: &drive.Drive{
+			Type: "mega", Config: drive.DriveConfig{User: "u@x.com", Pass: "p"},
+		},
+	})
+	a.rclone = rc
+
+	// 本地文件大小同样为 10 字节
+	localPath := filepath.Join(dir, "photo.jpg")
+	if err := os.WriteFile(localPath, []byte("0123456789"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := a.upload(context.Background(), store.Task{
+		ID: "t1", UserID: "u1", FileName: sqlStr("photo.jpg"), FileSize: 10,
+	}); err != nil {
+		t.Fatalf("上传发生意外错误: %v", err)
+	}
+
+	if len(rc.uploadCalls) != 0 {
+		t.Fatalf("秒传命中时不应执行实际上传, 实际调用了 %d 次", len(rc.uploadCalls))
 	}
 }
 

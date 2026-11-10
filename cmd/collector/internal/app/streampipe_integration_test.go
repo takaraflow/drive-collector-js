@@ -9,6 +9,7 @@ import (
 
 	"github.com/youngsx/drive-collector/cmd/collector/internal/contract"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/drive"
+	"github.com/youngsx/drive-collector/cmd/collector/internal/rclone"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/store"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/task"
 	tgclient "github.com/youngsx/drive-collector/cmd/collector/internal/telegram"
@@ -190,5 +191,128 @@ func TestStreamTransfer_FallbackToDiskOnStreamError(t *testing.T) {
 		if evs[i] != exp {
 			t.Errorf("event [%d]: got %v, expected %v", i, evs[i], exp)
 		}
+	}
+}
+
+func TestStreamTransfer_ConflictResolution_AutoRename(t *testing.T) {
+	ctx := context.Background()
+
+	dl := &streamingFakeDL{
+		fakeDL: fakeDL{content: "payload"},
+	}
+	rc := &fakeRclone{
+		list: []rclone.FileEntry{
+			{Name: "stream_video.mp4", Size: 2048, IsDir: false},
+		},
+	}
+	repo := &fakeRepo{}
+	drives := &fakeDrives{
+		drive: &drive.Drive{
+			ID:        "drv1",
+			UserID:    "user1",
+			Type:      "mega",
+			Config:    drive.DriveConfig{User: "u", Pass: "p"},
+			IsDefault: 1,
+		},
+	}
+
+	taskID := "task-stream-conflict"
+	tsk := store.Task{
+		ID:        taskID,
+		UserID:    "user1",
+		Status:    contract.StatusQueued,
+		FileName:  sql.NullString{String: "stream_video.mp4", Valid: true},
+		FileSize:  1024, // 1024 != 2048 (远端大小不同)
+		SourceRef: sql.NullString{String: "100/1000", Valid: true},
+	}
+	repo.byID = &tsk
+
+	a := &App{
+		downloader: dl,
+		rclone:     rc,
+		repo:       repo,
+		drives:     drives,
+		locks:      drive.NewSessionLock(),
+		log:        quietApp(),
+		tasks:      task.NewManager(repo, quietApp()),
+		cfg: Config{
+			EnableStreamPipe: true,
+			RemoteBase:       "backups",
+		},
+	}
+	a.tasks.Download = a.download
+	a.tasks.Upload = a.upload
+
+	a.processTask(ctx, taskID)
+
+	if len(rc.uploadCalls) != 1 {
+		t.Fatalf("expected 1 rclone rcat call, got %d", len(rc.uploadCalls))
+	}
+	expectedTarget := "backups/stream_video (1).mp4"
+	if rc.uploadCalls[0] != expectedTarget {
+		t.Errorf("unexpected target path: got %q, expected %q", rc.uploadCalls[0], expectedTarget)
+	}
+	if repo.fileName != "stream_video (1).mp4" {
+		t.Errorf("expected repo metadata update to %q, got %q", "stream_video (1).mp4", repo.fileName)
+	}
+}
+
+func TestStreamTransfer_ConflictResolution_Dedupe(t *testing.T) {
+	ctx := context.Background()
+
+	dl := &streamingFakeDL{
+		fakeDL: fakeDL{content: "payload"},
+	}
+	rc := &fakeRclone{
+		list: []rclone.FileEntry{
+			{Name: "stream_video.mp4", Size: 1024, IsDir: false},
+		},
+	}
+	repo := &fakeRepo{}
+	drives := &fakeDrives{
+		drive: &drive.Drive{
+			ID:        "drv1",
+			UserID:    "user1",
+			Type:      "mega",
+			Config:    drive.DriveConfig{User: "u", Pass: "p"},
+			IsDefault: 1,
+		},
+	}
+
+	taskID := "task-stream-dedupe"
+	tsk := store.Task{
+		ID:        taskID,
+		UserID:    "user1",
+		Status:    contract.StatusQueued,
+		FileName:  sql.NullString{String: "stream_video.mp4", Valid: true},
+		FileSize:  1024, // 1024 == 1024 (远端同名同大小)
+		SourceRef: sql.NullString{String: "100/1000", Valid: true},
+	}
+	repo.byID = &tsk
+
+	a := &App{
+		downloader: dl,
+		rclone:     rc,
+		repo:       repo,
+		drives:     drives,
+		locks:      drive.NewSessionLock(),
+		log:        quietApp(),
+		tasks:      task.NewManager(repo, quietApp()),
+		cfg: Config{
+			EnableStreamPipe: true,
+			RemoteBase:       "backups",
+		},
+	}
+	a.tasks.Download = a.download
+	a.tasks.Upload = a.upload
+
+	a.processTask(ctx, taskID)
+
+	// 秒传命中：不应发生实际 rcat 上传
+	if len(rc.uploadCalls) != 0 {
+		t.Errorf("expected 0 rcat calls on dedupe skip, got %d", len(rc.uploadCalls))
+	}
+	if dl.streamCalls != 0 {
+		t.Errorf("expected 0 stream calls on dedupe skip, got %d", dl.streamCalls)
 	}
 }
