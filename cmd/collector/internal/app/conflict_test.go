@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/youngsx/drive-collector/cmd/collector/internal/rclone"
@@ -119,6 +120,62 @@ func TestResolveUploadConflict_NoExtension(t *testing.T) {
 	}
 	if res.ShouldSkip || !res.IsRenamed {
 		t.Fatalf("unexpected res state: %+v", res)
+	}
+}
+
+func TestResolveUploadConflict_Dotfiles(t *testing.T) {
+	remoteFiles := []rclone.FileEntry{
+		{Name: ".gitignore", Size: 50, IsDir: false},
+	}
+	res := resolveUploadConflict(remoteFiles, ".gitignore", 100)
+	if res.TargetFileName != ".gitignore (1)" {
+		t.Fatalf("expected TargetFileName '.gitignore (1)', got '%s'", res.TargetFileName)
+	}
+}
+
+func TestResolveUploadConflict_YearProtection(t *testing.T) {
+	remoteFiles := []rclone.FileEntry{
+		{Name: "Inception (2010).mkv", Size: 1000, IsDir: false},
+	}
+	// 2010 is a year, not an index: should become "Inception (2010) (1).mkv" instead of "Inception (2011).mkv"
+	res := resolveUploadConflict(remoteFiles, "Inception (2010).mkv", 2000)
+	if res.TargetFileName != "Inception (2010) (1).mkv" {
+		t.Fatalf("expected TargetFileName 'Inception (2010) (1).mkv', got '%s'", res.TargetFileName)
+	}
+}
+
+func TestResolveUploadConflict_LeadingZeroProtection(t *testing.T) {
+	remoteFiles := []rclone.FileEntry{
+		{Name: "Track (01).mp3", Size: 1000, IsDir: false},
+	}
+	// "Track (01)" has a leading zero: should become "Track (01) (1).mp3"
+	res := resolveUploadConflict(remoteFiles, "Track (01).mp3", 2000)
+	if res.TargetFileName != "Track (01) (1).mp3" {
+		t.Fatalf("expected TargetFileName 'Track (01) (1).mp3', got '%s'", res.TargetFileName)
+	}
+}
+
+func TestResolveUploadConflict_MaxLengthTruncation(t *testing.T) {
+	longName := strings.Repeat("a", 260) + ".txt"
+	remoteFiles := []rclone.FileEntry{
+		{Name: longName, Size: 10, IsDir: false},
+	}
+	res := resolveUploadConflict(remoteFiles, longName, 20)
+	if len(res.TargetFileName) > 255 {
+		t.Fatalf("expected TargetFileName <= 255 bytes, got %d", len(res.TargetFileName))
+	}
+	if !strings.HasSuffix(res.TargetFileName, " (1).txt") {
+		t.Fatalf("expected suffix ' (1).txt', got '%s'", res.TargetFileName)
+	}
+}
+
+func TestResolveUploadConflict_PathTraversalDefense(t *testing.T) {
+	remoteFiles := []rclone.FileEntry{
+		{Name: "evil.sh", Size: 10, IsDir: false},
+	}
+	res := resolveUploadConflict(remoteFiles, "../../evil.sh", 20)
+	if res.TargetFileName != "evil (1).sh" {
+		t.Fatalf("expected TargetFileName 'evil (1).sh', got '%s'", res.TargetFileName)
 	}
 }
 
