@@ -55,6 +55,14 @@ func (n *linkMockNotices) SendMessage(_ context.Context, _ int64, text string) e
 	return nil
 }
 
+func (n *linkMockNotices) SendMessageWithID(_ context.Context, _ int64, text string) (int, error) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.nextID++
+	n.messages = append(n.messages, text)
+	return n.nextID, nil
+}
+
 func (n *linkMockNotices) SendWithButtonsAndID(_ context.Context, _ int64, text string, buttons [][]tgclient.Button) (int, error) {
 	n.mu.Lock()
 	defer n.mu.Unlock()

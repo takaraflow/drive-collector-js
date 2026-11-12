@@ -1,11 +1,17 @@
 package telegram
 
 import (
+	"context"
+	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 
+	"github.com/gotd/td/telegram/message"
 	"github.com/gotd/td/telegram/message/entity"
 	"github.com/gotd/td/telegram/message/styling"
 	"github.com/gotd/td/tg"
+	"github.com/gotd/td/tgerr"
 )
 
 // render 走 gotd 自己的解析入口(styling.Perform → Complete)，
@@ -188,4 +194,75 @@ func describe(entities []tg.MessageEntityClass) []string {
 		out = append(out, typeName(e))
 	}
 	return out
+}
+
+type mockStyledSender struct {
+	styledErr    error
+	textErr      error
+	styledCalled int
+	textCalled   int
+}
+
+func (m *mockStyledSender) StyledText(_ context.Context, _ ...message.StyledTextOption) (tg.UpdatesClass, error) {
+	m.styledCalled++
+	if m.styledErr != nil {
+		return nil, m.styledErr
+	}
+	return &tg.Updates{}, nil
+}
+
+func (m *mockStyledSender) Text(_ context.Context, _ string) (tg.UpdatesClass, error) {
+	m.textCalled++
+	if m.textErr != nil {
+		return nil, m.textErr
+	}
+	return &tg.Updates{}, nil
+}
+
+func TestSendOrEdit_MessageNotModified(t *testing.T) {
+	c := &Client{log: slog.Default()}
+
+	// 1. tgerr.Error MESSAGE_NOT_MODIFIED on StyledText
+	sender1 := &mockStyledSender{
+		styledErr: &tgerr.Error{Code: 400, Type: "MESSAGE_NOT_MODIFIED", Message: "MESSAGE_NOT_MODIFIED"},
+	}
+	upd, err := c.sendOrEdit(context.Background(), sender1, "hello")
+	if err != nil {
+		t.Errorf("expected nil error on MESSAGE_NOT_MODIFIED, got: %v", err)
+	}
+	if upd != nil {
+		t.Errorf("expected nil updates on MESSAGE_NOT_MODIFIED, got: %v", upd)
+	}
+
+	// 2. Generic error containing MESSAGE_NOT_MODIFIED
+	sender2 := &mockStyledSender{
+		styledErr: errors.New("rpc error: code = 400 desc = MESSAGE_NOT_MODIFIED"),
+	}
+	_, err = c.sendOrEdit(context.Background(), sender2, "hello")
+	if err != nil {
+		t.Errorf("expected nil error on wrapped MESSAGE_NOT_MODIFIED, got: %v", err)
+	}
+
+	// 3. HTML parse error fallback to Text, and Text returns MESSAGE_NOT_MODIFIED
+	sender3 := &mockStyledSender{
+		styledErr: errors.New("cannot parse"),
+		textErr:   errors.New("MESSAGE_NOT_MODIFIED"),
+	}
+	// "</b>bad tag" causes styling.Perform to fail
+	_, err = c.sendOrEdit(context.Background(), sender3, "</b>bad tag")
+	if err != nil {
+		t.Errorf("expected nil error when stripped text returns MESSAGE_NOT_MODIFIED, got: %v", err)
+	}
+	if sender3.textCalled == 0 {
+		t.Errorf("expected Text fallback to be called for invalid HTML")
+	}
+
+	// 4. Other RPC error is returned
+	sender4 := &mockStyledSender{
+		styledErr: errors.New("rpc error: code = 500 desc = INTERNAL_SERVER_ERROR"),
+	}
+	_, err = c.sendOrEdit(context.Background(), sender4, "hello")
+	if err == nil || !strings.Contains(err.Error(), "INTERNAL_SERVER_ERROR") {
+		t.Errorf("expected INTERNAL_SERVER_ERROR to be propagated, got: %v", err)
+	}
 }

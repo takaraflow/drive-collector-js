@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"net"
 	"strings"
 	"testing"
@@ -130,6 +131,7 @@ type fakeExternalTG struct {
 	sentButtons [][][]tgclient.Button
 	editedTexts []string
 	answers     []string
+	editErr     error
 }
 
 func (f *fakeExternalTG) Run(_ context.Context) error                          { return nil }
@@ -157,6 +159,9 @@ func (f *fakeExternalTG) EditMessage(_ context.Context, _ int64, _ int, text str
 	return nil
 }
 func (f *fakeExternalTG) EditWithButtons(_ context.Context, _ int64, _ int, text string, _ [][]tgclient.Button) error {
+	if f.editErr != nil {
+		return f.editErr
+	}
 	f.editedTexts = append(f.editedTexts, text)
 	return nil
 }
@@ -325,6 +330,80 @@ func TestHandleExternalURLMessage_Flow(t *testing.T) {
 	}
 	if createdTask.FileSize != 1048576 {
 		t.Errorf("task FileSize = %d, want 1048576", createdTask.FileSize)
+	}
+	// 验证确认消息被就地更新为任务状态消息，MsgID 与 cb.MsgID 一致
+	if !createdTask.MsgID.Valid || createdTask.MsgID.Int64 != 456 {
+		t.Errorf("task MsgID = %v, want 456 (in-place updated callback msg)", createdTask.MsgID)
+	}
+	if !createdTask.SourceMsgID.Valid || createdTask.SourceMsgID.Int64 != 456 {
+		t.Errorf("task SourceMsgID = %v, want 456", createdTask.SourceMsgID)
+	}
+}
+
+// TestHandleExternalURLCallback_EditFailureFallsBackToPostNotice 验证就地更新外部链接确认消息失败时，平滑降级至 postNotice 发新消息。
+func TestHandleExternalURLCallback_EditFailureFallsBackToPostNotice(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mr.Close()
+
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
+
+	repo := &fakeRepo{}
+	drives := boundDrive()
+	tg := &fakeExternalTG{
+		editErr: errors.New("rpc error: MESSAGE_ID_INVALID"),
+	}
+
+	authorizer := &fakeAuthorizer{
+		perms: map[string]map[auth.Action]bool{
+			"1001": {auth.ActionExternalLink: true},
+		},
+	}
+
+	mockNotices := &linkMockNotices{nextID: 7777}
+	app := newTestLinkApp(repo, drives, nil, mockNotices)
+	app.tg = tg
+	app.notifier = tg
+	app.notices = mockNotices
+	app.auth = authorizer
+	app.bindSessions = bindingsession.NewStore(rdb)
+
+	_ = app.bindSessions.Start(context.Background(), "1001", "EXTERNAL_URL_CONFIRM", map[string]string{
+		"nonce":     "testnonce",
+		"chat_id":   "123",
+		"file_name": "backup.tar.gz",
+		"file_size": "2048",
+		"url":       "https://example.com/backup.tar.gz",
+		"final_url": "https://example.com/backup.tar.gz",
+	})
+
+	cbExecute := tgclient.CallbackContext{
+		ChatID:     123,
+		UserID:     1001,
+		MsgID:      456,
+		CallbackID: 789,
+	}
+	err = app.handleExternalURLCallback(context.Background(), cbExecute, "external_url_execute_testnonce")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(repo.created) == 0 {
+		t.Fatal("expected task to be created in repo")
+	}
+	createdTask := repo.created[len(repo.created)-1]
+	// 因 EditWithButtons 失败，MsgID 应降级为 postNotice 返回的 7778 (mockNotices 自增后的 ID)
+	if !createdTask.MsgID.Valid || createdTask.MsgID.Int64 == 456 {
+		t.Errorf("task MsgID should not be cb.MsgID (456) when edit fails, got %v", createdTask.MsgID)
+	}
+	if createdTask.MsgID.Int64 != 7778 {
+		t.Errorf("task MsgID = %v, want 7778 (fallback notice id)", createdTask.MsgID)
+	}
+	if !createdTask.SourceMsgID.Valid || createdTask.SourceMsgID.Int64 != 456 {
+		t.Errorf("task SourceMsgID = %v, want 456", createdTask.SourceMsgID)
 	}
 }
 

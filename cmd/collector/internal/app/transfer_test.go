@@ -185,6 +185,14 @@ func (f *fakeRepo) UpdateMsgID(_ context.Context, taskID string, msgID int) erro
 			f.batch[i].MsgID = nullableInt(int64(msgID))
 		}
 	}
+	if f.byID != nil && f.byID.ID == taskID {
+		f.byID.MsgID = nullableInt(int64(msgID))
+	}
+	for i := range f.created {
+		if f.created[i].ID == taskID {
+			f.created[i].MsgID = nullableInt(int64(msgID))
+		}
+	}
 	return nil
 }
 

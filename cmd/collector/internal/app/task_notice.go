@@ -122,14 +122,31 @@ func (a *App) notify(ctx context.Context, t *store.Task, text string, buttons []
 		// 而不是让这条任务从此静默。
 		a.log.Warn("编辑任务状态消息失败,改发新消息", "taskId", t.ID, "err", err)
 	}
+
+	var newMsgID int
 	if len(buttons) > 0 {
-		if _, err := a.notices.SendWithButtonsAndID(ctx, chatID, text, buttons); err != nil {
+		var err error
+		newMsgID, err = a.notices.SendWithButtonsAndID(ctx, chatID, text, buttons)
+		if err != nil {
 			a.log.Error("补发任务状态消息失败", "taskId", t.ID, "err", err)
+			return
 		}
-		return
+	} else {
+		var err error
+		newMsgID, err = a.notices.SendMessageWithID(ctx, chatID, text)
+		if err != nil {
+			a.log.Error("补发任务状态消息失败", "taskId", t.ID, "err", err)
+			return
+		}
 	}
-	if err := a.notices.SendMessage(ctx, chatID, text); err != nil {
-		a.log.Error("补发任务状态消息失败", "taskId", t.ID, "err", err)
+
+	if newMsgID > 0 {
+		t.MsgID = nullableInt(int64(newMsgID))
+		if a.repo != nil {
+			if err := a.repo.UpdateMsgID(ctx, t.ID, newMsgID); err != nil {
+				a.log.Warn("更新补发消息 id 到数据库失败", "taskId", t.ID, "msgId", newMsgID, "err", err)
+			}
+		}
 	}
 }
 

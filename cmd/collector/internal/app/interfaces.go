@@ -62,6 +62,7 @@ type Telegram interface {
 // 形状与 Notifier 相同,只是多了按钮和消息 id。
 type NoticeSender interface {
 	SendMessage(ctx context.Context, chatID int64, text string) error
+	SendMessageWithID(ctx context.Context, chatID int64, text string) (int, error)
 	SendWithButtonsAndID(ctx context.Context, chatID int64, text string, buttons [][]tgclient.Button) (int, error)
 	EditMessage(ctx context.Context, chatID int64, msgID int, text string) error
 	EditWithButtons(ctx context.Context, chatID int64, msgID int, text string, buttons [][]tgclient.Button) error
