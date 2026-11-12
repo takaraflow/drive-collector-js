@@ -37,6 +37,7 @@ import (
 	"github.com/youngsx/drive-collector/cmd/collector/internal/gofile"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/instance"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/rclone"
+	"github.com/youngsx/drive-collector/cmd/collector/internal/shortshare"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/streampipe"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/storageguard"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/store"
@@ -199,6 +200,10 @@ type App struct {
 	gofileClient *gofile.Client
 	gofileReqMu  sync.Mutex
 	gofileReqs   map[string]time.Time
+
+	shortshareClient shortshare.Extractor
+	shortshareReqMu  sync.Mutex
+	shortshareReqs   map[string]time.Time
 }
 
 // filesMemEntry 是内存缓存的一条。
@@ -253,8 +258,10 @@ func New(cfg Config) (*App, error) {
 		pending:        make(chan string, pendingQueueSize),
 		filesMem:       map[string]filesMemEntry{},
 		filesRefreshAt: map[string]time.Time{},
-		gofileClient:   gofile.NewClient(),
-		gofileReqs:     map[string]time.Time{},
+		gofileClient:     gofile.NewClient(),
+		gofileReqs:       map[string]time.Time{},
+		shortshareClient: shortshare.NewClient(),
+		shortshareReqs:   map[string]time.Time{},
 	}
 
 	// 绑定向导:Redis(会话存储)和 D1(落库)都在才装配。
@@ -693,12 +700,20 @@ func (a *App) onUpdate(ctx context.Context, u tgclient.Update) error {
 			return nil
 		}
 
+		if a.handleShortshareInput(ctx, msg, msg.Text) {
+			return nil
+		}
+
 		// 社媒链接优先提取最高画质解析（不论是否生成了 TG 网页预览卡片）
 		if a.handleSocialMediaMessage(ctx, msg) {
 			return nil
 		}
 
 		if a.handleGofileMessage(ctx, msg) {
+			return nil
+		}
+
+		if a.handleShortshareMessage(ctx, msg) {
 			return nil
 		}
 
@@ -899,6 +914,9 @@ func (a *App) handleCancelCommand(ctx context.Context, msg messageInfo) error {
 		sess, _ := a.bindSessions.Get(ctx, userID)
 		if sess != nil {
 			_ = a.bindSessions.Clear(ctx, userID)
+			if strings.HasPrefix(sess.CurrentStep, "SHORTSHARE_") {
+				return a.tg.SendMessage(ctx, msg.ChatID, "✅ <b>已取消短链资源转存</b>\n\n随时发送文件或链接即可开始转存。")
+			}
 			return a.tg.SendMessage(ctx, msg.ChatID, "✅ <b>已退出当前网盘绑定流程</b>\n\n随时发送文件或链接即可开始转存。")
 		}
 	}
@@ -1143,6 +1161,9 @@ func (a *App) handleCallback(ctx context.Context, u tgclient.Update) error {
 
 	case strings.HasPrefix(data, "gofile_"):
 		return a.handleGofileCallback(ctx, cb, data)
+
+	case strings.HasPrefix(data, "shortshare_"):
+		return a.handleShortshareCallback(ctx, cb, data)
 	}
 
 	a.log.Debug("收到未处理的按钮点击", "data", data)

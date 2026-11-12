@@ -129,8 +129,8 @@ func (a *App) downloadExternal(ctx context.Context, t store.Task) error {
 		// 优先走 HTTP 直链流式下载
 		err := a.downloadHTTP(ctx, ref.URL, dest, t.FileSize, ref.Headers, progressFunc)
 		if err != nil {
-			if ref.Platform == "gofile" {
-				return fmt.Errorf("gofile 直链下载失败: %w", err)
+			if ref.Platform == "gofile" || ref.Platform == "shortshare" {
+				return fmt.Errorf("%s 直链下载失败: %w", ref.Platform, err)
 			}
 			a.log.Warn("直接 HTTP 下载失败，尝试 yt-dlp 回退", "url", ref.URL, "err", err)
 			targetURL := ref.WebURL
