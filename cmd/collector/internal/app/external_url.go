@@ -18,6 +18,7 @@ import (
 
 	"github.com/youngsx/drive-collector/cmd/collector/internal/auth"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/gofile"
+	"github.com/youngsx/drive-collector/cmd/collector/internal/shortshare"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/social"
 	"github.com/youngsx/drive-collector/cmd/collector/internal/store"
 	tgclient "github.com/youngsx/drive-collector/cmd/collector/internal/telegram"
@@ -71,6 +72,10 @@ func extractExternalHTTPURLs(text string) []string {
 		}
 		// Gofile 链接由专门的 Gofile 流程处理，避免走通用 HTTP HEAD 嗅探探测成 SPA HTML
 		if gofile.IsGofileURL(cleaned) {
+			continue
+		}
+		// Shortshare (lurl.cc, myppt.cc) 链接由专门的流程处理，避免走通用 HTTP HEAD 嗅探探测成 HTML
+		if shortshare.IsShortshareURL(cleaned) {
 			continue
 		}
 		if isTorrentURL(u) {

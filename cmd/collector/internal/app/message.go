@@ -22,6 +22,8 @@ type messageInfo struct {
 	ChatID    int64
 	SenderID  int64
 	GroupedID int64
+	// ReplyToMsgID 是回复的目标消息 ID（若非回复消息则为 0）
+	ReplyToMsgID int
 	// SourceMsgID 是被转存的那条消息的 id。
 	//
 	// 与 GroupedID 严格区分:GroupedID 标识「一组消息」,
@@ -88,6 +90,12 @@ func fromMessage(m tg.MessageClass) (messageInfo, bool) {
 	}
 	gid, _ := msg.GetGroupedID()
 	info.GroupedID = gid
+
+	if replyTo, ok := msg.GetReplyTo(); ok {
+		if h, ok := replyTo.(*tg.MessageReplyHeader); ok {
+			info.ReplyToMsgID = h.ReplyToMsgID
+		}
+	}
 
 	info.Text = msg.GetMessage()
 

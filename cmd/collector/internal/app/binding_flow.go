@@ -114,8 +114,8 @@ func (a *App) handleBindInput(ctx context.Context, msg messageInfo, text string)
 		return false
 	}
 
-	// 排除交互确认类会话（如 Gofile 选择面板或 External URL 确认），避免普通文本误清掉用户的交互会话
-	if sess.CurrentStep == "GOFILE_SELECT" || strings.HasPrefix(sess.CurrentStep, "EXTERNAL_URL_") {
+	// 排除交互确认类会话（如 Gofile 选择面板、External URL 确认或 Shortshare 密码输入），避免普通文本误清掉用户的交互会话
+	if sess.CurrentStep == "GOFILE_SELECT" || strings.HasPrefix(sess.CurrentStep, "EXTERNAL_URL_") || strings.HasPrefix(sess.CurrentStep, "SHORTSHARE_") {
 		return false
 	}
 
