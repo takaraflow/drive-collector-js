@@ -287,7 +287,7 @@ func (a *App) processTask(ctx context.Context, taskID string) {
 	isGroup := t != nil && t.GroupedID.Valid && t.GroupedID.Int64 > 0
 
 	// 1. 尝试零磁盘管道直传（如果开启且为 Telegram 任务）
-	if a.cfg.EnableStreamPipe && t != nil && (t.SourceType == "" || t.SourceType == "telegram") {
+	if a.cfg.EnableStreamPipe && t != nil && (t.SourceType == "" || t.SourceType == "telegram" || t.SourceType == "telegram_media") {
 		claim, terr := a.repo.Transition(ctx, taskID, contract.EventStartDownload, nil)
 		if terr == nil && !claim.Blocked {
 			if isGroup {

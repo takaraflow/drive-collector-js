@@ -50,7 +50,7 @@ func (c *Client) sendOrEdit(ctx context.Context, s styledSender, text string) (t
 			return nil
 		}
 		// 编辑消息未发生变化时返回 MESSAGE_NOT_MODIFIED，视为成功
-		if tgerr.Is(err, "MESSAGE_NOT_MODIFIED") {
+		if tgerr.Is(err, "MESSAGE_NOT_MODIFIED") || strings.Contains(err.Error(), "MESSAGE_NOT_MODIFIED") {
 			return nil
 		}
 
@@ -60,6 +60,9 @@ func (c *Client) sendOrEdit(ctx context.Context, s styledSender, text string) (t
 			c.log.Warn("HTML 解析失败, 剥除标签退回纯文本", "err", parseErr)
 			u, err = s.Text(ctx, stripHTML(text))
 			if err != nil {
+				if tgerr.Is(err, "MESSAGE_NOT_MODIFIED") || strings.Contains(err.Error(), "MESSAGE_NOT_MODIFIED") {
+					return nil
+				}
 				return err
 			}
 			upd = u

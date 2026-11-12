@@ -503,13 +503,19 @@ func (a *App) handleExternalURLCallback(ctx context.Context, cb tgclient.Callbac
 	finalURL := sess.Data["final_url"]
 
 	answer("已创建任务", false)
-	_ = a.tg.EditMessage(ctx, cb.ChatID, cb.MsgID, fmt.Sprintf(
+	taskID := newTaskID()
+	noticeButtons := [][]tgclient.Button{{{Text: noticeCancelBtn, Data: "cancel_confirm_" + taskID}}}
+	noticeText := fmt.Sprintf(
 		"🌐 <b>已创建外部链接任务</b>\n\n📄 名称: <code>%s</code>\n正在排队处理...",
 		escapeHTMLText(fileName),
-	))
-
-	taskID := newTaskID()
-	noticeID := a.postNotice(ctx, cb.ChatID, taskID)
+	)
+	noticeID := cb.MsgID
+	if a.tg != nil {
+		if err := a.tg.EditWithButtons(ctx, cb.ChatID, cb.MsgID, noticeText, noticeButtons); err != nil {
+			a.log.Warn("就地更新外部链接确认消息失败，降级发新消息", "taskId", taskID, "err", err)
+			noticeID = a.postNotice(ctx, cb.ChatID, taskID)
+		}
+	}
 
 	refData, _ := json.Marshal(externalSourceRef{
 		URL:      sourceURL,

@@ -200,6 +200,39 @@ func TestSessionStorageIsReadableByGotd(t *testing.T) {
 	}
 }
 
+// TestMessageIDOfCoversAllMTProtoUpdates 确保所有群组/频道/私聊的短更新与复合更新均能正确提取消息 ID。
+func TestMessageIDOfCoversAllMTProtoUpdates(t *testing.T) {
+	cases := []struct {
+		name string
+		u    tg.UpdatesClass
+		want int
+	}{
+		{"ShortSentMessage", &tg.UpdateShortSentMessage{ID: 101}, 101},
+		{"ShortMessage", &tg.UpdateShortMessage{ID: 102}, 102},
+		{"ShortChatMessage", &tg.UpdateShortChatMessage{ID: 103}, 103},
+		{"ShortWithNewChannelMessage", &tg.UpdateShort{Update: &tg.UpdateNewChannelMessage{Message: &tg.Message{ID: 104}}}, 104},
+		{"UpdatesWithNewChannelMessage", &tg.Updates{Updates: []tg.UpdateClass{&tg.UpdateNewChannelMessage{Message: &tg.Message{ID: 105}}}}, 105},
+		{"UpdatesWithEditMessage", &tg.Updates{Updates: []tg.UpdateClass{&tg.UpdateEditMessage{Message: &tg.Message{ID: 106}}}}, 106},
+		{"UpdatesWithEditChannelMessage", &tg.Updates{Updates: []tg.UpdateClass{&tg.UpdateEditChannelMessage{Message: &tg.Message{ID: 107}}}}, 107},
+		{"UpdatesCombinedWithMessageID", &tg.UpdatesCombined{Updates: []tg.UpdateClass{&tg.UpdateMessageID{ID: 108}}}, 108},
+		{"UpdatesWithNewMessage", &tg.Updates{Updates: []tg.UpdateClass{&tg.UpdateNewMessage{Message: &tg.Message{ID: 109}}}}, 109},
+		{"UpdatesTooLong", &tg.UpdatesTooLong{}, 0},
+		{"NilUpdatesClass", nil, 0},
+		{"ShortWithNilUpdate", &tg.UpdateShort{Update: nil}, 0},
+		{"ShortWithTypedNilMessage", &tg.UpdateShort{Update: &tg.UpdateNewChannelMessage{Message: (*tg.Message)(nil)}}, 0},
+		{"UpdatesWithNilMessage", &tg.Updates{Updates: []tg.UpdateClass{&tg.UpdateNewMessage{Message: nil}}}, 0},
+		{"UpdatesWithTypedNilMessage", &tg.Updates{Updates: []tg.UpdateClass{&tg.UpdateNewMessage{Message: (*tg.Message)(nil)}}}, 0},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := messageIDOf(tc.u); got != tc.want {
+				t.Errorf("messageIDOf(%s) = %d, want %d", tc.name, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestStoreSessionIsNoOp session 不能被写回 —— 那是 Node 的。
 func TestStoreSessionIsNoOp(t *testing.T) {
 	sess := loadSession(t)

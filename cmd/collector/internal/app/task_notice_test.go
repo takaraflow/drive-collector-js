@@ -7,6 +7,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -21,6 +22,8 @@ type fakeNotices struct {
 	edits    []string
 	sendBtns [][][]tgclient.Button
 	editBtns [][][]tgclient.Button
+	editErr  error
+	nextID   int
 }
 
 func (f *fakeNotices) SendMessage(_ context.Context, _ int64, text string) error {
@@ -28,18 +31,35 @@ func (f *fakeNotices) SendMessage(_ context.Context, _ int64, text string) error
 	return nil
 }
 
+func (f *fakeNotices) SendMessageWithID(_ context.Context, _ int64, text string) (int, error) {
+	f.sent = append(f.sent, text)
+	if f.nextID > 0 {
+		return f.nextID, nil
+	}
+	return 9001, nil
+}
+
 func (f *fakeNotices) SendWithButtonsAndID(_ context.Context, _ int64, text string, buttons [][]tgclient.Button) (int, error) {
 	f.sent = append(f.sent, text)
 	f.sendBtns = append(f.sendBtns, buttons)
+	if f.nextID > 0 {
+		return f.nextID, nil
+	}
 	return 9001, nil
 }
 
 func (f *fakeNotices) EditMessage(_ context.Context, _ int64, _ int, text string) error {
+	if f.editErr != nil {
+		return f.editErr
+	}
 	f.edits = append(f.edits, text)
 	return nil
 }
 
 func (f *fakeNotices) EditWithButtons(_ context.Context, _ int64, _ int, text string, buttons [][]tgclient.Button) error {
+	if f.editErr != nil {
+		return f.editErr
+	}
 	f.edits = append(f.edits, text)
 	f.editBtns = append(f.editBtns, buttons)
 	return nil
@@ -174,6 +194,94 @@ func TestNoticeFallsBackToNewMessage(t *testing.T) {
 	if len(notices.edits) != 0 || len(notices.sent) == 0 {
 		t.Errorf("没有 msg_id 时应改为发一条新消息,实际 edits=%v sent=%v",
 			notices.edits, notices.sent)
+	}
+}
+
+// TestNoticeFallbackPersistsAndUpdatesInPlace 确保降级补发消息后会持久化 msg_id，且后续阶段就地更新而不是重复发新消息。
+func TestNoticeFallbackPersistsAndUpdatesInPlace(t *testing.T) {
+	notices := &fakeNotices{}
+	task := noticeTask("queued", "")
+	task.MsgID = nullableInt(0)
+	repo := &fakeRepo{byID: &task}
+	a, _ := newTestApp(t, &fakeDL{content: "x"}, repo, boundDrive())
+	a.notices = notices
+
+	// 第一次通知 (下载中)，原 msg_id 为 0，应补发一条新消息并回写 msg_id
+	a.notify(context.Background(), &task, noticeDownloading, nil)
+	if len(notices.sent) != 1 {
+		t.Fatalf("第一次应补发 1 条新消息，实际 sent=%d", len(notices.sent))
+	}
+	if !task.MsgID.Valid || task.MsgID.Int64 != 9001 {
+		t.Fatalf("补发后 task.MsgID 未更新，得到 %v", task.MsgID)
+	}
+	if len(repo.msgIDs) == 0 || repo.msgIDs[len(repo.msgIDs)-1] != 9001 {
+		t.Fatalf("补发后未向数据库回写 msg_id，repo.msgIDs=%v", repo.msgIDs)
+	}
+
+	// 第二次通知 (上传中)，此时已有 msg_id，必须就地更新而不是重复发新消息
+	a.notify(context.Background(), &task, noticeUploading, nil)
+	if len(notices.sent) != 1 {
+		t.Errorf("第二次通知不应再发新消息，实际 sent=%d", len(notices.sent))
+	}
+	if len(notices.edits) != 1 {
+		t.Errorf("第二次通知必须就地更新消息，实际 edits=%d", len(notices.edits))
+	}
+
+	// 任务完成通知，必须继续就地更新
+	task.Status = contract.StatusCompleted
+	a.notifyOutcome(context.Background(), task.ID, true)
+	if len(notices.sent) != 1 {
+		t.Errorf("完成阶段不应再发新消息，实际 sent=%d", len(notices.sent))
+	}
+	if len(notices.edits) != 2 {
+		t.Errorf("完成阶段必须就地更新消息，实际 edits=%d", len(notices.edits))
+	}
+}
+
+// TestNoticeEditErrorFallsBackToNewMessageAndPersists 模拟原消息被删等原因导致编辑失败时，降级发新消息并更新 msg_id，后续阶段基于新消息就地更新。
+func TestNoticeEditErrorFallsBackToNewMessageAndPersists(t *testing.T) {
+	notices := &fakeNotices{
+		editErr: errors.New("rpc error: MESSAGE_ID_INVALID"),
+		nextID:  9005,
+	}
+	task := noticeTask("queued", "")
+	task.MsgID = nullableInt(8888) // 初始存在一个消息 ID
+	repo := &fakeRepo{byID: &task}
+	a, _ := newTestApp(t, &fakeDL{content: "x"}, repo, boundDrive())
+	a.notices = notices
+
+	// 1. 下载阶段：尝试编辑 8888 失败，触发降级补发 9005
+	a.notify(context.Background(), &task, noticeDownloading, [][]tgclient.Button{{{Text: "取消", Data: "cancel"}}})
+	if len(notices.sent) != 1 {
+		t.Fatalf("降级时应补发 1 条新消息，实际 sent=%d", len(notices.sent))
+	}
+	if !task.MsgID.Valid || task.MsgID.Int64 != 9005 {
+		t.Fatalf("降级后 task.MsgID 应该更新为 9005，实际为 %v", task.MsgID)
+	}
+	if len(repo.msgIDs) == 0 || repo.msgIDs[len(repo.msgIDs)-1] != 9005 {
+		t.Fatalf("未持久化新 msg_id 到 repo，repo.msgIDs=%v", repo.msgIDs)
+	}
+
+	// 2. 模拟新消息有效，消除 editErr
+	notices.editErr = nil
+
+	// 上传阶段：必须就地更新 9005，不能再补发
+	a.notify(context.Background(), &task, noticeUploading, nil)
+	if len(notices.sent) != 1 {
+		t.Errorf("上传阶段不应补发新消息，实际 sent=%d", len(notices.sent))
+	}
+	if len(notices.edits) != 1 {
+		t.Errorf("上传阶段应就地更新新消息，实际 edits=%d", len(notices.edits))
+	}
+
+	// 完成阶段：继续就地更新 9005
+	task.Status = contract.StatusCompleted
+	a.notifyOutcome(context.Background(), task.ID, true)
+	if len(notices.sent) != 1 {
+		t.Errorf("完成阶段不应补发新消息，实际 sent=%d", len(notices.sent))
+	}
+	if len(notices.edits) != 2 {
+		t.Errorf("完成阶段应就地更新，实际 edits=%d", len(notices.edits))
 	}
 }
 

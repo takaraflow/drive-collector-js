@@ -331,6 +331,12 @@ func messageIDOf(u tg.UpdatesClass) int {
 	switch v := u.(type) {
 	case *tg.UpdateShortSentMessage:
 		return v.ID
+	case *tg.UpdateShortMessage:
+		return v.ID
+	case *tg.UpdateShortChatMessage:
+		return v.ID
+	case *tg.UpdateShort:
+		return messageIDFromUpdate(v.Update)
 	case *tg.Updates:
 		return messageIDFromUpdates(v.Updates)
 	case *tg.UpdatesCombined:
@@ -339,15 +345,34 @@ func messageIDOf(u tg.UpdatesClass) int {
 	return 0
 }
 
+func messageIDFromUpdate(u tg.UpdateClass) int {
+	switch v := u.(type) {
+	case *tg.UpdateMessageID:
+		return v.ID
+	case *tg.UpdateNewMessage:
+		if m, ok := v.Message.(*tg.Message); ok && m != nil {
+			return m.ID
+		}
+	case *tg.UpdateNewChannelMessage:
+		if m, ok := v.Message.(*tg.Message); ok && m != nil {
+			return m.ID
+		}
+	case *tg.UpdateEditMessage:
+		if m, ok := v.Message.(*tg.Message); ok && m != nil {
+			return m.ID
+		}
+	case *tg.UpdateEditChannelMessage:
+		if m, ok := v.Message.(*tg.Message); ok && m != nil {
+			return m.ID
+		}
+	}
+	return 0
+}
+
 func messageIDFromUpdates(list []tg.UpdateClass) int {
 	for _, uu := range list {
-		switch v := uu.(type) {
-		case *tg.UpdateMessageID:
-			return v.ID
-		case *tg.UpdateNewMessage:
-			if m, ok := v.Message.(*tg.Message); ok {
-				return m.ID
-			}
+		if id := messageIDFromUpdate(uu); id > 0 {
+			return id
 		}
 	}
 	return 0
